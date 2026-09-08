@@ -1,0 +1,8 @@
+{
+  "name": "external-docs",
+  "private": true,
+  "type": "module",
+  "description": "Generates the outward-facing .docx from SPEC-derived Markdown. SPEC 4.7 forbids hand-copying Markdown into Word.",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": { "marked": "^15.0.0", "html-to-docx": "^1.8.0" }
+}

@@ -1,0 +1,703 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--reporter=json"
+    ],
+    "configFile": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\playwright.config.ts",
+    "rootDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 4
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 6,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "auth\\login.spec.ts",
+      "file": "auth/login.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Auth > Login",
+          "file": "auth/login.spec.ts",
+          "line": 2,
+          "column": 6,
+          "specs": [
+            {
+              "title": "rejects empty password",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-26T08:34:21.935Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "231ca1f0f4db3e4958c3-0833e872ed9051fb2625",
+              "file": "auth/login.spec.ts",
+              "line": 3,
+              "column": 7
+            },
+            {
+              "title": "skipped case",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\auth\\login.spec.ts",
+                        "line": 4,
+                        "column": 8
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-26T08:34:22.004Z",
+                      "annotations": [
+                        {
+                          "type": "skip",
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\auth\\login.spec.ts",
+                            "line": 4,
+                            "column": 8
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "231ca1f0f4db3e4958c3-7a670e3d1bf9b9d78683",
+              "file": "auth/login.spec.ts",
+              "line": 4,
+              "column": 8
+            },
+            {
+              "title": "rejects empty password",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 2,
+                      "status": "passed",
+                      "duration": 15,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-26T08:34:21.901Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "231ca1f0f4db3e4958c3-434de10626774960d1bd",
+              "file": "auth/login.spec.ts",
+              "line": 3,
+              "column": 7
+            },
+            {
+              "title": "skipped case",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\auth\\login.spec.ts",
+                        "line": 4,
+                        "column": 8
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 2,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-26T08:34:21.970Z",
+                      "annotations": [
+                        {
+                          "type": "skip",
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\auth\\login.spec.ts",
+                            "line": 4,
+                            "column": 8
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "231ca1f0f4db3e4958c3-138109ef87c53724e151",
+              "file": "auth/login.spec.ts",
+              "line": 4,
+              "column": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "checkout\\payment.spec.ts",
+      "file": "checkout/payment.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "applies discount for 10",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 5,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 9,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-26T08:34:22.577Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53e2ac8dd9282eb8e198-9cd1f036560e688c8e8e",
+          "file": "checkout/payment.spec.ts",
+          "line": 10,
+          "column": 7
+        },
+        {
+          "title": "applies discount for 20",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 5,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 1,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-26T08:34:22.624Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53e2ac8dd9282eb8e198-f2264a8570ffd12d3e51",
+          "file": "checkout/payment.spec.ts",
+          "line": 10,
+          "column": 7
+        },
+        {
+          "title": "applies discount for 10",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 4,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-26T08:34:22.538Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53e2ac8dd9282eb8e198-f7e581faa7dc27663c82",
+          "file": "checkout/payment.spec.ts",
+          "line": 10,
+          "column": 7
+        },
+        {
+          "title": "applies discount for 20",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 4,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-26T08:34:22.586Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "53e2ac8dd9282eb8e198-f680a3097c53c9a90870",
+          "file": "checkout/payment.spec.ts",
+          "line": 10,
+          "column": 7
+        }
+      ],
+      "suites": [
+        {
+          "title": "Checkout",
+          "file": "checkout/payment.spec.ts",
+          "line": 2,
+          "column": 6,
+          "specs": [],
+          "suites": [
+            {
+              "title": "Payment",
+              "file": "checkout/payment.spec.ts",
+              "line": 3,
+              "column": 8,
+              "specs": [
+                {
+                  "title": "declines expired card",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "chromium",
+                      "projectName": "chromium",
+                      "results": [
+                        {
+                          "workerIndex": 1,
+                          "parallelIndex": 1,
+                          "status": "passed",
+                          "duration": 12,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-08-26T08:34:21.964Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "53e2ac8dd9282eb8e198-67af76c5d6d22b113ea4",
+                  "file": "checkout/payment.spec.ts",
+                  "line": 4,
+                  "column": 9
+                },
+                {
+                  "title": "accepts valid card",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "chromium",
+                      "projectName": "chromium",
+                      "results": [
+                        {
+                          "workerIndex": 1,
+                          "parallelIndex": 1,
+                          "status": "passed",
+                          "duration": 2,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-08-26T08:34:22.027Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "53e2ac8dd9282eb8e198-01b0330b8e2dc9d6d789",
+                  "file": "checkout/payment.spec.ts",
+                  "line": 5,
+                  "column": 9
+                },
+                {
+                  "title": "fails on purpose",
+                  "ok": false,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "chromium",
+                      "projectName": "chromium",
+                      "results": [
+                        {
+                          "workerIndex": 1,
+                          "parallelIndex": 1,
+                          "status": "failed",
+                          "duration": 4,
+                          "error": {
+                            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts:6:54",
+                            "location": {
+                              "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts",
+                              "column": 54,
+                              "line": 6
+                            },
+                            "snippet": "\u001b[0m \u001b[90m 4 |\u001b[39m     test(\u001b[32m'declines expired card'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 5 |\u001b[39m     test(\u001b[32m'accepts valid card'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 6 |\u001b[39m     test(\u001b[32m'fails on purpose'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m2\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m   |\u001b[39m                                                      \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 7 |\u001b[39m   })\u001b[33m;\u001b[39m\n \u001b[90m 8 |\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 9 |\u001b[39m \u001b[36mfor\u001b[39m (\u001b[36mconst\u001b[39m amount \u001b[36mof\u001b[39m [\u001b[35m10\u001b[39m\u001b[33m,\u001b[39m \u001b[35m20\u001b[39m]) {\u001b[0m"
+                          },
+                          "errors": [
+                            {
+                              "location": {
+                                "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts",
+                                "column": 54,
+                                "line": 6
+                              },
+                              "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  4 |     test('declines expired card', async () => { expect(1).toBe(1); });\n  5 |     test('accepts valid card', async () => { expect(1).toBe(1); });\n> 6 |     test('fails on purpose', async () => { expect(1).toBe(2); });\n    |                                                      ^\n  7 |   });\n  8 | });\n  9 | for (const amount of [10, 20]) {\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts:6:54"
+                            }
+                          ],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-08-26T08:34:22.039Z",
+                          "annotations": [],
+                          "attachments": [
+                            {
+                              "name": "error-context",
+                              "contentType": "text/markdown",
+                              "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\checkout-payment-Checkout-Payment-fails-on-purpose-chromium\\error-context.md"
+                            }
+                          ],
+                          "errorLocation": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts",
+                            "column": 54,
+                            "line": 6
+                          }
+                        }
+                      ],
+                      "status": "unexpected"
+                    }
+                  ],
+                  "id": "53e2ac8dd9282eb8e198-30094a81567b0d95632c",
+                  "file": "checkout/payment.spec.ts",
+                  "line": 6,
+                  "column": 9
+                },
+                {
+                  "title": "declines expired card",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "firefox",
+                      "projectName": "firefox",
+                      "results": [
+                        {
+                          "workerIndex": 3,
+                          "parallelIndex": 3,
+                          "status": "passed",
+                          "duration": 11,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-08-26T08:34:21.912Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "53e2ac8dd9282eb8e198-e71fe0bf1d7af7bfcab6",
+                  "file": "checkout/payment.spec.ts",
+                  "line": 4,
+                  "column": 9
+                },
+                {
+                  "title": "accepts valid card",
+                  "ok": true,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "firefox",
+                      "projectName": "firefox",
+                      "results": [
+                        {
+                          "workerIndex": 3,
+                          "parallelIndex": 3,
+                          "status": "passed",
+                          "duration": 2,
+                          "errors": [],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-08-26T08:34:21.977Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "expected"
+                    }
+                  ],
+                  "id": "53e2ac8dd9282eb8e198-f6d12866483f09a33d9c",
+                  "file": "checkout/payment.spec.ts",
+                  "line": 5,
+                  "column": 9
+                },
+                {
+                  "title": "fails on purpose",
+                  "ok": false,
+                  "tags": [],
+                  "tests": [
+                    {
+                      "timeout": 30000,
+                      "annotations": [],
+                      "expectedStatus": "passed",
+                      "projectId": "firefox",
+                      "projectName": "firefox",
+                      "results": [
+                        {
+                          "workerIndex": 3,
+                          "parallelIndex": 3,
+                          "status": "failed",
+                          "duration": 12,
+                          "error": {
+                            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts:6:54",
+                            "location": {
+                              "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts",
+                              "column": 54,
+                              "line": 6
+                            },
+                            "snippet": "\u001b[0m \u001b[90m 4 |\u001b[39m     test(\u001b[32m'declines expired card'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 5 |\u001b[39m     test(\u001b[32m'accepts valid card'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 6 |\u001b[39m     test(\u001b[32m'fails on purpose'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m2\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m   |\u001b[39m                                                      \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 7 |\u001b[39m   })\u001b[33m;\u001b[39m\n \u001b[90m 8 |\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 9 |\u001b[39m \u001b[36mfor\u001b[39m (\u001b[36mconst\u001b[39m amount \u001b[36mof\u001b[39m [\u001b[35m10\u001b[39m\u001b[33m,\u001b[39m \u001b[35m20\u001b[39m]) {\u001b[0m"
+                          },
+                          "errors": [
+                            {
+                              "location": {
+                                "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts",
+                                "column": 54,
+                                "line": 6
+                              },
+                              "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  4 |     test('declines expired card', async () => { expect(1).toBe(1); });\n  5 |     test('accepts valid card', async () => { expect(1).toBe(1); });\n> 6 |     test('fails on purpose', async () => { expect(1).toBe(2); });\n    |                                                      ^\n  7 |   });\n  8 | });\n  9 | for (const amount of [10, 20]) {\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts:6:54"
+                            }
+                          ],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2026-08-26T08:34:21.990Z",
+                          "annotations": [],
+                          "attachments": [
+                            {
+                              "name": "error-context",
+                              "contentType": "text/markdown",
+                              "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\checkout-payment-Checkout-Payment-fails-on-purpose-firefox\\error-context.md"
+                            }
+                          ],
+                          "errorLocation": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests\\checkout\\payment.spec.ts",
+                            "column": 54,
+                            "line": 6
+                          }
+                        }
+                      ],
+                      "status": "unexpected"
+                    }
+                  ],
+                  "id": "53e2ac8dd9282eb8e198-3290667b7e713e82967c",
+                  "file": "checkout/payment.spec.ts",
+                  "line": 6,
+                  "column": 9
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-26T08:34:21.105Z",
+    "duration": 1550.4050000000002,
+    "expected": 10,
+    "skipped": 2,
+    "unexpected": 2,
+    "flaky": 0
+  }
+}

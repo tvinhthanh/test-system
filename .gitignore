@@ -1,0 +1,14 @@
+# npm deps for the outward-doc build pipeline (docs/external).
+# Reproduce with: cd docs/external && npm install
+node_modules/
+
+# Go build output. The prototype is run with `go run ./cmd/protoident`,
+# never from a committed binary.
+protoident
+protoident.exe
+*.test
+*.exe
+
+# OS noise
+Thumbs.db
+.DS_Store

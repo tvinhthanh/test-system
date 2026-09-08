@@ -1,0 +1,505 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "-c",
+      "pw-flaky.config.ts",
+      "--reporter=json"
+    ],
+    "configFile": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\pw-flaky.config.ts",
+    "rootDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/tests-flaky",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/vinht/AppData/Local/Temp/claude/c--source-Testing-Project/ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b/scratchpad/pwsample/tests-flaky",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 2000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 6,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "flaky.spec.ts",
+      "file": "flaky.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Retry behaviour",
+          "file": "flaky.spec.ts",
+          "line": 14,
+          "column": 6,
+          "specs": [
+            {
+              "title": "flaky: fails once then passes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 2000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 10,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m1\u001b[39m\nReceived:   \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m1\u001b[39m\nReceived:   \u001b[31m1\u001b[39m\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:17:15",
+                        "location": {
+                          "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                          "column": 15,
+                          "line": 17
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 15 |\u001b[39m   test(\u001b[32m'flaky: fails once then passes'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m {\n \u001b[90m 16 |\u001b[39m     \u001b[36mconst\u001b[39m n \u001b[33m=\u001b[39m bump(\u001b[32m'flaky1'\u001b[39m)\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 17 |\u001b[39m     expect(n)\u001b[33m.\u001b[39mtoBeGreaterThan(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m          \u001b[90m// attempt 1 fails, attempt 2 passes\u001b[39m\n \u001b[90m    |\u001b[39m               \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 18 |\u001b[39m   })\u001b[33m;\u001b[39m\n \u001b[90m 19 |\u001b[39m   test(\u001b[32m'always fails'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m2\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 20 |\u001b[39m   test(\u001b[32m'always passes'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                            "column": 15,
+                            "line": 17
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m1\u001b[39m\nReceived:   \u001b[31m1\u001b[39m\n\n  15 |   test('flaky: fails once then passes', async () => {\n  16 |     const n = bump('flaky1');\n> 17 |     expect(n).toBeGreaterThan(1);          // attempt 1 fails, attempt 2 passes\n     |               ^\n  18 |   });\n  19 |   test('always fails', async () => { expect(1).toBe(2); });\n  20 |   test('always passes', async () => { expect(1).toBe(1); });\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:17:15"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-27T10:50:20.719Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-flaky-fails-once-then-passes-chromium\\error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                        "column": 15,
+                        "line": 17
+                      }
+                    },
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2026-08-27T10:50:21.313Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "flaky"
+                }
+              ],
+              "id": "b862a406253815a75d4a-a3e17923554163d04be3",
+              "file": "flaky.spec.ts",
+              "line": 15,
+              "column": 7
+            },
+            {
+              "title": "always fails",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 2000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 5,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:19:48",
+                        "location": {
+                          "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                          "column": 48,
+                          "line": 19
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 17 |\u001b[39m     expect(n)\u001b[33m.\u001b[39mtoBeGreaterThan(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m          \u001b[90m// attempt 1 fails, attempt 2 passes\u001b[39m\n \u001b[90m 18 |\u001b[39m   })\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 19 |\u001b[39m   test(\u001b[32m'always fails'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m2\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 20 |\u001b[39m   test(\u001b[32m'always passes'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 21 |\u001b[39m   test\u001b[33m.\u001b[39mskip(\u001b[32m'skipped on purpose'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m {})\u001b[33m;\u001b[39m\n \u001b[90m 22 |\u001b[39m   test(\u001b[32m'times out'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { \u001b[36mawait\u001b[39m \u001b[36mnew\u001b[39m \u001b[33mPromise\u001b[39m(r \u001b[33m=>\u001b[39m setTimeout(r\u001b[33m,\u001b[39m \u001b[35m5000\u001b[39m))\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                            "column": 48,
+                            "line": 19
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  17 |     expect(n).toBeGreaterThan(1);          // attempt 1 fails, attempt 2 passes\n  18 |   });\n> 19 |   test('always fails', async () => { expect(1).toBe(2); });\n     |                                                ^\n  20 |   test('always passes', async () => { expect(1).toBe(1); });\n  21 |   test.skip('skipped on purpose', async () => {});\n  22 |   test('times out', async () => { await new Promise(r => setTimeout(r, 5000)); });\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:19:48"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-27T10:50:21.361Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-always-fails-chromium\\error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                        "column": 48,
+                        "line": 19
+                      }
+                    },
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 11,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:19:48",
+                        "location": {
+                          "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                          "column": 48,
+                          "line": 19
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 17 |\u001b[39m     expect(n)\u001b[33m.\u001b[39mtoBeGreaterThan(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m          \u001b[90m// attempt 1 fails, attempt 2 passes\u001b[39m\n \u001b[90m 18 |\u001b[39m   })\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 19 |\u001b[39m   test(\u001b[32m'always fails'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m2\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 20 |\u001b[39m   test(\u001b[32m'always passes'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 21 |\u001b[39m   test\u001b[33m.\u001b[39mskip(\u001b[32m'skipped on purpose'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m {})\u001b[33m;\u001b[39m\n \u001b[90m 22 |\u001b[39m   test(\u001b[32m'times out'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { \u001b[36mawait\u001b[39m \u001b[36mnew\u001b[39m \u001b[33mPromise\u001b[39m(r \u001b[33m=>\u001b[39m setTimeout(r\u001b[33m,\u001b[39m \u001b[35m5000\u001b[39m))\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                            "column": 48,
+                            "line": 19
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  17 |     expect(n).toBeGreaterThan(1);          // attempt 1 fails, attempt 2 passes\n  18 |   });\n> 19 |   test('always fails', async () => { expect(1).toBe(2); });\n     |                                                ^\n  20 |   test('always passes', async () => { expect(1).toBe(1); });\n  21 |   test.skip('skipped on purpose', async () => {});\n  22 |   test('times out', async () => { await new Promise(r => setTimeout(r, 5000)); });\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:19:48"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2026-08-27T10:50:22.030Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-always-fails-chromium-retry1\\error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                        "column": 48,
+                        "line": 19
+                      }
+                    },
+                    {
+                      "workerIndex": 3,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 12,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:19:48",
+                        "location": {
+                          "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                          "column": 48,
+                          "line": 19
+                        },
+                        "snippet": "\u001b[0m \u001b[90m 17 |\u001b[39m     expect(n)\u001b[33m.\u001b[39mtoBeGreaterThan(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m          \u001b[90m// attempt 1 fails, attempt 2 passes\u001b[39m\n \u001b[90m 18 |\u001b[39m   })\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 19 |\u001b[39m   test(\u001b[32m'always fails'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m2\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 20 |\u001b[39m   test(\u001b[32m'always passes'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { expect(\u001b[35m1\u001b[39m)\u001b[33m.\u001b[39mtoBe(\u001b[35m1\u001b[39m)\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\n \u001b[90m 21 |\u001b[39m   test\u001b[33m.\u001b[39mskip(\u001b[32m'skipped on purpose'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m {})\u001b[33m;\u001b[39m\n \u001b[90m 22 |\u001b[39m   test(\u001b[32m'times out'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m () \u001b[33m=>\u001b[39m { \u001b[36mawait\u001b[39m \u001b[36mnew\u001b[39m \u001b[33mPromise\u001b[39m(r \u001b[33m=>\u001b[39m setTimeout(r\u001b[33m,\u001b[39m \u001b[35m5000\u001b[39m))\u001b[33m;\u001b[39m })\u001b[33m;\u001b[39m\u001b[0m"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                            "column": 48,
+                            "line": 19
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  17 |     expect(n).toBeGreaterThan(1);          // attempt 1 fails, attempt 2 passes\n  18 |   });\n> 19 |   test('always fails', async () => { expect(1).toBe(2); });\n     |                                                ^\n  20 |   test('always passes', async () => { expect(1).toBe(1); });\n  21 |   test.skip('skipped on purpose', async () => {});\n  22 |   test('times out', async () => { await new Promise(r => setTimeout(r, 5000)); });\n    at C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts:19:48"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 2,
+                      "startTime": "2026-08-27T10:50:22.625Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-always-fails-chromium-retry2\\error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                        "column": 48,
+                        "line": 19
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "b862a406253815a75d4a-06188d1ba0dba156f7c1",
+              "file": "flaky.spec.ts",
+              "line": 19,
+              "column": 7
+            },
+            {
+              "title": "always passes",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 2000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-27T10:50:23.237Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "b862a406253815a75d4a-5d43aea70f9d9874a759",
+              "file": "flaky.spec.ts",
+              "line": 20,
+              "column": 7
+            },
+            {
+              "title": "skipped on purpose",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 2000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                        "line": 21,
+                        "column": 8
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-27T10:50:23.286Z",
+                      "annotations": [
+                        {
+                          "type": "skip",
+                          "location": {
+                            "file": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\tests-flaky\\flaky.spec.ts",
+                            "line": 21,
+                            "column": 8
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b862a406253815a75d4a-6f0d4a45da57248914e3",
+              "file": "flaky.spec.ts",
+              "line": 21,
+              "column": 8
+            },
+            {
+              "title": "times out",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 2000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "timedOut",
+                      "duration": 2009,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-27T10:50:23.286Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-times-out-chromium\\error-context.md"
+                        }
+                      ]
+                    },
+                    {
+                      "workerIndex": 5,
+                      "parallelIndex": 0,
+                      "status": "timedOut",
+                      "duration": 2007,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2026-08-27T10:50:26.285Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-times-out-chromium-retry1\\error-context.md"
+                        }
+                      ]
+                    },
+                    {
+                      "workerIndex": 6,
+                      "parallelIndex": 0,
+                      "status": "timedOut",
+                      "duration": 2008,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 2000ms exceeded.\u001b[39m"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 2,
+                      "startTime": "2026-08-27T10:50:29.145Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "C:\\Users\\vinht\\AppData\\Local\\Temp\\claude\\c--source-Testing-Project\\ff026fa1-2d0b-43ed-b4c8-3096f78e6e7b\\scratchpad\\pwsample\\test-results\\flaky-Retry-behaviour-times-out-chromium-retry2\\error-context.md"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "b862a406253815a75d4a-c06920b46563b2db3a0d",
+              "file": "flaky.spec.ts",
+              "line": 22,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-27T10:50:20.091Z",
+    "duration": 11164.401,
+    "expected": 1,
+    "skipped": 1,
+    "unexpected": 2,
+    "flaky": 1
+  }
+}
