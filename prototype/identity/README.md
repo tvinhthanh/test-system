@@ -1,5 +1,7 @@
 # Test Identity Prototype — round 1
 
+Hướng dẫn tiếng Việt cho người mới: [Học Go qua project](../../docs/go/README.md) — cài đặt, chạy CLI/test, đọc code và kiến trúc backend dự kiến.
+
 > The only code SPEC §5.7 permits during Phase 0 (see §4.3, week 3).
 > Run **2026-08-26**, week 1 — two weeks ahead of schedule.
 > **Synthetic corpus.** §9.6 item 1 still requires >= 500 **real** test results from >= 2 design partners in week 3.

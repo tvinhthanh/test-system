@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.9 · **Ngày:** 08-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9950); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; 50 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50)
+> **Phiên bản:** v3.9 · **Ngày:** 08-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9950); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 50 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -863,7 +863,7 @@ Sản phẩm dài hạn gồm ba plane độc lập về mặt kiến trúc. Tá
 
 | Plane | Nội dung | Phase | Trạng thái |
 |---|---|---|---|
-| **Test Intelligence** | Report, history xuyên run, test identity, flaky detection, AI triage, analytics | P1 + P1.5 | Đã đặc tả đủ để build |
+| **Test Intelligence** | Report, history xuyên run, test identity, flaky detection, AI triage, analytics | P1 + P1.5 | Đã đặc tả đủ để build; bố cục module ở **§6.9** |
 | **Execution** | Scheduler, job dispatch, runner registry, capability matching, sharding, tenant quota, retry/cancel, autoscaling | P3 (+ P5 distributed) | **Thiết kế ở §6.7** — chưa build |
 | **Test Management** | Manual test, test case, requirement mapping, ROI, release gate, evidence | P2 | **Thiết kế ở §6.8** — chưa build |
 
@@ -1166,6 +1166,252 @@ Không import được thì chi phí chuyển đổi quá cao, P2 vô nghĩa. Nh
 - Test Management **không** được tự định nghĩa khái niệm test riêng. Mọi liên kết tới automation đi qua `TestIdentity`.
 - Manual execution **không** tạo `Run`. Nó là `ManualExecution`, có thể gom vào một `TestPlan` — trộn vào `Run` sẽ làm bẩn mọi metric flaky và TTRC vốn giả định execution là tự động.
 - Release gate **đọc** từ Intelligence Plane, không tự tính lại flaky hay TTRC.
+
+### 6.9 Bố cục module của monolith — thi hành SAU Gate-0
+
+> **Chưa build.** §5.7 cấm code sản phẩm trong Phase 0; mục này là **thiết kế**, không phải lệnh khởi công. Điều kiện vào: Gate-0 PASS **và** đã chốt P1-min hay P1-full (§13 mục 6) — vì hai scope cho ra hai tập module khác nhau (§6.9.11).
+>
+> Lý do mục này tồn tại: QĐ-9 chốt "Go monolith" nhưng không nói monolith đó **có hình gì bên trong**. Monolith không có ranh giới cưỡng chế được thì sau 12 tháng thành big ball of mud, và lúc đó §6.7.8 có cho phép tách microservice cũng không tách nổi — vì không tìm ra đường cắt.
+
+#### 6.9.1 Nguyên tắc: module là đơn vị **có thể** tách, và chưa tách
+
+Một module hợp lệ khi thỏa cả bốn:
+
+1. **Sở hữu dữ liệu riêng.** Bảng của nó, không ai đọc thẳng (§6.9.5).
+2. **Phơi ra một interface Go duy nhất.** Mọi thứ khác nằm sau `internal/` lồng nhau — compiler chặn, không phải code review chặn.
+3. **Tách ra thành service được mà không sửa module khác.** Nếu tách phải sửa 5 chỗ thì ranh giới đang sai.
+4. **Có lý do tồn tại nói được bằng một câu nghiệp vụ.** `ingest` là "nhận kết quả test"; `utils` không phải module.
+
+> **Đây không phải microservices trá hình.** Tách thật chỉ khi đo được điều kiện §6.7.8: *"một domain có nhịp deploy hoặc profile scale khác hẳn phần còn lại, đo được"*. Trước đó tất cả chạy trong một binary, một process, gọi nhau bằng function call.
+
+#### 6.9.2 Cây thư mục
+
+```text
+backend/
+  cmd/
+    api/            # HTTP server — /v1 (§6.5)
+    worker/         # consumer của các logical queue (§6.7.4)
+    migrate/        # schema migration, chạy tách khỏi api (§8.10)
+  internal/
+    platform/       # hạ tầng, KHÔNG biết gì về nghiệp vụ
+      config/       #   env + validate lúc khởi động, fail fast
+      log/          #   structured, có correlation id (§6.4)
+      metric/       #   mọi chỉ số §6.4 — bắt buộc từ P1
+      pg/           #   pool, tx helper, FOR UPDATE SKIP LOCKED
+      objstore/     #   S3/R2, presigned URL, multipart (§7.7)
+      queue/        #   NHIỀU logical queue (§6.7.4), không phải một FIFO
+      outbox/       #   §6.7.8 — độ bền cho event khi cần
+      httpx/        #   middleware: auth, rate limit, CSRF/Origin (N18)
+      idem/         #   idempotency key store (§7.1)
+    tenancy/        # Organization -> Workspace -> Project -> Environment (§8.2)
+    authz/          # token HMAC-SHA-256 (§8.8), RBAC 3 role (§11.3)
+    ingest/         # §7.2-7.4 — hot path
+    identity/       # §9 — resolver HAI TẦNG (§6.9.10)
+    results/        # §8.4 Run / TestResult / TestResultAttempt
+    artifact/       # §7.7 upload, §10.4 cap + retention
+    flaky/          # §8.6 FlakySignal — tổng hợp XUYÊN run
+    triage/         # §8.3 TriageEvent, §8.7 taxonomy, §1.4 AI (P1.5)
+    query/          # read model cho dashboard (§6.9.5)
+    billing/        # §10.6 shadow meter — đọc, không charge trước Gate-1.5
+  api/              # OpenAPI spec; type sinh ra từ đây, không viết tay
+  test/
+    arch/           # test cưỡng chế luật phụ thuộc (§6.9.7)
+    integration/    # §14.3 failure injection
+```
+
+Hai thư mục **đặt chỗ sẵn, chưa tạo**: `internal/execution/` (§6.7, P3) và `internal/testmgmt/` (§6.8, P2). Ghi ra đây để P1 không thiết kế thứ chặn đường chúng — đúng tinh thần câu mở đầu §6.7.
+
+#### 6.9.3 Luật phụ thuộc — bất biến quan trọng nhất của mục này
+
+```mermaid
+flowchart TD
+    CMD["cmd/api · cmd/worker"] --> DOM
+    CMD --> QRY
+    DOM["Domain: ingest · identity · results<br/>artifact · flaky · triage · billing"] --> TEN
+    QRY["query (chỉ đọc)"] --> TEN
+    TEN["tenancy · authz"] --> PLAT
+    DOM --> PLAT
+    PLAT["platform/*"]
+```
+
+| Từ | Được import | Cấm |
+|---|---|---|
+| `platform/*` | stdlib + thư viện ngoài | **Mọi thứ trong `internal/` khác.** Hạ tầng không được biết nghiệp vụ |
+| `tenancy`, `authz` | `platform/*` | Domain module |
+| Domain module | `platform/*`, `tenancy`, `authz`, và **interface công khai** của domain khác | Package con bên trong domain khác |
+| `query` | `platform/*`, `tenancy` | **Ghi bất cứ thứ gì.** Chỉ đọc |
+| `cmd/*` | tất cả | — |
+
+**Ba luật cứng:**
+
+1. **Đồ thị phụ thuộc phải phi chu trình.** Cần gọi ngược chiều thì dùng event (§6.9.6), không dùng callback interface — callback là chu trình được che.
+2. **Không có package `models` / `entity` / `common` dùng chung.** Đây là cách chết kinh điển của monolith: mọi module import nó, nó phình ra, và sau 6 tháng không tách được gì nữa. Type nghiệp vụ **thuộc về module sở hữu**; module khác nhận qua interface.
+3. **Import trực tiếp tối đa 3 domain khác.** Vượt là dấu hiệu module này đang làm việc của orchestrator — hoặc tách nhỏ, hoặc đẩy phần phối hợp lên `cmd/`.
+
+#### 6.9.4 Hợp đồng của một module
+
+Mỗi domain module có đúng một file phơi ra bên ngoài. Phần còn lại nằm trong `internal/` lồng — Go compiler cấm, không cần discipline:
+
+```text
+internal/identity/
+  identity.go          # DUY NHẤT file người khác import: interface + type
+  internal/
+    resolve/           # không ai ngoài identity/ import được
+    score/
+    fingerprint/
+    store/
+```
+
+```go
+// identity.go — hợp đồng, không phải implementation
+package identity
+
+type Service interface {
+    ResolveInline(ctx, ProjectID, []Fingerprint) ([]Resolution, error)
+    ResolveDeferred(ctx, RunID) (DeferredReport, error)
+    UndoMerge(ctx, AliasID, Actor) error
+    SplitFrom(ctx, IdentityID, at time.Time, Actor) error
+}
+```
+
+**Luật:** interface khai báo ở **phía người dùng** khi chỉ một module cần (Go idiom), khai báo ở phía sở hữu khi từ 2 module trở lên cần. Không tạo interface "cho đủ bộ" — interface một implementation, không có test double, là chi phí thuần.
+
+#### 6.9.5 Ranh giới dữ liệu — chỗ modular monolith thường vỡ
+
+Cùng một Postgres, nhưng **mỗi bảng có đúng một module sở hữu**:
+
+| Module | Sở hữu bảng |
+|---|---|
+| `tenancy` | `Organization`, `Workspace`, `Project`, `Environment` |
+| `authz` | `ApiToken`, `Membership`, `Role` |
+| `results` | `Run`, `TestResult`, `TestResultAttempt` |
+| `identity` | `TestIdentity`, `TestIdentityAlias`, `ReviewQueueItem` |
+| `artifact` | `Artifact` |
+| `flaky` | `FlakySignal` |
+| `triage` | `TriageEvent`, `AiHypothesis` |
+
+**Cấm cross-module JOIN trong code ghi.** Cần dữ liệu của module khác thì gọi interface của nó. Đây là thứ đắt nhất phải giữ, và cũng là thứ duy nhất làm §6.7.8 khả thi — ngày cần tách `ingest` ra service, nếu đã có 40 câu SQL join xuyên 6 bảng của 5 module thì không tách được nữa.
+
+**Ngoại lệ có kiểm soát: `query`.** Dashboard cần join thật (§14.2: 100k–1M test result, p95 < 500 ms). `query` được đọc mọi bảng nhưng:
+
+- **chỉ đọc** — không một câu `INSERT`/`UPDATE`/`DELETE` nào, test kiến trúc cưỡng chế;
+- không chứa luật nghiệp vụ, chỉ hình dạng dữ liệu cho UI;
+- mọi truy vấn có test hồi quy khi chạm ngưỡng §14.2.
+
+Đổi lại: `query` là module **hy sinh được**. Tách `results` ra service thì `query` phải viết lại — chấp nhận trước, ghi ở đây để sau không ai bất ngờ.
+
+#### 6.9.6 Transaction và event
+
+**Transaction:** một use case chạy trong **một** transaction, truyền xuống qua `ctx`. Module nhận `tx` từ caller, không tự mở. Không có transaction phân tán, không có kiểu "gọi module khác rồi hy vọng cả hai cùng thành công".
+
+**Event — ba mức, chọn theo yêu cầu độ bền, không theo sở thích:**
+
+| Mức | Dùng khi | Ví dụ |
+|---|---|---|
+| Gọi hàm trực tiếp | Cùng transaction, cần kết quả ngay | `identity.ResolveInline()` trong `ingest` |
+| In-process bus | Fire-and-forget, mất được | Cập nhật metric, invalidate cache |
+| **Outbox** | **Không được mất** | `run.finished` -> identity tầng 2 -> flaky -> billing meter |
+
+Đường ranh: **mọi thứ ảnh hưởng tới tiền, tới kết quả test, hoặc tới trạng thái run đều đi outbox** — ghi `outbox` row trong cùng transaction, worker đọc và phát. §14.3 yêu cầu *"kill worker giữa job → không mất kết quả đã nhận"*; chỉ outbox giữ được bất biến đó.
+
+⚠️ Kafka vẫn **chưa** dùng cho tới khi đủ điều kiện §6.7.8 (từ 3 consumer độc lập trở lên + cần replay). Outbox trên Postgres đi được rất xa trước điểm đó.
+
+#### 6.9.7 Cưỡng chế — bằng compiler và CI, không bằng thiện chí
+
+Luật không kiểm tra tự động là luật sẽ bị vi phạm trong vòng một quý.
+
+| Cơ chế | Bắt được gì |
+|---|---|
+| **`internal/` lồng nhau** | Import xuyên vào ruột module — compiler từ chối. Mạnh nhất vì không bypass được |
+| **`depguard` trong golangci-lint** | Bảng §6.9.3, ví dụ `platform/*` import ngược lên domain |
+| **Test kiến trúc** (`test/arch/`) | Chu trình phụ thuộc; `query` có câu ghi; module import quá 3 domain |
+| **`go test -race` trong CI** | N46 còn treo: máy dev thiếu gcc nên chưa chạy được. **Phải xanh trước T1** |
+| **CODEOWNERS theo module** | Đổi ranh giới thì đúng người phải duyệt |
+
+Thêm hai thứ N50 để lại, chạy trên Postgres thật trong CI: giới hạn `fuzzystrmatch` là ký tự hay byte, và parity `pg_trgm` với `similarity.go`.
+
+#### 6.9.8 Scale monolith trước khi tách — theo đúng thứ tự này
+
+§6.7.8 nói tách khi *đo được*. Trước đó còn rất nhiều dư địa, và mỗi bước rẻ hơn tách một bậc:
+
+| Bước | Làm gì | Đủ tới đâu |
+|---|---|---|
+| 1 | Index đúng (§8.9 + 3 index N47) | Phần lớn vấn đề p95 giai đoạn đầu là thiếu index, không phải thiếu máy |
+| 2 | **Tách process, chung code:** `cmd/api` và `cmd/worker` scale độc lập | Ingest và resolver tầng 2 có profile khác hẳn nhau |
+| 3 | Read replica cho `query` | §14.2 dashboard p95 < 500 ms, tách khỏi hot path ingest |
+| 4 | Nhiều worker pool theo `job.type` (§6.7.4) | Resolver chậm không chặn artifact cleanup |
+| 5 | Partition `TestResult` theo thời gian | Khi một project chạm 1M row (§14.2) |
+| 6 | Broker riêng thay queue Postgres | Điều kiện §6.7.8: p99 claim latency > 2 s ở tải thật |
+| 7 | **Mới tới đây mới tách service** | Điều kiện §6.7.8 |
+
+**Bước 2 là bước quan trọng nhất và hay bị bỏ qua.** Một binary chạy hai lệnh khác nhau cho gần hết lợi ích scale của microservices, mà không có network hop, không có transaction phân tán, không phải versioning API nội bộ.
+
+#### 6.9.9 Đường cắt — khi buộc phải tách thì cắt ở đâu
+
+Xếp theo thứ tự khả năng phải tách trước, kèm dấu hiệu đo được:
+
+| Ứng viên | Dấu hiệu bắt buộc có trước khi tách | Ghi chú |
+|---|---|---|
+| `ingest` | p95 §14.2 trượt vì contention với dashboard, sau khi đã làm bước 1–4 §6.9.8 | Hot path, stateless, ranh giới sạch nhất |
+| `triage` | Chi phí/độ trễ LLM cần isolation và rate limit riêng (§10.3 kill-switch) | Chỉ có nghĩa từ P1.5 |
+| `identity` tầng 2 | CPU-bound; N47 đo 18,7 s cho 25k test **khi chưa có index** | Tách **process** (bước 2) gần như chắc chắn đã đủ |
+| `execution` | P3, và chỉ khi QĐ-5 mở lại (§6.7.9) | Là plane riêng từ đầu (§6.6), không phải "tách ra" |
+
+**Không bao giờ tách:** `tenancy` và `authz`. Mọi request đều đi qua chúng; tách ra là thêm một network hop vào 100% lưu lượng để đổi lấy không gì cả — và §14.3 đặt tenant isolation là gate release, thứ càng ít chỗ sai càng tốt.
+
+#### 6.9.10 `identity` — hai ràng buộc không được thiết kế hỏng
+
+**1. Hai tầng, không phải một hàm.** N39 đo được: resolve inline lúc ingest chỉ thấy một phần run, recall rơi **0,995 → 0,295** ở 50% tầm nhìn. Nên interface §6.9.4 phơi ra **hai** entry point với hai ngân sách khác nhau:
+
+| | Gọi từ | Ngân sách | Hấp thụ |
+|---|---|---|---|
+| `ResolveInline` | `ingest`, trong request | §7.6 p50 < 1 s (đo được 0,7–1,7 µs/event) | ~90,9% event |
+| `ResolveDeferred` | worker, tại `run.finish` | Spec không đặt deadline; trần 5 s chỉ để bắt hồi quy | ~9,1% |
+
+Gộp hai thứ này thành một `Resolve()` là xoá phát hiện đắt nhất của prototype ngay tại chữ ký hàm.
+
+**2. Di trú từ prototype: giữ invariant, không giữ code.** `prototype/identity` chỉ khoảng 3.300 dòng, viết lại rẻ. Thứ không được mất là **các test khóa** — mỗi cái là một vòng đo đã trả giá:
+
+| Test | Khóa | Mất thì |
+|---|---|---|
+| `presence_test.go` | N34 tín hiệu ×0,3 | recall 0,992 → 0,128 |
+| `visibility_test.go` | N39/N40 `MinGap` | mất lưới an toàn giữ precision 1,0 |
+| `fingerprint_test.go` | N22 separator `U+0000` | hai test khác nhau trùng fingerprint |
+| `retries_test.go` · `regression_test.go` | N41 status hai tầng | `timed_out` thành `failed`, AI triage vĩnh viễn mù |
+| `similarity_test.go` | N49 parity `generate_trgm()` | ngưỡng 0,4 tuned trên hàm sai |
+| `pgparity_test.go` | N50 chấm điểm ở tầng ứng dụng | `fuzzystrmatch` sập với title dài |
+| `merge_split_test.go` | N43 `UndoMerge` khác `SplitFrom` | gộp nhầm 29 ngày vẫn sai sau khi "sửa" |
+
+Chuyển sang `backend/internal/identity/` là **port có kèm test**, không phải copy thư mục. Test nào không chạy được ở layout mới thì viết lại test, không bỏ test.
+
+#### 6.9.11 Module nào tồn tại ở phase nào
+
+Đây là lý do §6.9 không thi hành được trước Gate-0 — cột P1-min và P1-full khác nhau:
+
+| Module | P1-min | P1-full | P1.5 | P2 | P3 |
+|---|---|---|---|---|---|
+| `platform/*`, `tenancy`, `authz` | ✅ | ✅ | | | |
+| `ingest`, `results`, `artifact` | ✅ | ✅ | | | |
+| `identity` | ✅ resolver + merge/split dạng **script/CSV** | ✅ + Review Queue UI, `UndoMerge` có giao diện | | | |
+| `flaky` | ✅ | ✅ | | | |
+| `query` | ✅ dashboard v0 | ✅ + màn hình EM (§2.5) | | | |
+| `triage` | ghi `TriageEvent` thủ công | ghi `TriageEvent` thủ công | ✅ AI hypothesis | | |
+| `billing` | — | shadow meter (§10.6) | | | |
+| `testmgmt` | — | — | — | ✅ §6.8 | |
+| `execution` | — | — | — | — | ✅ §6.7 |
+
+§4.3 Track A ghi rõ P1-min làm *"identity operations dạng script/CSV"* — nghĩa là **không có** Review Queue service ở P1-min. Dựng sẵn nó rồi Gate-0 chốt P1-min là làm thừa; giả định ngược lại là thiếu. **Chốt scope trước, tạo thư mục sau.**
+
+#### 6.9.12 Sáu thứ giết modular monolith
+
+1. **Package `common` / `models` / `utils` dùng chung.** Nguyên nhân số một, không có ngoại lệ.
+2. **Cross-module JOIN trong code ghi.** Rẻ hôm nay, khoá cứng mọi đường tách về sau.
+3. **Interface "cho đủ bộ".** Một implementation, không test double → chi phí thuần, và che mất ranh giới thật.
+4. **Chu trình che bằng callback.** `A` nhận `func()` của `B` thì vẫn là `A` phụ thuộc `B`. Dùng event.
+5. **Luật không có test.** §6.9.7 tồn tại vì luật chỉ nằm trong code review sẽ trôi trong một quý.
+6. **Tách service vì "cho sạch".** §6.7.8 đòi số đo. Chưa có số thì câu trả lời là §6.9.8 bước 2.
+
+---
 
 ## 7. Ingestion API & Agent Protocol
 
