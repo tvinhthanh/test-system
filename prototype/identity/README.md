@@ -286,7 +286,7 @@ A trigram spanning a separator stops matching as soon as the two strings differ 
 
 The sign matters more than the size. The old copy scored **lower** than `pg_trgm` on the pairs where they disagreed, so a threshold tuned here would admit **more** candidates once it ran against real Postgres, not fewer. File paths are the worst case, since `/` and `.` are both separators.
 
-Rewriting `trigrams()` to match `generate_trgm()` left the headline numbers alone — precision 1.0000, recall 0.9950, exact-match share 90.91%, deferred recall 0.9900 — with half-visibility recall moving 0.2950 → 0.3000, one case in 200. So 0.4 survives as a threshold. What changed is that the number now describes something the database will actually compute.
+Rewriting `trigrams()` to match `generate_trgm()` left the headline numbers alone — precision 1.0000, recall 0.9920, exact-match share 90.91%, deferred recall 0.9900 — with half-visibility recall moving 0.2950 → 0.3000, one case in 200. So 0.4 survives as a threshold. What changed is that the number now describes something the database will actually compute.
 
 `similarity_test.go` pins the generator against hand-computed trigram sets and asserts the specific defect is gone: no trigram may straddle a separator, and every word must get its own leading padding.
 

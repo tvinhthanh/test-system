@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.9 · **Ngày:** 08-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9950); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 50 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50)
+> **Phiên bản:** v3.10 · **Ngày:** 08-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 52 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -20,7 +20,7 @@ Việc tách `docs/v3.0/` và `docs/v3.1/` cũng xử lý luôn vụ va chạm �
 
 ### 0.2 Nhật ký sửa lỗi qua các vòng review
 
-Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026** — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
+Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N52 từ vòng soát nhất quán nội bộ 08-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
 
 | # | Lỗi / rủi ro | Cách sửa | Xem mục |
 |---|---|---|---|
@@ -62,7 +62,7 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N36 | Từ vựng status của Playwright là `expected\|unexpected\|skipped\|flaky` — **không phải** `passed\|failed`. Quan trọng hơn: **Playwright TỰ tính `flaky`** trong một run | ✅ Ánh xạ trong `playwright.go`; phân vai rõ: Playwright quyết flaky **trong** run, `FlakySignal` §8.6 tổng hợp **xuyên** run — cấm suy diễn lại | §8.4, §8.6 |
 | N37 | **`spec.id` của Playwright không dùng được làm định danh bền vững.** Dạng `<hash-file>-<hash-test>`; đo thật: đổi tên 1 test + move 1 file làm vỡ 6/14 entry. Nó fragile đúng bằng fingerprint ngây thơ | ✅ Ghi rõ để không ai với tay tới nó như lối tắt; có test khóa với 2 fixture Playwright thật | §9.1, §9.3 |
 | N38 | Bản vá N35 đo được: `TemplateKeyNormalized` gộp đúng biến thể sinh từ vòng `for` (7 → 6 template key trên fixture thật) trong khi **fingerprint giữ nguyên 14** — identity không bị đụng | ✅ `dynamic_title.go`. **Ranh giới bất di dịch:** chuẩn hóa chỉ cho template key, TUYỆT ĐỐI không cho fingerprint | §9.5, §9.7 |
-| N39 | **Xung đột §7.6 ↔ §9.3, đo được.** §7.6 resolve inline (p50 < 1s) nhưng tín hiệu quyết định của §9.3 (N34) cần biết test nào đã chạy — lúc ingest thì run chưa xong. Shard, `--grep` và chính batch 500 event đều tạo tầm nhìn từng phần. Đo: recall **0.995 → 0.295** ở 50% tầm nhìn | ✅ Resolve hai tầng: tầng 1 inline chỉ exact match (hấp thụ ≥ 90% event); tầng 2 fuzzy tại `run.finish` | §7.6, §9.3 |
+| N39 | **Xung đột §7.6 ↔ §9.3, đo được.** §7.6 resolve inline (p50 < 1s) nhưng tín hiệu quyết định của §9.3 (N34) cần biết test nào đã chạy — lúc ingest thì run chưa xong. Shard, `--grep` và chính batch 500 event đều tạo tầm nhìn từng phần. Đo: recall **0,9920 → 0,3000** ở 50% tầm nhìn | ✅ Resolve hai tầng: tầng 1 inline chỉ exact match (hấp thụ ≥ 90% event); tầng 2 fuzzy tại `run.finish` | §7.6, §9.3 |
 | N40 | Điểm tích cực đo được: **precision KHÔNG suy giảm** ở mọi mức tầm nhìn (1.0 ở cả 10%). Luật `MinGap` — tưởng thừa sau N34 — chính là lưới an toàn: nhiều ứng viên cùng "có vẻ vắng mặt" thì không ai nổi bật, auto-match từ chối kích hoạt | ✅ Hai cơ chế bổ trợ nhau, **cấm gỡ cả hai** | §9.3 |
 | N41 | **Playwright có hai từ vựng status ở hai tầng, spec chỉ ánh xạ tầng trên.** `timed_out` và `interrupted` của §8.4 **chỉ thấy được ở tầng `results[]`**. Đo trên report thật có `retries:2`: một test timeout bị ánh xạ thành `failed`, mất sạch tín hiệu timeout | ✅ `mapStatus` đọc **cả hai tầng** + `mapAttemptStatus`; có test hồi quy giữ lại hành vi cũ để không ai tái lập | §8.4, §8.7 |
 | N42 | Hệ quả nghiệp vụ của N41: §8.7 có category `flaky_timing` và việc phân biệt timeout với assertion-fail là chức năng lõi của sản phẩm. Gộp timeout vào `failed` ở tầng ingest thì AI triage (§1.4) vĩnh viễn không có tín hiệu đó | ✅ Đã chặn từ loader; §8.4 cần ghi rõ nguồn của từng giá trị enum | §1.4, §8.7 |
@@ -72,8 +72,10 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N46 | Race test mà §9.7 đánh dấu "bắt buộc" nay đã có và pass: 16 worker × 50 fingerprint → đúng **50 identity**, 750 lần thua race đọc lại đúng identity của bên thắng | 🔶 **Có giới hạn:** máy này thiếu gcc nên `go test -race` chưa chạy được. Đây là kiểm chứng **đúng đắn logic**, chưa phải kiểm chứng data-race ở tầng bộ nhớ. Cần chạy lại trong CI | §9.7 |
 | N47 | **§9.3 bước 2 lọc ứng viên bằng ba điều kiện mà §8.9 không index điều kiện nào.** Đo trên prototype (không có index nào): 50 rename tốn **~180ms ở 500 test → ~3,8s ở 10k → ~19s ở 25k**, biên độ ±15%. Đây là **cận trên**, không phải dự đoán production | ✅ Thêm 3 index vào §8.9 + cột `canonicalLeafTitle` vào §8.5. Ghi rõ: trần 50 ứng viên giới hạn chi phí **chấm điểm**, không giới hạn chi phí **lọc** | §8.5, §8.9, §9.3 |
 | N48 | Tầng 1 (exact match, inline) xử lý 10.000 event trong **7–17ms** (0,7–1,7 µs/event, 4 lần chạy) — ngân sách §7.6 dư hai bậc độ lớn, xác nhận việc tách hai tầng ở N39. Bản ghi cũ để "0,8 µs" như một hằng số dù biên độ thật là 2,4× | ✅ Tách assertion: tầng 1 giữ mốc 1s của §7.6; tầng 2 (spec không đặt deadline) dùng trần 5s chỉ để bắt hồi quy. Test cũ cộng cả hai tầng rồi so với mốc của riêng tầng 1 | §7.6 |
-| N49 | **Hàm trigram của prototype không phải `pg_trgm`.** Nó đệm cả chuỗi thay vì cắt thành từ rồi đệm từng từ như `generate_trgm()`, nên sinh trigram vắt qua dấu phân cách. Đo 100k cặp leaf title: lệch trung bình **0,013**, tối đa 0,054, 12 cặp đổi phía ngưỡng 0,4 — và luôn chấm **thấp hơn** Postgres | ✅ Viết lại đúng `generate_trgm()` + test khóa. Số §9.6 không đổi (precision 1,0000 · recall 0,9950) | §9.3 |
+| N49 | **Hàm trigram của prototype không phải `pg_trgm`.** Nó đệm cả chuỗi thay vì cắt thành từ rồi đệm từng từ như `generate_trgm()`, nên sinh trigram vắt qua dấu phân cách. Đo 100k cặp leaf title: lệch trung bình **0,013**, tối đa 0,054, 12 cặp đổi phía ngưỡng 0,4 — và luôn chấm **thấp hơn** Postgres | ✅ Viết lại đúng `generate_trgm()` + test khóa. Số §9.6 không đổi (precision 1,0000 · recall 0,9920) | §9.3 |
 | N50 | **Hai trong ba hàm của §9.3 không chạy được ở Postgres như §2 tuyên bố.** Jaccard trên tập describe cha: không có hàm stdlib nào. `fuzzystrmatch.levenshtein()`: **báo lỗi** khi title quá dài, kéo sập cả câu lệnh chấm điểm (đo trên title thật: 195 byte data-driven, 391 byte cho hai row fixture) | ✅ Chấm điểm về tầng ứng dụng — **463µs** cho trần 50 ứng viên, **4,6ms** cho cả run; Postgres chỉ lo bước lọc. Sửa câu §2. 🔶 Đơn vị giới hạn (ký tự hay byte) cần verify trên Postgres đích | §2, §9.3 |
+| N51 | **Số đo §9.6 bị sao chép ra 5 chỗ và trôi.** Header, N39, N49, §6.9.10 và §7.6 ghi `recall 0,9950` và cặp `0,995 → 0,295`. Chạy lại prototype ngày 08-09: headline là **0,9920** (248/250 auto, 2 review) và 50% tầm nhìn là **0,3000**. `0,9950` là số của sweep mật độ ~128/~285 test/file, bị nhấc lên làm headline; cặp `0,995 → 0,295` chưa bao giờ khớp bảng của chính prototype | ✅ Sửa cả 5 chỗ về số đo được. **Quy tắc:** §9.6 là nơi duy nhất giữ số headline; chỗ khác trích thì phải ghi rõ là trích | §0.2, §7.6, §9.6, §6.9.10 |
+| N52 | **§13 và F16 vẫn gọi pipeline đối ngoại là `pandoc`,** trong khi §4.7 và `docs/external/` dùng `npm run build` → `build.mjs`. Nặng hơn: §13 vẫn liệt "chạy pandoc" là **blocker để gửi tài liệu**, mâu thuẫn với chính mục 3 của nó đã đánh ✅ (`.docx` đã sinh, `verify.sh` 11/11). Ai đọc đoạn kết §13 sẽ tưởng còn vướng một bước không tồn tại | ✅ Đổi tên pipeline; viết lại câu blocker — chỉ còn mục 4 (claim competitor) | §12.1, §13 |
 
 ### 0.3 Những gì vẫn CẦN người chịu trách nhiệm quyết
 
@@ -1361,7 +1363,7 @@ Xếp theo thứ tự khả năng phải tách trước, kèm dấu hiệu đo �
 
 #### 6.9.10 `identity` — hai ràng buộc không được thiết kế hỏng
 
-**1. Hai tầng, không phải một hàm.** N39 đo được: resolve inline lúc ingest chỉ thấy một phần run, recall rơi **0,995 → 0,295** ở 50% tầm nhìn. Nên interface §6.9.4 phơi ra **hai** entry point với hai ngân sách khác nhau:
+**1. Hai tầng, không phải một hàm.** N39 đo được: resolve inline lúc ingest chỉ thấy một phần run, recall rơi **0,9920 → 0,3000** ở 50% tầm nhìn. Nên interface §6.9.4 phơi ra **hai** entry point với hai ngân sách khác nhau:
 
 | | Gọi từ | Ngân sách | Hấp thụ |
 |---|---|---|---|
@@ -1512,7 +1514,7 @@ Vấn đề v3.0: client phát `testId`, schema khóa theo `stableTestId` server
    - **Tầng 1 — inline với ingest, p50 < 1 s:** *chỉ* exact match trên alias. Không cần thông tin presence, hấp thụ ≥ 90% event (≥ 99% ở tần suất rename thật). Event được nhận và lưu ngay theo `clientTestId`.
    - **Tầng 2 — tại `run.finish`:** fuzzy matching (§9.3 bước 2–4) cho các fingerprint lạ, lúc này mới biết đủ test nào đã chạy. Backfill `stableTestId` vào `TestResult`.
 
-   **Vì sao không gộp làm một:** tín hiệu quyết định của §9.3 hỏi "ứng viên còn xuất hiện trong run này không?". Lúc ingest thì run chưa xong — test **chưa báo cáo** trông giống hệt test **đã biến mất**. Shard, `--grep`, và chính batch 500 event của §7.2 đều tạo tầm nhìn từng phần. Đo được: recall rơi từ 0.995 xuống 0.295 ở 50% tầm nhìn (N39). Precision vẫn 1.0 nhờ luật `MinGap` (N40), nên đây là mất tự động hóa chứ không phải mất an toàn — nhưng Review Queue sẽ ngập, vượt xa ngưỡng cảnh báo 50 của §6.4.
+   **Vì sao không gộp làm một:** tín hiệu quyết định của §9.3 hỏi "ứng viên còn xuất hiện trong run này không?". Lúc ingest thì run chưa xong — test **chưa báo cáo** trông giống hệt test **đã biến mất**. Shard, `--grep`, và chính batch 500 event của §7.2 đều tạo tầm nhìn từng phần. Đo được: recall rơi từ 0,9920 xuống 0,3000 ở 50% tầm nhìn (N39). Precision vẫn 1.0 nhờ luật `MinGap` (N40), nên đây là mất tự động hóa chứ không phải mất an toàn — nhưng Review Queue sẽ ngập, vượt xa ngưỡng cảnh báo 50 của §6.4.
 3. Artifact tham chiếu `(localRunId, clientTestId, occurrenceIndex, attempt)` — server nối về `TestResultAttempt` sau khi resolve. Artifact đến **trước** event `test.finished` vẫn hợp lệ (out-of-order tolerant): giữ trạng thái `unlinked` tối đa 1 giờ rồi mới cảnh báo.
 4. Reporter đổi version thuật toán fingerprint → raw signals cho phép server match tiếp mà không vỡ lịch sử (§9.5).
 
@@ -2231,13 +2233,13 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 | F13                               | `FlakySignal`/`TestIdentity` không có trường | §8.5, §8.6                                                   | ✅ Đóng                                                             |
 | F14                               | Thiếu enum và taxonomy                       | §8.4, §8.7                                                   | ✅ Đóng                                                             |
 | F15                               | Token scope bỏ tầng Workspace                | §8.8, §11.3                                                  | ✅ Đóng                                                             |
-| F16                               | `.docx` còn `**` literal                     | Nguồn mới sạch; sinh bằng pipeline pandoc (§4.7)              | ✅ **Đóng** — `.docx` đã sinh bằng pipeline `docs/external/build.mjs`, qua 11/11 mục checklist §4.7 (`verify.sh`) |
+| F16                               | `.docx` còn `**` literal                     | Nguồn mới sạch; sinh bằng pipeline `build.mjs` (§4.7)              | ✅ **Đóng** — `.docx` đã sinh bằng pipeline `docs/external/build.mjs`, qua 11/11 mục checklist §4.7 (`verify.sh`) |
 
 **15 đóng · 1 mở theo thiết kế (F03).** F12 và F16 — hai mục treo từ bản thẩm định đầu tiên — nay đã đóng thật: bản `.docx` sinh bằng pipeline `docs/external/build.mjs` và qua đủ 11/11 mục checklist §4.7 do `verify.sh` kiểm. README của bộ v3.1 từng đánh dấu chúng đóng khi hiện vật chưa sửa; lần này có script chứng minh.
 
 ### 12.2 Phát hiện khi review hợp nhất (N01–N50)
 
-Danh sách đầy đủ 50 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
+Danh sách đầy đủ 52 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
 
 Trước đây mục này giữ một bản tóm tắt song song của đúng 50 dòng đó. Hai bảng cho cùng một danh sách nghĩa là mỗi phát hiện phải sửa hai lần — và chúng **đã** lệch nhau thật: khi sửa số đo của N47 ngày 30-08, bản thứ ba nằm trong §8.9 bị bỏ sót vì không ai nhớ nó tồn tại. Trùng lặp không làm tài liệu đầy đủ hơn, nó chỉ làm tài liệu sai ở nhiều chỗ hơn.
 
@@ -2255,7 +2257,7 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 | 8 | **Khóa model LLM cùng lúc với giá** — benchmark hypothesis trên vài model; model hạng Opus đẩy biến phí $9–10 → ~$24/team và phá sàn giá $49 (QĐ-9, §10.3) | Product/engineering | P1.5, trước Gate-1.5 |
 
 **Phase 0 đã khởi động 26-08-2026** (§5.8). Mục 1 và 2 — hai blocker cuối — đã đóng. Mốc kế tiếp: **22-09 hạn chót partner #3**, rồi **06-10 họp Gate-0**.  
-**Blocker để gửi tài liệu đối ngoại:** chạy pandoc ở mục 3 (nếu cần bản Word/PowerPoint — bản Markdown đã dùng được ngay), và mọi claim chưa kiểm chứng ở mục 4.  
+**Blocker để gửi tài liệu đối ngoại:** chỉ còn mục 4 — mọi claim competitor chưa kiểm chứng. Mục 3 đã đóng: `.md` và `.docx` đều sẵn sàng, `verify.sh` gác 11/11. `.pptx` chưa có nguồn, và đó là lựa chọn có lý do ghi ở `docs/external/README.md`.  
 **P1-min/P1-full không chặn phỏng vấn; nó chặn việc bắt đầu build sau Gate-0.**
 
 ---
