@@ -2,6 +2,8 @@
 
 [Mục lục](README.md)
 
+Đây là **7 buổi nhập môn**, không phải toàn bộ lộ trình production. Sau phần này, tiếp tục [track lý thuyết từ chương 06](06-language-foundations.md) và [10 chặng trong project từ chương 13](13-labs-foundation-to-api.md); xem [cách ghép hai track](16-study-and-work-handbook.md).
+
 Mỗi buổi khoảng 45–90 phút, điều chỉnh theo nền tảng của bạn. Bài tập thay đổi code là tùy chọn để thực hành; bộ tài liệu này chưa thực hiện chúng và không mở rộng phạm vi Phase 0.
 
 | Buổi | Học và thực hành | Hoàn thành khi |

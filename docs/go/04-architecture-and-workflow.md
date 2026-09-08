@@ -1,94 +1,92 @@
-# 04 — Kiến trúc và workflow Go
+# 04 — Kiến trúc và workflow của project
 
-[Mục lục](README.md) · [Tiếp: Lộ trình](05-learning-path.md)
+[Mục lục](README.md) · [Tiếp: Lộ trình nhập môn](05-learning-path.md)
 
-## Phạm vi và lựa chọn
+## Nguồn chuẩn và trạng thái
 
-Go monolith đã được chốt trong [SPEC, QĐ-9](../../SPEC.md). Cấu trúc dưới đây là **đề xuất học và triển khai sau**, chưa tồn tại trong codebase và không thay thế quyết định gate của Phase 0.
+[SPEC §6.9](../../SPEC.md) đã định nghĩa modular monolith; đây là kiến trúc đích của chính project, chưa có backend implementation. Học hiện tại ở `prototype/identity`; khi triển khai P1, đưa thay đổi vào `backend` theo gate và scope của SPEC. Không tạo ứng dụng mẫu hoặc module học riêng.
 
-| Phương án | Ưu điểm | Đánh đổi |
+## Tên module phải thống nhất
+
+| Khái niệm từng dùng trong trao đổi | Module trong SPEC §6.9 | Trách nhiệm |
 |---|---|---|
-| A — Mở rộng prototype thành một package backend lớn | Ít setup, nhanh cho thử nghiệm | Trộn HTTP, lưu trữ và thuật toán; khó kiểm thử quyền và thay persistence |
-| B — Monolith chia theo nghiệp vụ | Ranh giới rõ, tái dùng thuật toán, dễ kiểm thử service | Cần xác định ownership và dependency lúc đầu |
+| projects | `tenancy` | Organization, Workspace, Project, Environment |
+| auth + rbac | `authz` | ApiToken, Membership, Role; xác thực và authorize tập trung |
+| runs | `results` | Run, TestResult, TestResultAttempt |
+| ingest | `ingest` | Nhận event theo protocol |
+| identity | `identity` | Fingerprint, alias, resolution, merge/split |
+| artifact | `artifact` | Upload, cap, retention và metadata |
+| Dashboard | `query` | Read model, chỉ đọc |
+| Flaky xuyên run | `flaky` | Tổng hợp FlakySignal |
 
-Khuyến nghị B khi bắt đầu backend. Chỉ tạo package khi có trách nhiệm cụ thể; không cần tạo đủ interface/layer trống cho mọi module.
+`triage` và `billing` theo scope/gate trong SPEC; `execution` và `testmgmt` chưa tạo trước giai đoạn tương ứng. Không tạo song song `auth`, `rbac`, `runs`, `projects` chỉ để khớp giáo trình cũ.
+
+## Đường dẫn đích
+
+Cây rút gọn từ §6.9.2, **đường dẫn dự kiến, chưa tồn tại**:
 
 ```text
-backend/                     # Đề xuất, chưa triển khai
-  go.mod
-  cmd/api/main.go             # Khởi tạo dependencies, HTTP lifecycle
+backend/
+  cmd/api/
+  cmd/worker/
+  cmd/migrate/
   internal/
+    platform/
+      config/
+      log/
+      metric/
+      pg/
+      objstore/
+      queue/
+      outbox/
+      httpx/
+      idem/
+    tenancy/
+    authz/
     ingest/
     identity/
+    results/
     artifact/
-    auth/
-    rbac/
-    runs/
-    projects/
-    platform/                # Adapter hạ tầng thực sự dùng chung
-      postgres/
-      objectstore/
-      queue/
-    config/
+    flaky/
+    query/
+  api/                # OpenAPI và generated types
+  test/arch/
+  test/integration/
 ```
 
-Đây là các package trong một backend Go module; không cần một `go.mod` cho mỗi nghiệp vụ. `internal` hạn chế import từ bên ngoài cây cho phép, nhưng không tự ngăn coupling giữa các package bên trong.
+`backend/go.mod` khi được tạo là module sản phẩm, không phải module bài tập. Các package nghiệp vụ không cần mỗi nơi một go.mod. Prototype chỉ chuyển sang cấu trúc đích khi có kế hoạch port giữ nguyên invariants/test; không duy trì hai bản thuật toán lệch nhau.
 
-## Ai sở hữu việc gì?
+## Ranh giới và phụ thuộc
 
-| Module | Trách nhiệm |
-|---|---|
-| `ingest` | Validate batch/event, điều phối tiếp nhận và chống xử lý lặp theo protocol |
-| `identity` | Fingerprint, alias, resolution, merge/split; giữ phần tính toán độc lập HTTP |
-| `artifact` | Metadata, quota/cap, vòng đời upload/download và object storage |
-| `auth` | Xác thực token/credential thành principal đáng tin cậy |
-| `rbac` | Quyết định quyền qua một hàm `authorize(principal, resource, action)` tập trung |
-| `runs` | Vòng đời run, finish, trạng thái và truy vấn lịch sử run |
-| `projects` | Dữ liệu/cấu hình project và quan hệ scope với workspace/organization |
+Platform không import domain. Tenancy/authz không import domain. Domain chỉ dùng hợp đồng công khai của module khác; nội bộ mỗi domain nằm sau `internal/` lồng theo §6.9.4. Go import package, không import từng file: file hợp đồng là quy ước tổ chức; nested internal mới là cơ chế compiler hạn chế truy cập implementation.
 
-`identity` ở đây là **test identity**, không phải tài khoản người dùng. `auth` trả lời “ai gọi”; `rbac` trả lời “được làm gì trên resource nào”. Run là dữ liệu, không phải tầng scope quyền.
+Đồ thị phải không có chu trình; tối đa 3 domain import trực tiếp theo §6.9.3. Không tạo `common/models/entity` gom type nghiệp vụ. Interface nhỏ ở caller khi một nơi cần, ở module sở hữu khi nhiều nơi dùng theo quy tắc SPEC.
 
-## Chiều dependency
+Mỗi bảng có module sở hữu. Code ghi không JOIN xuyên module; gọi API module trong use case. `query` là ngoại lệ được đọc nhiều bảng cho dashboard, không được ghi hoặc chứa business rule. Test kiến trúc phải giữ các quy tắc này khi backend có code.
 
-HTTP handler nhận request → gọi service nghiệp vụ → service kiểm tra quyền và phối hợp repository/adapter. Domain tính fingerprint/score không import router, SDK object storage hoặc SQL driver.
+## Luồng request của project
 
-- Handler xử lý transport: decode, giới hạn body, mapping response/error. Business rule thuộc service.
-- Service nhận dependency qua constructor/tham số. `main` khởi tạo và nối các thành phần.
-- Định nghĩa interface nhỏ tại nơi sử dụng khi cần thay adapter hoặc kiểm thử; không tạo interface cho mọi struct theo thói quen.
-- Gọi module khác qua API service rõ ràng. Không đọc thẳng bảng của module khác khắp codebase.
-- Nếu `ingest` và `runs` phụ thuộc vòng, đưa orchestration vào một lớp có trách nhiệm rõ; không sửa bằng package `common` chứa mọi thứ.
+HTTP decode/validate → xác thực principal → service authorize resource → use case dùng transaction → adapter persistence → response theo OpenAPI. API nhận run/event/artifact ở §7.2, không tự thêm route học.
 
-## Dữ liệu, quyền và công việc nền
+Một use case dùng một transaction theo §6.9.6; caller quản lý và truyền transaction xuống qua cơ chế context của project. Đây là quy ước riêng được SPEC yêu cầu, không phải lời khuyên dùng context chứa mọi dependency. Helper typed thuộc platform/pg, module không tự mở transaction con hoặc dùng pool ngoài transaction đang chạy.
 
-Service gọi chung `authorize`, repository luôn scope dữ liệu theo tenant/project phù hợp. Không tin `projectId` do client gửi chỉ vì token hợp lệ. Cần test truy cập chéo tenant khi backend được triển khai.
+Kết quả test, trạng thái run và công việc không được mất dùng outbox theo §6.9.6. Metric mất được có thể dùng cơ chế nhẹ hơn. Deferred identity chạy từ durable event hoàn tất run, không từ goroutine sống nhờ request.
 
-Xác định transaction ở use case: ví dụ lưu event và trạng thái xử lý liên quan phải nhất quán khi retry. Unique constraint/upsert chống tạo trùng xuyên process; mutex Go không thay thế được. Nếu ghi DB rồi phát job có nguy cơ mất job giữa hai bước, thiết kế cơ chế publish bền vững như transactional outbox theo nhu cầu protocol.
+## Học bằng thay đổi thật
 
-Worker cần retry có giới hạn, idempotency và backpressure. Goroutine đơn lẻ không phải durable queue. Chọn queue/router/DB driver sau khi kiểm tra dependency và yêu cầu cụ thể; bộ docs này chưa chọn hoặc cài thư viện mới.
+| Cách làm | Lợi ích | Đánh đổi |
+|---|---|---|
+| Đọc code, giải thích và chạy test hiện có | Học ngay, không thêm code thừa | Chưa chứng minh được backend chưa triển khai |
+| Bổ sung case thiếu hoặc feature theo roadmap | Học và tạo giá trị trực tiếp cho project | Cần scope, review và integration evidence |
 
-## Quy ước khi triển khai
+Bắt đầu bằng cách thứ nhất; chỉ sửa khi có khoảng trống hoặc yêu cầu thật. Không thêm interface/helper trống để hoàn thành bài. Khi tới P1, xây từng lát chức năng có auth và persistence, không xây API demo rồi thay lại.
 
-- Truyền `context.Context` qua I/O để hủy công việc và giới hạn thời gian.
-- Wrap lỗi có ngữ cảnh, phân loại bằng cơ chế error của Go; không so sánh chuỗi lỗi để quyết định HTTP status.
-- Log có request/run/project ID phù hợp, không log token hoặc toàn bộ payload mặc định. Theo dõi latency, lỗi và queue depth ở biên hệ thống.
-- Không giữ global config có thể mutate; truyền config/dependency rõ ràng.
-- Dùng thư viện chuẩn và code sẵn có trước; thêm abstraction khi có ranh giới cần bảo vệ.
-- Khi port identity, giữ các test bất biến và tách adapter persistence. Không chép in-memory store thành database production.
+## Quy trình một thay đổi
 
-## Workflow cho một thay đổi
+1. Đọc SPEC và test liên quan, xác định module sở hữu.
+2. Ghi hành vi trước/sau và rủi ro quyền/dữ liệu.
+3. Sửa đúng package; test hành vi thay đổi, không mirror implementation.
+4. Format file sửa, chạy kiểm tra cần thiết theo terminal policy.
+5. Cập nhật docs/lệnh chạy và kết quả thật, ghi rõ phần chưa kiểm chứng.
 
-1. Đọc SPEC, code và test liên quan; xác định hành vi mong đợi.
-2. Với lỗi, tái hiện và tìm nguyên nhân trước khi sửa threshold/timeout.
-3. Sửa nhỏ trong đúng module; cập nhật test hành vi khi thay logic.
-4. Chạy format/test phù hợp khi được phép; đọc diff sau format.
-5. Ghi lại kết quả kiểm tra thật và cập nhật docs nếu API/cờ thay đổi.
-
-Ví dụ lệnh trong module hiện tại (chỉ là hướng dẫn, không được chạy bởi việc thêm docs):
-
-```powershell
-gofmt -w config.go
-go test ./...
-go vet ./...
-```
-
-Chỉ format file thực sự sửa; `config.go` là ví dụ. Chạy `-race` khi sửa shared state và benchmark khi sửa hot path, không dùng mọi phép đo cho một sửa tài liệu. Agent phải xin phép các lệnh thuộc nhóm yêu cầu approval theo chính sách terminal project.
+Prototype chạy test trong `prototype/identity`. Lệnh backend chỉ thêm vào docs sau khi module/backend thực sự có. Thay đổi tài liệu hiện tại không tự triển khai API, migrate DB hoặc deploy.
