@@ -1,7 +1,7 @@
 # Automation Testing Platform
 
-> Bản tóm tắt đối ngoại · Phiên bản 3.10 · 08-09-2026
-> Nguồn: `SPEC.md` v3.10 — tài liệu này sinh từ đó, không sửa tay
+> Bản tóm tắt đối ngoại · Phiên bản 3.11 · 09-09-2026
+> Nguồn: `SPEC.md` v3.11 — tài liệu này sinh từ đó, không sửa tay
 > Trạng thái: Phase 0 (validation). Chưa có sản phẩm chạy được.
 
 ---
@@ -110,4 +110,4 @@ Hai bên dừng bất cứ lúc nào bằng một email. Điều khoản dữ li
 
 ---
 
-*Tài liệu này sinh từ `SPEC.md` v3.10 ngày 08-09-2026. Mọi con số về giá và chi phí trong tài liệu nội bộ là giả định đang được kiểm chứng, không phải cam kết.*
+*Tài liệu này sinh từ `SPEC.md` v3.11 ngày 09-09-2026. Mọi con số về giá và chi phí trong tài liệu nội bộ là giả định đang được kiểm chứng, không phải cam kết.*

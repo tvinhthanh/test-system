@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.10 · **Ngày:** 08-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 52 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50)
+> **Phiên bản:** v3.11 · **Ngày:** 09-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 53 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -20,7 +20,7 @@ Việc tách `docs/v3.0/` và `docs/v3.1/` cũng xử lý luôn vụ va chạm �
 
 ### 0.2 Nhật ký sửa lỗi qua các vòng review
 
-Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N52 từ vòng soát nhất quán nội bộ 08-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
+Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N53 từ vòng soát nhất quán nội bộ 08-09 → 09-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
 
 | # | Lỗi / rủi ro | Cách sửa | Xem mục |
 |---|---|---|---|
@@ -76,6 +76,7 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N50 | **Hai trong ba hàm của §9.3 không chạy được ở Postgres như §2 tuyên bố.** Jaccard trên tập describe cha: không có hàm stdlib nào. `fuzzystrmatch.levenshtein()`: **báo lỗi** khi title quá dài, kéo sập cả câu lệnh chấm điểm (đo trên title thật: 195 byte data-driven, 391 byte cho hai row fixture) | ✅ Chấm điểm về tầng ứng dụng — **463µs** cho trần 50 ứng viên, **4,6ms** cho cả run; Postgres chỉ lo bước lọc. Sửa câu §2. 🔶 Đơn vị giới hạn (ký tự hay byte) cần verify trên Postgres đích | §2, §9.3 |
 | N51 | **Số đo §9.6 bị sao chép ra 5 chỗ và trôi.** Header, N39, N49, §6.9.10 và §7.6 ghi `recall 0,9950` và cặp `0,995 → 0,295`. Chạy lại prototype ngày 08-09: headline là **0,9920** (248/250 auto, 2 review) và 50% tầm nhìn là **0,3000**. `0,9950` là số của sweep mật độ ~128/~285 test/file, bị nhấc lên làm headline; cặp `0,995 → 0,295` chưa bao giờ khớp bảng của chính prototype | ✅ Sửa cả 5 chỗ về số đo được. **Quy tắc:** §9.6 là nơi duy nhất giữ số headline; chỗ khác trích thì phải ghi rõ là trích | §0.2, §7.6, §9.6, §6.9.10 |
 | N52 | **§13 và F16 vẫn gọi pipeline đối ngoại là `pandoc`,** trong khi §4.7 và `docs/external/` dùng `npm run build` → `build.mjs`. Nặng hơn: §13 vẫn liệt "chạy pandoc" là **blocker để gửi tài liệu**, mâu thuẫn với chính mục 3 của nó đã đánh ✅ (`.docx` đã sinh, `verify.sh` 11/11). Ai đọc đoạn kết §13 sẽ tưởng còn vướng một bước không tồn tại | ✅ Đổi tên pipeline; viết lại câu blocker — chỉ còn mục 4 (claim competitor) | §12.1, §13 |
+| N53 | **§9.6 gán tính ổn định cho sai biến, và bảng số không tái lập được.** §9.6 ghi "mật độ 11→285 test/file cho recall 0.97–0.996", dẫn từ bảng bốn dòng trong README prototype (0,9700 / 0,9850 / 0,9950 / 0,9950) kể một xu hướng **tăng đơn điệu**. Đo lại 09-09 đúng bốn mức đó: **0,9760 / 0,9960 / 0,9880 / 0,9920** — không đơn điệu, không mức nào khớp. Bảng cũ sinh từ harness `_test.go` đã bị thay bằng flag nên **không lệnh nào tái lập được nó**. Và sweep cũ để `-mutate=50` cố định trong khi `-suite` đổi, nên "mật độ 11" đồng thời là "**65% corpus bị rename**" — hai biến trộn vào nhau | ✅ Đo lại tách bạch: giữ rename 10% rồi quét mật độ; giữ mật độ rồi quét rename 1%→80%. **Cả hai trục đều phẳng**, precision 1,0000 khắp nơi. Viết lại §9.6 thành bảng bốn biến kèm lệnh tái lập trong README prototype | §9.6 |
 
 ### 0.3 Những gì vẫn CẦN người chịu trách nhiệm quyết
 
@@ -2000,7 +2001,16 @@ Cùng bộ chỉ số này được dùng lại ở Gate-1 (§4.5) — một đ�
 | Precision | **1.0000** | ≥ 0.98 | ĐẠT — không một ca gộp nhầm ở bất kỳ cấu hình nào |
 | Recall | **0.9920** | ≥ 0.80 | ĐẠT |
 
-Ổn định qua mọi biến: mật độ 11→285 test/file cho recall 0.97–0.996; ngưỡng gap 0.02→0.20 không đổi kết quả; bốn seed khác nhau đều 0.988–0.996.
+**Ổn định qua mọi biến đã quét** — đo lại 09-09-2026, lệnh tái lập ghi ở `prototype/identity/README.md`:
+
+| Biến | Dải quét | Precision | Recall |
+|---|---|---|---|
+| Ngưỡng gap | 0,02 → 0,20 | 1,0000 | **0,9920 giống hệt nhau ở cả năm mức** |
+| Seed | 1 · 7 · 99 · 12345 | 1,0000 | 0,9880 – 0,9960 |
+| Mật độ | 11 → 285 test/file | 1,0000 | 0,9750 – 1,0000 |
+| **Tỉ lệ rename** | **1% → 80% corpus** | **1,0000** | **0,9867 – 1,0000** |
+
+Hai dòng dưới không theo xu hướng nào — dao động là nhiễu của seed, không phải hàm của biến. Kết luận đúng vì thế **mạnh hơn** bản cũ: thuật toán không nhạy với mật độ **lẫn** tỉ lệ rename, và precision giữ 1,0000 kể cả khi 80% corpus bị đổi tên cùng lúc — đúng kịch bản refactor lớn, lúc identity dễ vỡ nhất. Bản cũ gán tính ổn định cho riêng mật độ và trộn hai biến vào nhau (N53).
 
 **Phát hiện quan trọng nhất (N34):** tín hiệu *"ứng viên vẫn xuất hiện trong run này → score × 0.3"* là **bộ phận chịu lực** của thuật toán, không phải tinh chỉnh phụ. Một lần chạy với tín hiệu này bị vô hiệu hoá cho recall **0.128**; bật đúng thì lên **0.992**. Lý do: khi test X bị đổi tên, mọi test gần-giống X vẫn chạy với fingerprint cũ và bị phạt, để lại đúng một ứng viên nổi bật. Không có nó, các test cùng file có điểm gần bằng nhau và luật `MinGap` chặn hết.
 
@@ -2239,7 +2249,7 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 
 ### 12.2 Phát hiện khi review hợp nhất (N01–N50)
 
-Danh sách đầy đủ 52 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
+Danh sách đầy đủ 53 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
 
 Trước đây mục này giữ một bản tóm tắt song song của đúng 50 dòng đó. Hai bảng cho cùng một danh sách nghĩa là mỗi phát hiện phải sửa hai lần — và chúng **đã** lệch nhau thật: khi sửa số đo của N47 ngày 30-08, bản thứ ba nằm trong §8.9 bị bỏ sót vì không ai nhớ nó tồn tại. Trùng lặp không làm tài liệu đầy đủ hơn, nó chỉ làm tài liệu sai ở nhiều chỗ hơn.
 

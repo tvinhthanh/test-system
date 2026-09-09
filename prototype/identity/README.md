@@ -45,16 +45,29 @@ PRECISION : 1.0000   (§9.6 needs >= 0.98)  PASS  — zero wrong merges
 RECALL    : 0.9920   (§9.6 needs >= 0.80)  PASS
 ```
 
-Stable across every variable tried:
+Stable across every variable swept. Re-measured 2026-09-09; every row below
+is reproducible with the command beside it, because a table nobody can
+regenerate is a table that rots (N53).
 
-| Density (tests/file) | precision | recall | | Seed | precision | recall |
-|---|---|---|---|---|---|---|
-| ~11 | 1.0000 | 0.9700 | | 1 | 1.0000 | 0.9880 |
-| ~42 | 1.0000 | 0.9850 | | 7 | 1.0000 | 0.9880 |
-| ~128 | 1.0000 | 0.9950 | | 99 | 1.0000 | 0.9960 |
-| ~285 | 1.0000 | 0.9950 | | 12345 | 1.0000 | 0.9920 |
+| Variable | Range | precision | recall | Reproduce with |
+|---|---|---|---|---|
+| Gap threshold | 0.02 → 0.20 | 1.0000 | **0.9920, identical at all five** | `-gap=0.02` … `-gap=0.20` |
+| Seed | 1 · 7 · 99 · 12345 | 1.0000 | 0.9880 – 0.9960 | `-seed=99` |
+| Density | 11 → 285 tests/file | 1.0000 | 0.9750 – 1.0000 | `-suite=77 -mutate=8` … `-suite=1995 -mutate=200` |
+| **Rename rate** | **1% → 80% of corpus** | **1.0000** | **0.9867 – 1.0000** | `-suite=896 -mutate=9` … `-mutate=717` |
 
-Gap thresholds from 0.02 to 0.20 give **identical results** — see N34 for why.
+The corpus spans 7 spec files, so density is `-suite / 7`. Rename rate is
+`-mutate / -suite` — which is why the two bottom rows have to be swept
+*separately*: the old sweep held `-mutate=50` fixed while `-suite` varied, so
+its "density 11" row was also "65% of the corpus renamed at once". Two
+variables moving together, reported as one.
+
+Swept apart, neither shows a trend — the movement is seed noise. That makes
+the real claim stronger than the one this table used to make: identity
+resolution is insensitive to density **and** to rename rate, and precision
+holds at 1.0000 even when 80% of the suite is renamed in a single run. That
+last case is the large-refactor scenario, which is exactly when identity is
+most likely to break and most expensive to get wrong.
 
 ## N34: the presence signal is load-bearing
 
