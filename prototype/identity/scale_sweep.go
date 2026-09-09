@@ -31,7 +31,10 @@ func ScaleSweep() string {
 		per := time.Since(start) / time.Duration(len(probes))
 		fmt.Fprintf(&b, "  %-12d %14s %16s\n", n, per.Round(time.Microsecond), (per * 50).Round(time.Millisecond))
 	}
-	fmt.Fprintf(&b, "\nCost is linear in project size: every unknown fingerprint is compared\n")
-	fmt.Fprintf(&b, "against every active identity before the 50-candidate cap applies.\n")
+	fmt.Fprintf(&b, "\nEvery unknown fingerprint is compared against every active identity\n")
+	fmt.Fprintf(&b, "before the 50-candidate cap applies, so cost grows with project size.\n")
+	fmt.Fprintf(&b, "One run cannot pin the exponent. Across three runs the 500-to-25000\n")
+	fmt.Fprintf(&b, "ratio came out 51x, 121x and 125x, and 25000 itself spanned 8.3s to\n")
+	fmt.Fprintf(&b, "30.5s. Read the magnitude, not the digits.\n")
 	return b.String()
 }

@@ -232,21 +232,32 @@ Playwright genuinely does compute `flaky` itself — `test.status = "flaky"` wit
 
 §9.3 step 2 filters candidates on three conditions — same `canonicalFilePath`, same leaf title, or trigram similarity >= 0.4 — and §8.9's index list covers **none of them**.
 
-Measured in this prototype, which has no index at all. Median of three warm runs,
-with the run-to-run range beside it — these numbers move by about a sixth between
-runs, so read the order of magnitude, not the digits:
+Measured in this prototype, which has no index at all. Three runs of
+`go run ./cmd/protoident -scale` on 2026-09-09, full range across all three:
 
 ```
-  project size   per unknown fp              50 renames
-  500                3.5ms  (3.4-3.7)      176ms  (172-186)
-  2000              14.5ms  (13.9-15.7)    725ms  (697-783)
-  10000             75.7ms  (75.4-83.5)    3.78s  (3.77-4.17)
-  25000            374.9ms  (338-394)      18.7s  (16.9-19.7)
+  project size   per unknown fp          50 renames
+  500            3.3 -   5.0ms           163 -   252ms
+  2000          13.7 -  21.7ms           683ms -  1.09s
+  10000         70.8 - 136.2ms           3.54 -  6.81s
+  25000        165.1 - 610.2ms           8.25 - 30.51s
 ```
 
-Growth is superlinear: 50x the project size costs about 107x per unknown
-fingerprint. Re-measured after the N49 trigram rewrite, which sits inside this
-loop — it changed nothing outside the spread above.
+**Read the magnitude, not the digits — and this README used to say that while
+quoting digits far tighter than the data supports.** The previous table gave
+`25000 -> 18.7s (16.9-19.7)` and claimed the numbers "move by about a sixth
+between runs". They move by **3.7x** at that size. Filed as N55.
+
+The growth exponent is not stable enough to state either. The 500-to-25000
+ratio per unknown fingerprint came out **51x, 121x and 125x** across the three
+runs. The old claim of "superlinear, about 107x" is one draw from that spread,
+and `scale_sweep.go` was simultaneously printing "Cost is linear in project
+size" — the tool and the document describing it disagreed. The tool now states
+the mechanism (a linear scan over every active identity) and shows the three
+observed ratios without asserting an exponent.
+
+None of this moves the conclusion, which is the point of recording it honestly:
+at 8.3s or at 30.5s, §8.9 is still missing the indexes §9.3 depends on.
 
 Being honest about what this does and does not show: the prototype does a linear scan, so these are an **upper bound**, not a prediction of production behaviour. With a GIN trigram index Postgres does an index lookup instead. The finding is not "this will be slow" — it is "§8.9 is missing exactly the indexes §9.3 depends on, and here is the cost of that omission."
 
@@ -325,12 +336,18 @@ The data-driven title is the N35 idiom — `test(\`rejects order ${JSON.stringif
 **The measurement that makes the question moot.** §9.3 step 3 scores at most 50 candidates, and §9.7 expects under 10 unknown fingerprints in a normal run:
 
 ```
-  scoring the full 50-candidate cap in Go : 463µs
-    per candidate                         : 9.3µs
-    10 unknown fingerprints in a run      : 4.6ms
+  scoring the full 50-candidate cap in Go : 348 - 587µs   (6 runs)
+    per candidate                         : 7.0 -  11.7µs
+    10 unknown fingerprints in a run      : 3.48 - 5.87ms
 ```
 
-4.6ms against §7.6's 1s budget. There is no performance argument for expressing step 3 as SQL, so the split is: **step 2 filters in Postgres** — that is where N47's GIN index earns its place — and **step 3 scores in the application**. `pgparity_test.go` holds both measurements and fails if scoring a run ever costs more than 50ms.
+This block used to read `463µs / 9.3µs / 4.6ms` as three flat constants. Those
+are real — one run lands on 465µs / 9.3µs / 4.654ms almost exactly — but the
+spread is **1.7x**, so a single sample presented as a constant is the same
+defect N48 already caught one section above, left uncorrected here. Filed as
+N54.
+
+At the worst end of the range, 5.9ms against §7.6's 1s budget. There is no performance argument for expressing step 3 as SQL, so the split is: **step 2 filters in Postgres** — that is where N47's GIN index earns its place — and **step 3 scores in the application**. `pgparity_test.go` holds both measurements and fails if scoring a run ever costs more than 50ms.
 
 ## Week 3 (once partners are on board)
 
