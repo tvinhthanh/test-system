@@ -149,11 +149,23 @@ Measured (`visibility.go`):
   visible     precision    recall     auto    WRONG   review
   1.00           1.0000    0.9920      248        0        2
   0.90           1.0000    0.7520      188        0       62
-  0.75           1.0000    0.5160      129        0      121
-  0.50           1.0000    0.2960       74        0      176
-  0.25           1.0000    0.1880       47        0      203
-  0.10           1.0000    0.1360       34        0      216
+  0.75           1.0000    0.5200      130        0      120
+  0.50           1.0000    0.3000       75        0      175
+  0.25           1.0000    0.1920       48        0      202
+  0.10           1.0000    0.1400       35        0      215
 ```
+
+Re-measured 2026-09-10 at the §9.6 rename set of 50. The four partial-visibility
+rows each moved by exactly one case from what this table used to show — 0.75,
+0.50, 0.25 and 0.10 all gained one auto-match. That is the N49 trigram fix, which
+landed after this table was written and was never re-run against it (N57).
+
+The direction is the point. N49 predicted the old copy scored **lower** than
+`pg_trgm`, so correcting it lets one more candidate clear the 0.4 filter — at
+every level, in the same direction. N49 recorded this as a single row moving
+"one case in 200" and read it as rounding noise. It is not noise; it is the
+systematic shift N49's own mechanism predicts, and seeing it on four rows is
+better evidence for that analysis than the one row it reported.
 
 ### N40: the gap rule turns out not to be redundant
 
@@ -172,7 +184,7 @@ Neither may be removed.
 
 ### The fix: resolve in two stages
 
-Partial visibility costs automation, not safety. But the cost is severe — at 50% visibility 176 of 250 renames land in the Review Queue, far past the alert threshold of 50 in §6.4.
+Partial visibility costs automation, not safety. But the cost is severe — at 50% visibility 175 of 250 renames land in the Review Queue, far past the alert threshold of 50 in §6.4.
 
 Measured share of each path:
 
@@ -188,7 +200,7 @@ So deferring only the fuzzy path is nearly free:
 - **Stage 1 — inline, p50 < 1s:** exact alias match only. No presence information required.
 - **Stage 2 — at `run.finish`:** fuzzy matching from §9.3 steps 2-4, once the run is fully visible.
 
-Confirmed by measurement: `inline (50% visible) recall 0.2800 -> deferred (run complete) recall 0.9900`.
+Confirmed by measurement: `inline (50% visible) recall 0.2720 -> deferred (run complete) recall 0.9880`.
 
 This fits the "backfill" language §7.6 already uses; it only had to say *when* the backfill happens for the fuzzy path. SPEC §7.6 now specifies both stages.
 
@@ -310,7 +322,7 @@ A trigram spanning a separator stops matching as soon as the two strings differ 
 
 The sign matters more than the size. The old copy scored **lower** than `pg_trgm` on the pairs where they disagreed, so a threshold tuned here would admit **more** candidates once it ran against real Postgres, not fewer. File paths are the worst case, since `/` and `.` are both separators.
 
-Rewriting `trigrams()` to match `generate_trgm()` left the headline numbers alone — precision 1.0000, recall 0.9920, exact-match share 90.91%, deferred recall 0.9900 — with half-visibility recall moving 0.2950 → 0.3000, one case in 200. So 0.4 survives as a threshold. What changed is that the number now describes something the database will actually compute.
+Rewriting `trigrams()` to match `generate_trgm()` left the headline numbers alone — precision 1.0000, recall 0.9920, exact-match share 90.91%, deferred recall 0.9880 — with half-visibility recall moving one case, 0.2960 → 0.3000. So 0.4 survives as a threshold. (It moved the 0.75, 0.25 and 0.10 rows by one case each too, in the same direction — this section originally reported only the half-visibility row, and the visibility table above went un-regenerated for it. See N57.) What changed is that the number now describes something the database will actually compute.
 
 `similarity_test.go` pins the generator against hand-computed trigram sets and asserts the specific defect is gone: no trigram may straddle a separator, and every word must get its own leading padding.
 
@@ -349,6 +361,49 @@ N54.
 
 At the worst end of the range, 5.9ms against §7.6's 1s budget. There is no performance argument for expressing step 3 as SQL, so the split is: **step 2 filters in Postgres** — that is where N47's GIN index earns its place — and **step 3 scores in the application**. `pgparity_test.go` holds both measurements and fails if scoring a run ever costs more than 50ms.
 
+## N56: the harness that kept regenerating the number N51 deleted
+
+N51 found `recall 0.9950` copied into five places in SPEC, replaced all five with
+the measured `0.9920`, and wrote a rule: §9.6 is the only place that holds a
+headline number. What it did not find was the thing still producing 0.9950.
+
+`visibility_test.go` called `VisibilitySweep(500, 40, 42, "")`. §9.6 item 2 fixes
+the rename set at **50** tests × 5 mutations = 250 trials, and `cmd/protoident`
+defaults to exactly that. The test used 40 — 200 trials — and 199 of 200 is
+**0.9950**:
+
+```
+-mutate=40 (what the test hardcoded)     1.00   1.0000   0.9950   199   0    1
+-mutate=50 (what §9.6 specifies)         1.00   1.0000   0.9920   248   0    2
+```
+
+So every `go test ./...` printed `full visibility recall 0.9950` while the CLI
+next to it printed 0.9920 for the same row. Two harnesses, two denominators, one
+spec number.
+
+N51 diagnosed the 0.9950 as the density sweep's number "lifted into the
+headline". That was wrong, and being wrong about the source is why the round
+removed every copy and left the generator running. The pair in SPEC read
+`0.995 → 0.295`; N51 concluded it "never matched the prototype's own table",
+but `0.9950 → 0.3000` matches this harness exactly. The pair was not invented —
+it was read off a sweep nobody realised was measuring something else.
+
+`gate_test.go` had the same 40, under a comment calling it "the main §9.6
+benchmark".
+
+**Fix:** `SpecRenameSetSize = 50` in `synth.go`, used by all three call sites, so
+the §9.6 rename set is named once and a sweep that varies it has to say so.
+After it, the tests print what the spec says:
+
+```
+full visibility recall 0.9920 -> half visibility recall 0.3000
+30-day gate on fresh candidates: precision 1.0000 recall 0.9920 — unchanged
+```
+
+That half-visibility 0.3000 is the number SPEC's N39 already carried, now
+produced by a harness measuring the set §9.6 defines rather than agreeing with
+it by coincidence.
+
 ## Week 3 (once partners are on board)
 
 - [ ] Collect Playwright JSON reporter exports from >= 2 partners, >= 500 test results
@@ -370,7 +425,7 @@ At the worst end of the range, 5.9ms against §7.6's 1s budget. There is no perf
 | `resolve.go` | §9.3 steps 1-4 |
 | `dynamic_title.go` | N35 fix — dynamic-value normalisation for template grouping |
 | `visibility.go` | N39/N40 — accuracy vs how much of a run the resolver can see |
-| `synth.go` | §9.6 item 2 — five-mutation rename corpus |
+| `synth.go` | §9.6 item 2 — five-mutation rename corpus; `SpecRenameSetSize` pins the rename set (N56) |
 | `eval.go` | Precision/recall measurement |
 | `diag.go` | Diagnosis when auto-match does not fire |
 | `playwright.go` | JSON reporter loader, schema verified against real output |

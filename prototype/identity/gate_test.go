@@ -50,7 +50,7 @@ func TestRecencyGateCostsNothingOnFreshData(t *testing.T) {
 	run := func(cfg Config) Result {
 		rng := rand.New(rand.NewSource(42))
 		suite := BaseSuite(500, rng)
-		cases := BuildRenameCases(suite, 40, rng)
+		cases := BuildRenameCases(suite, SpecRenameSetSize, rng)
 		return Evaluate(cfg, suite, cases, "", time.Now())
 	}
 	off := run(DefaultConfig())

@@ -19,6 +19,16 @@ const (
 
 var AllMutations = []MutationKind{MutateLeafTitle, MutateDescribe, MutateMoveFile, MutateBoth, MutateAddParam}
 
+// SpecRenameSetSize is the rename-set size SPEC §9.6 item 2 fixes: 50 tests, each
+// put through all five mutations, so 250 trials.
+//
+// Any harness reporting recall as a §9.6 number must use it. A harness that
+// quietly picks another count reports against a different denominator: at 40 the
+// full-visibility recall is 0.9950 (199/200), at 50 it is 0.9920 (248/250). That
+// is where the 0.9950 removed from SPEC in N51 was still being generated, long
+// after every copy of it had been swept out of the document — see N56.
+const SpecRenameSetSize = 50
+
 // RenameCase is one trial: the identity before and after the change, plus ground truth.
 type RenameCase struct {
 	StableID string

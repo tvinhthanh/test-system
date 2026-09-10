@@ -59,7 +59,7 @@ Ba đường còn lại, phải chọn một và ghi vào `06-gate0-decision-rec
 - [ ] Chuẩn bị `03-pain-ranking-cards.md` và `08-email-gui-sep.md` trước buổi đầu tiên
 - [ ] Quyết một trong ba đường ở trên, ghi vào biên bản Gate-0
 
-> Tuần 3 theo §5.8 còn có mục *"prototype identity chạy trên ≥ 500 test result thật"*. Prototype đã xong, test pass (`prototype/identity/` — precision 1,0000 · recall 0,9950) nhưng vẫn trên corpus tổng hợp. Mục này **bị chặn vì chưa có partner**, không phải vì code.
+> Tuần 3 theo §5.8 còn có mục *"prototype identity chạy trên ≥ 500 test result thật"*. Prototype đã xong, test pass (`prototype/identity/` — precision 1,0000 · recall 0,9920, trích §9.6) nhưng vẫn trên corpus tổng hợp. Mục này **bị chặn vì chưa có partner**, không phải vì code.
 
 ## Các file
 

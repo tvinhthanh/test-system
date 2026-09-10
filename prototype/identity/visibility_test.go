@@ -19,7 +19,7 @@ import (
 //  2. Recall DOES collapse, and that is why fuzzy resolution has to be deferred
 //     to run completion rather than run inline with ingest (§7.6).
 func TestPartialVisibilityIsSafeButUseless(t *testing.T) {
-	results := VisibilitySweep(500, 40, 42, "")
+	results := VisibilitySweep(500, SpecRenameSetSize, 42, "")
 
 	var full, half VisibilityResult
 	for _, r := range results {
@@ -56,7 +56,7 @@ func TestPartialVisibilityIsSafeButUseless(t *testing.T) {
 func TestDeferredResolutionRecoversRecall(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
 	suite := BaseSuite(500, rng)
-	cases := BuildRenameCases(suite, 40, rng)
+	cases := BuildRenameCases(suite, SpecRenameSetSize, rng)
 
 	inline := EvaluateWithVisibility(DefaultConfig(), suite, cases, 0.5, "", timeRef(), rand.New(rand.NewSource(8)))
 	deferred := EvaluateWithVisibility(DefaultConfig(), suite, cases, 1.0, "", timeRef(), rand.New(rand.NewSource(8)))
