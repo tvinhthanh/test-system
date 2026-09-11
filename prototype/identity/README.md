@@ -404,6 +404,48 @@ That half-visibility 0.3000 is the number SPEC's N39 already carried, now
 produced by a harness measuring the set §9.6 defines rather than agreeing with
 it by coincidence.
 
+## N59: `-diag` was still running the harness bug N32 retracted
+
+First time the project owner ran `go run ./cmd/protoident -diag`, 2026-09-11,
+the screen showed two results that cannot both be true:
+
+```
+Auto-matched          : 248  (correct 248, WRONG 0)
+Sent to Review Queue  : 2
+...
+  score >= 0.85 (auto-match eligible) : 248
+     of which gap < 0.10, blocked     : 215   <-- HERE
+```
+
+215 gap-blocked cases would be 215 cases in the Review Queue. There were 2.
+
+`Diagnose` built its candidates without ever setting `PresentInRun`, leaving
+every candidate at the zero value — absent. That is the N32/N33 harness bug
+verbatim: a world where all 500 tests vanished at once. `Evaluate` was fixed on
+2026-08-26 to model only the renamed test as absent. `Diagnose` was not, and
+the two printed one under the other for sixteen days.
+
+What made it worse than a wrong number: the tool pointed at the wrong fix. It
+attributed the two review cases to `MinGap`; they sit in the 0.60–0.85 score
+band, and no gap setting moves them.
+
+Fixed to model presence exactly as `Evaluate` does. After:
+
+```
+  score >= 0.85 (auto-match eligible) : 248
+     of which gap < 0.10, blocked     : 0   <-- HERE
+  0.60 <= score < 0.85 (review)       : 2
+Gap top-1 vs top-2:  p50=0.7036          (was 0.0274)
+```
+
+That gap jump is N34's mechanism showing itself. `diag_test.go` locks it both
+ways: `Diagnose`'s counts must reconcile with `Evaluate`'s on three seeds (the
+test fails on the old code with exactly 33 ≠ 248), and a second test rebuilds
+the no-presence world so the 215 stays reproducible rather than becoming lore.
+
+The lesson N32 taught was incomplete. Fixing one harness means fixing every
+harness that shares the assumption — `grep PresentInRun` takes five seconds.
+
 ## Week 3 (once partners are on board)
 
 - [ ] Collect Playwright JSON reporter exports from >= 2 partners, >= 500 test results
@@ -427,7 +469,7 @@ it by coincidence.
 | `visibility.go` | N39/N40 — accuracy vs how much of a run the resolver can see |
 | `synth.go` | §9.6 item 2 — five-mutation rename corpus; `SpecRenameSetSize` pins the rename set (N56) |
 | `eval.go` | Precision/recall measurement |
-| `diag.go` | Diagnosis when auto-match does not fire |
+| `diag.go` | Diagnosis when auto-match does not fire — models presence like `Evaluate` (N59) |
 | `playwright.go` | JSON reporter loader, schema verified against real output |
 | `testdata/` | Three real Playwright fixtures: before/after rename+move, plus a retries+flaky+timeout run |
 | `fingerprint_test.go` | Separator and normalisation invariants |
@@ -441,6 +483,7 @@ it by coincidence.
 | `bench_test.go` + `scale_sweep.go` | N47/N48 — latency budget and candidate-filter scaling |
 | `age_sweep.go` | N45 — how candidate staleness moves the decision |
 | `store_helper.go` | Shared corpus builder for the sweeps and benchmarks |
+| `diag_test.go` | N59 — `Diagnose` must reconcile with `Evaluate`; the old 215 stays reproducible |
 | `hotpath_test.go` | Share of events the exact-match path absorbs |
 | `retries_test.go` | N41 — status mapping across both levels, on a real retry run |
 | `regression_test.go` | Demonstrates the timeout-losing bug the fix removed |

@@ -31,8 +31,28 @@ func Diagnose(cfg Config, suite []Identity, cases []RenameCase, repoRoot string,
 	}
 	r := &Resolver{Aliases: aliases, Candidates: cands, RepoRoot: repoRoot, Config: cfg}
 
+	// Index candidates by stableID so PresentInRun can be toggled per case,
+	// exactly as Evaluate does. This function used to leave PresentInRun at its
+	// zero value for every candidate — the N32/N33 harness bug, fixed in
+	// Evaluate on 2026-08-26 and never carried over here. A diagnosis of a
+	// world where all 500 tests vanished at once explains nothing about the
+	// world Evaluate measures, and the two printed side by side did not agree
+	// (N59).
+	idxByID := make(map[string]int, len(cands))
+	for i, c := range cands {
+		idxByID[c.StableID] = i
+	}
+
 	d := Diagnosis{Total: len(cases)}
 	for _, c := range cases {
+		// Model reality: only the renamed test is absent from this run.
+		for i := range r.Candidates {
+			r.Candidates[i].PresentInRun = true
+		}
+		if i, ok := idxByID[c.StableID]; ok {
+			r.Candidates[i].PresentInRun = false
+		}
+
 		got := r.Resolve(c.After, now)
 		if got.Decision == DecisionExactMatch {
 			d.ScoreAboveAuto++

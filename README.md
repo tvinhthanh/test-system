@@ -8,7 +8,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.13** — 10 ADR đã chốt, ba plane đã đặc tả, 58 phát hiện N đã xử lý |
+| Spec | **v3.14** — 10 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
 | Phase 0 | 26-08-2026 → Gate-0 **06-10-2026**. Hết tuần 2/6; mốc 01-09 và 08-09 đã trượt |
 | Code sản phẩm | **Chưa có.** SPEC §5.7 cấm trong Phase 0 |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
@@ -23,7 +23,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 | Tài liệu gửi ra ngoài | [`docs/external/`](docs/external/) — chạy `verify.sh` trước khi gửi |
 | Học Go qua chính codebase này | [`docs/go/README.md`](docs/go/README.md) |
 
-`SPEC.md` dài, nhưng §0.2 (nhật ký 58 phát hiện) và §4.10 (bức tranh tổng) là hai chỗ vào nhanh nhất.
+`SPEC.md` dài, nhưng §0.2 (nhật ký 59 phát hiện) và §4.10 (bức tranh tổng) là hai chỗ vào nhanh nhất.
 
 ## Chạy thử
 
