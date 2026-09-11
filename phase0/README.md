@@ -81,7 +81,7 @@ Rồi ngày **15-09**, tuần 1 bắt đầu:
 
 ## Bốn điều bị cấm (SPEC §5.7)
 
-1. Viết code sản phẩm "tranh thủ" — ngoại lệ duy nhất: prototype test identity tuần 3.
+1. ~~Viết code sản phẩm "tranh thủ"~~ — **QĐ-11 (11-09) lật luật này có điều kiện:** `backend/` chỉ được đụng vào trong ngày **đã gửi outreach và đã ghi tracker**. Cột `Code?` trong `07-outreach-messages.md`. Chưa gửi → chưa code, không ngoại lệ.
 2. Demo mockup rồi hỏi "anh/chị có dùng không" và tính câu trả lời "có" là validation.
 3. Tính bạn bè nể nang vào 3 design partner — phải qua screener như mọi người.
 4. Sửa hoặc bỏ câu B1–B7 giữa chừng. Được phép **thêm** câu, không được đổi.

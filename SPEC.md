@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.15 · **Ngày:** 11-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 59 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50) và một vòng soát harness ↔ tài liệu (N56–N59)
+> **Phiên bản:** v3.16 · **Ngày:** 11-09-2026 · **Trạng thái:** 11 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`); ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 59 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50) và một vòng soát harness ↔ tài liệu (N56–N59)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -92,7 +92,7 @@ QĐ-7 → QĐ-10 đã được **chủ dự án duyệt ngày 25-08-2026**. QĐ-
 |---|---|---|
 | **Tên người giữ quyền kill gate** | **Trước ngày bắt đầu Phase 0** | §1.6 |
 | **Ngày bắt đầu Phase 0** | Trước khi dùng mốc tuần 1–6 | §4.3, §5.6 |
-| **P1-min hay P1-full** | **Không cần chặn Phase 0**; phải chốt tại Gate-0 trước khi build | §4.3, §4.4 |
+| ~~P1-min hay P1-full~~ | **Đã chốt P1-min** (QĐ-11, 11-09-2026). Còn mở: có lên P1-full không — chỉ xét sau Gate-0 PASS | §1.11, §4.4 |
 
 > Không cần trì hoãn phỏng vấn Phase 0 chỉ vì chưa chọn P1-min/P1-full. Mục tiêu của Phase 0 chính là tạo dữ liệu để quyết định phạm vi build có đáng đầu tư hay không.
 
@@ -283,7 +283,29 @@ Async             Queue (nhiều logical queue, §6.7.4)
 
 **Điều kiện xét lại:** đúng điều kiện mở lại của QĐ-5, kèm một ADR riêng viết lại §10.
 
-### 1.11 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
+### 1.11 QĐ-11 — Xây P1-min song song Phase 0 ✅ CHỐT *(chủ dự án quyết 11-09-2026)*
+
+**Quyết định:** lật §5.7 mục 1 và điều kiện vào của §6.9. P1-min (§4.4) khởi công ngay, chạy **song song** với Phase 0 khởi động lại 15-09 (§5.8). Phạm vi chốt là **P1-min** — §13 mục 6 chốt sớm; mở rộng lên P1-full chỉ được xét **sau** Gate-0 PASS, không trước.
+
+**Lý do:** chủ dự án muốn xây hệ thống. Giữ một SPEC nói "hỏi trước, xây sau" trong khi thực tế xây trước là giữ một kế hoạch không ai theo — tệ hơn là đổi kế hoạch cho thật. §5.7 được viết vì "xây dễ chịu hơn hỏi người lạ"; 17 ngày đầu chứng minh đúng điều đó (prototype xong sớm 2 tuần, outreach 0). Quyết định này **không** phủ nhận lý do đó — nó chấp nhận rủi ro có tên và đặt điều kiện ràng buộc.
+
+**Rủi ro nhận, ghi rõ để không ai ngạc nhiên:**
+
+1. **Code lấn outreach lần nữa.** Đã xảy ra một lần. Điều kiện 1 dưới đây tồn tại vì thế.
+2. **Xây thứ không ai trả tiền.** Gate-0 vẫn là cổng kinh doanh với đủ 6 điều §4.5. Code không phải bằng chứng.
+3. **Sunk cost làm mềm tay tại Gate-0.** Người ký QĐ-6 sẽ đứng trước một codebase đã tốn công và một bảng dữ liệu có thể nói KILL.
+
+**Điều kiện ràng buộc — đây là luật, không phải gợi ý:**
+
+1. **Ngày nào không gửi outreach thì ngày đó không code.** Bảng theo dõi hằng ngày trong `phase0/07-outreach-messages.md` có cột `Code?` — điền sau khi điền cột `Contact gửi`, không điền trước. **Tuần 0 (12→14-09), khi chưa thể gửi:** đơn vị thay thế là **≥ 8 tên thêm vào tracker trong ngày** (30 tên / 4 ngày). **Ngày 11-09 là ngoại lệ duy nhất, ghi nhận ở đây:** khung `backend/` và test kiến trúc dựng cùng ngày quyết định với 0 tên — vì không có test kiến trúc thì điều kiện 4 không thi hành được. Từ 12-09 không có ngoại lệ.
+2. **Gate-0 giữ nguyên.** Sáu điều kiện §4.5, quyền kill QĐ-6, ngày 26-10. Tại Gate-0, code đã viết **không được nhắc tới** như lý lẽ. Nếu KILL, `backend/` là bài học Go, không phải sản phẩm — và điều đó phải được nói thành lời trước khi viết dòng đầu.
+3. **Ba thứ §4.4 cấm cắt vẫn cấm cắt:** test identity + resolver, artifact cap phía server, tenant isolation + test cross-tenant.
+4. **§6.9.3 và §6.9.7 cưỡng chế từ commit đầu.** Test kiến trúc (`backend/test/arch/`) phải tồn tại và chạy **trước** khi có module domain thứ hai. Luật không có test sẽ trôi trong một quý — §6.9.12 mục 5.
+5. **Code không dùng làm mockup validation.** §5.7 mục 2 vẫn nguyên hiệu lực: không demo cho người phỏng vấn rồi tính "có" là bằng chứng. Người phỏng vấn không biết `backend/` tồn tại.
+
+**Hệ quả tới văn bản:** §5.7 mục 1, §6.9 câu mở đầu, §13 mục 6, §0.3, `phase0/README.md` mục cấm #1, `README.md` luật #2 — tất cả trỏ về đây.
+
+### 1.12 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
 
 | **Câu hỏi** | **Quyết định** | **Ghi chú** |
 | ------------------------------------ | ------------------------ | ------------------------------------------------------- |
@@ -756,7 +778,7 @@ Dùng **cả hai** phương pháp cho mỗi partner:
 
 ### 5.7 Anti-pattern bị cấm
 
-- Viết code sản phẩm "tranh thủ" — ngoại lệ duy nhất: prototype identity tuần 3–4.
+- ~~Viết code sản phẩm "tranh thủ"~~ — **lật bởi QĐ-11 ngày 11-09-2026:** P1-min xây song song, với điều kiện *ngày nào không gửi outreach thì ngày đó không code*. Lý do luật này từng tồn tại vẫn đúng; đọc QĐ-11 trước khi viện dẫn nó.
 - Demo mockup rồi hỏi "anh/chị có dùng không" và tính câu trả lời "có" là validation.
 - Tính bạn bè nể nang vào 3 design partner — partner phải qua screener §5.2 như mọi người.
 - Đổi câu hỏi phỏng vấn giữa chừng khiến 15 mẫu không so được với nhau. Được phép **thêm** câu, không được sửa/bỏ câu B1–B7.
@@ -1181,9 +1203,9 @@ Không import được thì chi phí chuyển đổi quá cao, P2 vô nghĩa. Nh
 - Manual execution **không** tạo `Run`. Nó là `ManualExecution`, có thể gom vào một `TestPlan` — trộn vào `Run` sẽ làm bẩn mọi metric flaky và TTRC vốn giả định execution là tự động.
 - Release gate **đọc** từ Intelligence Plane, không tự tính lại flaky hay TTRC.
 
-### 6.9 Bố cục module của monolith — thi hành SAU Gate-0
+### 6.9 Bố cục module của monolith — thi hành từ 11-09-2026 theo QĐ-11
 
-> **Chưa build.** §5.7 cấm code sản phẩm trong Phase 0; mục này là **thiết kế**, không phải lệnh khởi công. Điều kiện vào: Gate-0 PASS **và** đã chốt P1-min hay P1-full (§13 mục 6) — vì hai scope cho ra hai tập module khác nhau (§6.9.11).
+> **Đang build ở `backend/` theo cột P1-min của §6.9.11.** Điều kiện vào ban đầu là Gate-0 PASS và đã chốt scope; QĐ-11 (11-09-2026) lật vế đầu và chốt vế sau là **P1-min**. Gate-0 vẫn là cổng kinh doanh — KILL thì `backend/` là bài học, không phải sản phẩm.
 >
 > Lý do mục này tồn tại: QĐ-9 chốt "Go monolith" nhưng không nói monolith đó **có hình gì bên trong**. Monolith không có ranh giới cưỡng chế được thì sau 12 tháng thành big ball of mud, và lúc đó §6.7.8 có cho phép tách microservice cũng không tách nổi — vì không tìm ra đường cắt.
 
@@ -2273,7 +2295,7 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 | 3 | ~~Viết lại + sinh bản đối ngoại~~ → **xong**: `docs/external/` có nguồn Markdown, `build.mjs` sinh `.docx`, `verify.sh` gác checklist §4.7 (11/11 pass). `.pptx` chưa làm — có lý do ghi ở README | Doc owner | ✅ |
 | 4 | Bỏ mọi claim competitor chưa có bằng chứng; benchmark Currents/Azure/ReportPortal | Product/tech | Trong P0; trước public comparison |
 | 5 | Có đủ 3 design partner **chậm nhất cuối tuần 4** để đủ baseline | Product | Tuần 4 |
-| 6 | Chọn **P1-min hoặc P1-full** dựa trên Gate-0 + số FTE/budget | Kill-gate owner | Tại Gate-0, trước build |
+| 6 | ~~Chọn P1-min hoặc P1-full~~ → **chốt P1-min 11-09-2026** theo QĐ-11, khởi công song song Phase 0. P1-full chỉ xét sau Gate-0 PASS | Kill-gate owner | ✅ |
 | 7 | Chạy shadow pricing meter; chưa charge theo `stableTestId` | Product/engineering | P1 → trước Gate-1.5 |
 | 8 | **Khóa model LLM cùng lúc với giá** — benchmark hypothesis trên vài model; model hạng Opus đẩy biến phí $9–10 → ~$24/team và phá sàn giá $49 (QĐ-9, §10.3) | Product/engineering | P1.5, trước Gate-1.5 |
 

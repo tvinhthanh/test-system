@@ -122,16 +122,29 @@ Không đạt mà họ vẫn muốn nói chuyện thì vẫn nghe — nhưng ghi
 
 ---
 
+## Theo dõi tuần 0 — lập danh sách, chưa gửi
+
+Chưa gửi được thì đơn vị công việc là **tên thêm vào tracker**. QĐ-11 điều kiện 1 áp theo đó: ≥ 8 tên trong ngày → được code, ghi ✅; ít hơn → ✗.
+
+| Ngày | Tên thêm vào tracker | Cộng dồn / 30 | Code? | Ghi chú |
+|---|---|---|---|---|
+| T6 11-09 | 0 | 0 | ✅ *(ngoại lệ ghi ở QĐ-11: dựng khung + test kiến trúc cùng ngày quyết định)* | Ngày quyết định |
+| T7 12-09 | | | | |
+| CN 13-09 | | | | |
+| T2 14-09 | | | | **Chốt: đủ 30 tên chưa? Chưa → 15-09 không phải ngày bắt đầu** |
+
 ## Theo dõi hằng ngày trong tuần 1
 
-| Ngày | Contact gửi | Phản hồi | Booking | Ghi chú |
-|---|---|---|---|---|
-| T3 15-09 | | | | **Ngày bắt đầu — gửi đợt 1, ghi tracker ngay** |
-| T4 16-09 | | | | |
-| T5 17-09 | | | | |
-| T6 18-09 | | | | |
-| T7 19-09 | | | | *(không gửi cuối tuần)* |
-| CN 20-09 | | | | *(không gửi cuối tuần)* |
-| T2 21-09 | | | | **Chốt: đủ 3 booking chưa?** |
+| Ngày | Contact gửi | Phản hồi | Booking | Code? | Ghi chú |
+|---|---|---|---|---|---|
+| T3 15-09 | | | | | **Ngày bắt đầu — gửi đợt 1, ghi tracker ngay** |
+| T4 16-09 | | | | | |
+| T5 17-09 | | | | | |
+| T6 18-09 | | | | | |
+| T7 19-09 | | | | — | *(không gửi cuối tuần — không code)* |
+| CN 20-09 | | | | — | *(không gửi cuối tuần — không code)* |
+| T2 21-09 | | | | | **Chốt: đủ 3 booking chưa?** |
+
+**Cột `Code?` — QĐ-11 điều kiện 1.** Điền **sau** khi điền cột `Contact gửi`, không điền trước. Ngày có contact gửi > 0 → được code `backend/`, ghi ✅. Ngày 0 contact → không code, ghi ✗ — và nếu vẫn code thì ghi ✗ rồi ghi thêm là đã vi phạm, vì bảng này là đầu vào Gate-0 và bảng nói dối thì Gate-0 vô nghĩa. Cuối tuần không gửi thì cũng không code: luật là "đã gửi hôm nay", không phải "đã gửi tuần này".
 
 **Nếu cuối 21-09 chưa đủ 3 booking:** không gửi thêm vào kênh cũ. Đổi kênh — và ghi lại kênh nào đã thử với tỉ lệ bao nhiêu, vì đó là dữ liệu cho Gate-0 dù kết quả có ra sao.

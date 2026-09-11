@@ -8,9 +8,9 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.15** — 10 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
+| Spec | **v3.16** — 11 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
 | Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
-| Code sản phẩm | **Chưa có.** SPEC §5.7 cấm trong Phase 0 |
+| Code sản phẩm | **Đang xây P1-min ở `backend/`** theo QĐ-11 (11-09) — song song Phase 0, có điều kiện. `cmd/api` chạy, `/healthz`, test kiến trúc §6.9.3 |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
 
 ## Đọc từ đâu
@@ -28,11 +28,16 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 ## Chạy thử
 
 ```bash
-# Prototype test identity — code duy nhất SPEC §5.7 cho phép ở Phase 0
+# Prototype test identity — bằng chứng §9.6, giữ nguyên
 cd prototype/identity
 go test ./...                    # mọi phát hiện đều có test khóa
 go run ./cmd/protoident          # phép đo §9.6
 go run ./cmd/protoident -visibility   # N39/N40: độ chính xác theo tầm nhìn run
+
+# Backend P1-min — QĐ-11, xây song song Phase 0
+cd backend
+go run ./cmd/api                 # :8080, curl localhost:8080/healthz
+go test ./...                    # gồm test kiến trúc §6.9.3
 
 # Tài liệu đối ngoại — exit code là cổng, chạy trước khi gửi cho ai
 cd docs/external
@@ -43,7 +48,7 @@ npm install && npm run build
 ## Bốn luật của repo này
 
 1. **`SPEC.md` là nguồn sự thật duy nhất.** Mọi thứ trong `docs/` là lịch sử. Tài liệu nào nói khác SPEC → tài liệu đó sai.
-2. **Không viết code sản phẩm trong Phase 0** (§5.7). Ngoại lệ duy nhất: `prototype/identity`.
+2. **Code sản phẩm ở `backend/` chỉ được viết trong ngày đã gửi outreach** (QĐ-11, lật §5.7 ngày 11-09). Gate-0 26-10 vẫn là cổng: KILL thì `backend/` là bài học, không phải sản phẩm.
 3. **Không điền dữ liệu Phase 0 bằng phỏng đoán.** Ghi chú phỏng vấn, tracker outreach và sổ baseline TTRC phải đến từ người thật — điền hộ là chế ra đúng thứ bằng chứng mà Gate-0 tồn tại để cân.
 4. **Ba file trong `docs/v3.0/` bị cấm gửi ra ngoài** cho tới khi regenerate theo §4.7 (§0.4). Chúng vẫn còn pitch agent-first, trái QĐ-1.
 
@@ -52,6 +57,7 @@ npm install && npm run build
 ```text
 SPEC.md              nguồn sự thật — quyết định, kiến trúc, schema, thuật toán, gate
 phase0/              bộ công cụ thi hành: outreach, phỏng vấn, baseline TTRC, biên bản Gate-0
+backend/             Go monolith P1-min theo §6.9 — QĐ-11; test kiến trúc cưỡng chế §6.9.3
 prototype/identity/  Go — thuật toán test identity §9, có loader Playwright thật
 docs/external/       bản đối ngoại + pipeline sinh .docx + verify.sh gác checklist §4.7
 docs/go/             hướng dẫn học Go qua codebase này
