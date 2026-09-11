@@ -1,6 +1,6 @@
 # Phase 0 — Bộ công cụ thi hành
 
-> Bắt đầu **26-08-2026** · Gate-0 **06-10-2026** · Người giữ quyền kill gate: `tvinhthanhsg@gmail.com`
+> Bắt đầu **15-09-2026** (chốt lại ngày 11-09; lần chốt 26-08 không diễn ra) · Gate-0 **26-10-2026** · Người giữ quyền kill gate: `tvinhthanhsg@gmail.com`
 > Kế hoạch: `SPEC.md` §5 (playbook) và §5.8 (lịch ngày thật). File ở đây là công cụ, không phải kế hoạch.
 
 ## Mục tiêu duy nhất của 6 tuần này
@@ -16,9 +16,9 @@ Chứng minh **hoặc bác bỏ** ba giả thuyết bằng dữ liệu. Không v
 **Bác bỏ cũng là kết quả tốt.** Biết sớm rẻ hơn nhiều so với build 6 tháng rồi mới biết.
 
 
-## Tình trạng — cập nhật 08-09-2026 (T3, ngày 14/42, hết tuần 2)
+## Tình trạng — cập nhật 11-09-2026 (tuần 0, còn 4 ngày tới ngày bắt đầu)
 
-> Số dưới đây **không đổi kể từ 30-08**. Không điền hộ: dữ liệu Phase 0 phải đến từ người thật. Điền hộ là chế ra đúng thứ bằng chứng mà Gate-0 tồn tại để cân (§5.7).
+> Không điền hộ: dữ liệu Phase 0 phải đến từ người thật. Điền hộ là chế ra đúng thứ bằng chứng mà Gate-0 tồn tại để cân (§5.7).
 
 | | |
 |---|---|
@@ -26,40 +26,36 @@ Chứng minh **hoặc bác bỏ** ba giả thuyết bằng dữ liệu. Không v
 | Ghi chú phỏng vấn trong `02-interview-notes/` | **0 / 15** |
 | Partner đã ký | **0 / 3** |
 | Baseline tiến cứu đang chạy | **0 / 3** |
-| Còn tới hạn chót partner #3 (22-09) | **14 ngày** |
-| Còn tới Gate-0 (06-10) | **28 ngày** |
+| Còn tới ngày bắt đầu (15-09) | **4 ngày** |
+| Còn tới hạn chót partner #3 (12-10) | **31 ngày** |
+| Còn tới Gate-0 (26-10) | **45 ngày** |
 
-### Hai mốc đã trượt
+### Vì sao chốt lại ngày
 
-| Mốc | Yêu cầu | Thực tế | §5.6 nói phải làm gì |
-|---|---|---|---|
-| **01-09** hết tuần 1 | ≥ 3 booking | 0 | **Đổi kênh ngay.** Và ghi lại kênh cũ đã thử với tỉ lệ bao nhiêu — bảng đó là đầu vào Gate-0 dù kết quả ra sao |
-| **08-09** hết tuần 2 | 5 phỏng vấn · partner #1 ký · baseline #1 chạy | 0 · chưa · chưa | Không ai chịu ký dù pain cao → dữ liệu H1 âm. Nhưng chưa gửi outreach thì **chưa có dữ liệu gì cả**, kể cả âm |
+Lần chốt đầu ghi bắt đầu 26-08. Đến 11-09 — ngày 17/42 — mọi ô trên vẫn bằng 0. Hai mốc 01-09 và 08-09 trượt không phải vì kết quả xấu mà vì **chưa gửi gì để có kết quả**. Trong ba đường README này từng liệt kê, chủ dự án chọn **đường C ngày 11-09**: thừa nhận Phase 0 chưa khởi động, chốt lại ngày, viết lại §5.8. Ghi ở `06-gate0-decision-record.md`.
 
-### Số học còn lại — đọc kỹ trước khi quyết gia hạn
+**Đây không dùng quyền gia hạn một lần** của §5.6 — gia hạn là kéo dài một Phase 0 đang chạy, còn đây là ghi nhận nó chưa chạy. Quyền đó vẫn còn nguyên, và vẫn chỉ có một.
 
-Gate-0 điều kiện #3 cần baseline tiến cứu **đủ 14 ngày cho cả 3 partner**. Ngày ký muộn nhất còn hợp lệ là **22-09** (22-09 → 05-10, vừa kịp 06-10). Từ hôm nay còn **14 ngày** để đi từ 0 contact tới 3 partner đã ký.
+### Điều kiện để 15-09 thật sự là ngày bắt đầu
 
-Phễu theo §5.2 là 30 contact → 15 phỏng vấn → 3 partner. Nén phễu đó vào 14 ngày là việc rất nặng, và **không được nén bằng cách bỏ screener** — §5.7 cấm tường minh, mà partner không qua screener thì baseline của họ không dùng được cho H2.
+Ngày bắt đầu chỉ có hiệu lực khi **đợt outreach đầu tiên đã gửi và đã ghi vào tracker trong ngày 15-09**. Hết 15-09 mà tracker vẫn 0 → chưa bắt đầu, không đếm ngày, và **không chốt lần ba** trước khi trả lời được câu hỏi vì sao lần hai cũng không gửi. Lịch mà không có hành động thì chỉ là một cách khác để trì hoãn.
 
-Ba đường còn lại, phải chọn một và ghi vào `06-gate0-decision-record.md`:
+## Việc phải làm ngay (tuần 0: 11-09 → 14-09)
 
-1. **Chạy nước rút 14 ngày** — dồn vào kênh 3 (cựu đồng nghiệp) và kênh 5 (giới thiệu) vì tỉ lệ nhận lời cao nhất; chấp nhận số phỏng vấn < 15 và ghi rõ điều đó ở Gate-0.
-2. **Gia hạn một lần** — §5.6 cho phép đúng một lần, phải do `tvinhthanhsg@gmail.com` ký và ghi lý do vào biên bản. Lần thứ hai không được phép.
-3. **Thừa nhận Phase 0 chưa khởi động thật** — dời ngày bắt đầu, viết lại §5.8 theo ngày mới. Trung thực hơn là giữ một lịch mà mọi mốc đều đã trượt.
+Tuần 0 chỉ có **một** việc, và nó không cần ai trả lời:
 
-Điều **không** được làm: để lịch trôi tới 06-10 rồi họp Gate-0 với bảng trống. Gate-0 không có dữ liệu thì không phải PASS cũng không phải KILL — nó là chưa họp.
+- [ ] Lập danh sách **≥ 30 contact** vào `01-outreach-tracker.md` — tên, công ty, vai trò, kênh. Nguồn: LinkedIn, danh bạ cựu đồng nghiệp, học viên cũ, nhóm Testing VN
+- [ ] Với mỗi contact ở kênh LinkedIn (kênh 2), ghi sẵn **một chi tiết cụ thể về họ** — `07-outreach-messages.md` cấm gửi khuôn mẫu; không có chi tiết thì bỏ contact đó
+- [ ] Chọn trước tin nhắn theo kênh cho từng người trong `07-outreach-messages.md`
 
-## Việc phải làm ngay (tuần 3: 09-09 → 15-09)
+Rồi ngày **15-09**, tuần 1 bắt đầu:
 
-- [ ] Lập danh sách **≥ 30 contact** vào `01-outreach-tracker.md` — việc này không cần ai trả lời, làm được ngay hôm nay
-- [ ] Chọn tin nhắn theo kênh trong `07-outreach-messages.md`; ưu tiên **kênh 3** và **kênh 5** vì chỉ còn 14 ngày
-- [ ] Gửi outreach đợt 1 và **ghi ngay vào tracker** — kể cả khi chưa ai trả lời, tỉ lệ theo kênh là dữ liệu Gate-0
-- [ ] Chạy phỏng vấn đầu tiên, ghi vào `02-interview-notes/`
+- [ ] Gửi đợt 1 và **ghi ngay vào tracker** — kể cả khi chưa ai trả lời, tỉ lệ theo kênh là dữ liệu Gate-0
+- [ ] Chạy phỏng vấn đầu tiên khi có booking, ghi vào `02-interview-notes/`
 - [ ] Chuẩn bị `03-pain-ranking-cards.md` và `08-email-gui-sep.md` trước buổi đầu tiên
-- [ ] Quyết một trong ba đường ở trên, ghi vào biên bản Gate-0
+- [ ] **21-09:** đủ 3 booking chưa? Chưa → đổi kênh, ghi lại kênh cũ với tỉ lệ
 
-> Tuần 3 theo §5.8 còn có mục *"prototype identity chạy trên ≥ 500 test result thật"*. Prototype đã xong, test pass (`prototype/identity/` — precision 1,0000 · recall 0,9920, trích §9.6) nhưng vẫn trên corpus tổng hợp. Mục này **bị chặn vì chưa có partner**, không phải vì code.
+> Mục *"prototype identity chạy trên ≥ 500 test result thật"* ở tuần 3 (§5.8): prototype đã xong, 40 test pass (`prototype/identity/` — precision 1,0000 · recall 0,9920, trích §9.6) nhưng vẫn trên corpus tổng hợp. Mục này **bị chặn vì chưa có partner**, không phải vì code.
 
 ## Các file
 
@@ -71,16 +67,17 @@ Ba đường còn lại, phải chọn một và ghi vào `06-gate0-decision-rec
 | `03-pain-ranking-cards.md` | Mang theo mỗi buổi — câu B7 |
 | `04-design-partner-email.md` | Khi mời partner (câu D1) |
 | `05-baseline-ttrc-log.md` | Ngay khi partner ký. **Cần 14 ngày liên tục** |
-| `06-gate0-decision-record.md` | Ngày 06-10-2026 |
+| `06-gate0-decision-record.md` | Ngày 26-10-2026 — và đã có mục "quyết định trước Gate-0" ghi ngày 11-09 |
 | `08-email-gui-sep.md` | Mang theo mỗi buổi — câu D3. Deliverable §2.5, dùng để **đo** H3 chứ không phải để bán |
 
-## Ba mốc không thương lượng
+## Bốn mốc không thương lượng
 
 | Ngày | Việc | Nếu trễ |
 |---|---|---|
-| **01-09** | ≥ 3 booking | Đổi kênh outreach |
-| **22-09** | Partner #3 phải ký | Baseline không đủ 14 ngày → Gate-0 **toán học không thể pass** |
-| **06-10** | Họp Gate-0 | Thi hành QĐ-6 |
+| **15-09** | Đợt outreach đầu đã gửi, đã ghi tracker | Ngày bắt đầu chưa xảy ra — không đếm ngày |
+| **21-09** | ≥ 3 booking | Đổi kênh outreach |
+| **12-10** | Partner #3 phải ký | Baseline không đủ 14 ngày → Gate-0 **toán học không thể pass** |
+| **26-10** | Họp Gate-0 | Thi hành QĐ-6 |
 
 ## Bốn điều bị cấm (SPEC §5.7)
 

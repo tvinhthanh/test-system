@@ -8,8 +8,8 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.14** — 10 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
-| Phase 0 | 26-08-2026 → Gate-0 **06-10-2026**. Hết tuần 2/6; mốc 01-09 và 08-09 đã trượt |
+| Spec | **v3.15** — 10 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
+| Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
 | Code sản phẩm | **Chưa có.** SPEC §5.7 cấm trong Phase 0 |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
 

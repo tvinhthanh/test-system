@@ -14,7 +14,7 @@ Nhanh, nhưng **có recall bias** — luôn gắn nhãn `retrospective`, không 
 
 Partner tự log mỗi failure họ điều tra. Nhắc qua Slack **2 lần/tuần** — không nhắc thì dữ liệu sẽ thủng.
 
-> ⚠️ **14 ngày là ràng buộc cứng.** Partner #3 ký muộn nhất 22-09 để baseline chạy 22-09 → 05-10, vừa kịp Gate-0 ngày 06-10.
+> ⚠️ **14 ngày là ràng buộc cứng.** Partner #3 ký muộn nhất 12-10 để baseline chạy 12-10 → 25-10, vừa kịp Gate-0 ngày 26-10.
 
 ---
 

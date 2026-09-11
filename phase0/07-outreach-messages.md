@@ -1,6 +1,6 @@
 # Tin nhắn outreach theo kênh
 
-> Mục tiêu tuần 1 (26-08 → 01-09): **≥ 30 contact, ≥ 3 booking.** Cuối 01-09 chưa đủ 3 → đổi kênh ngay, không đợi tuần 2 (§5.6).
+> Mục tiêu tuần 1 (15-09 → 21-09): **≥ 30 contact, ≥ 3 booking.** Cuối 21-09 chưa đủ 3 → đổi kênh ngay, không đợi tuần 2 (§5.6). Tuần 0 (11-09 → 14-09) lập xong danh sách 30 tên trước.
 > Ghi kết quả vào `01-outreach-tracker.md`.
 
 ## Ba nguyên tắc chi phối mọi tin nhắn dưới đây
@@ -126,12 +126,12 @@ Không đạt mà họ vẫn muốn nói chuyện thì vẫn nghe — nhưng ghi
 
 | Ngày | Contact gửi | Phản hồi | Booking | Ghi chú |
 |---|---|---|---|---|
-| T4 26-08 | | | | |
-| T5 27-08 | | | | |
-| T6 28-08 | | | | |
-| T7 29-08 | | | | |
-| CN 30-08 | | | | *(không gửi cuối tuần)* |
-| T2 31-08 | | | | |
-| T3 01-09 | | | | **Chốt: đủ 3 booking chưa?** |
+| T3 15-09 | | | | **Ngày bắt đầu — gửi đợt 1, ghi tracker ngay** |
+| T4 16-09 | | | | |
+| T5 17-09 | | | | |
+| T6 18-09 | | | | |
+| T7 19-09 | | | | *(không gửi cuối tuần)* |
+| CN 20-09 | | | | *(không gửi cuối tuần)* |
+| T2 21-09 | | | | **Chốt: đủ 3 booking chưa?** |
 
-**Nếu cuối 01-09 chưa đủ 3 booking:** không gửi thêm vào kênh cũ. Đổi kênh — và ghi lại kênh nào đã thử với tỉ lệ bao nhiêu, vì đó là dữ liệu cho Gate-0 dù kết quả có ra sao.
+**Nếu cuối 21-09 chưa đủ 3 booking:** không gửi thêm vào kênh cũ. Đổi kênh — và ghi lại kênh nào đã thử với tỉ lệ bao nhiêu, vì đó là dữ liệu cho Gate-0 dù kết quả có ra sao.

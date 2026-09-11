@@ -1,7 +1,31 @@
 # Biên bản Gate-0
 
-> **Họp ngày 06-10-2026.** Người có quyền tuyên bố: `tvinhthanhsg@gmail.com` (§1.6, ký 26-08-2026).
+> **Họp ngày 26-10-2026.** Người có quyền tuyên bố: `tvinhthanhsg@gmail.com` (§1.6, ký 26-08-2026).
 > Điền TRƯỚC buổi họp, không điền trong lúc họp. Số liệu phải lấy từ `01-outreach-tracker.md` và `05-baseline-ttrc-log.md`, không lấy từ trí nhớ.
+
+## Quyết định trước Gate-0 — ghi ngày 11-09-2026
+
+Lần chốt đầu ghi Phase 0 bắt đầu 26-08-2026, Gate-0 06-10-2026. Đến 11-09 (ngày 17/42): tracker 0/30, phỏng vấn 0/15, partner 0/3. Hai mốc 01-09 và 08-09 trượt vì chưa gửi outreach nào.
+
+`README.md` của thư mục này đặt ra ba đường. Người giữ quyền kill gate chọn:
+
+| Đường | Chọn? |
+|---|---|
+| A. Nước rút 11 ngày, giữ lịch cũ | ☐ |
+| B. Dùng quyền gia hạn một lần của §5.6 | ☐ |
+| **C. Thừa nhận Phase 0 chưa khởi động; chốt lại ngày bắt đầu** | **☑** |
+
+**Ngày bắt đầu mới: 15-09-2026. Gate-0 mới: 26-10-2026.** §5.8 và mọi file trong `phase0/` đã viết lại theo ngày này.
+
+**Vì sao C mà không phải B:** quyền gia hạn §5.6 là để kéo dài một Phase 0 *đang chạy* mà thiếu thời gian. Ở đây chưa có gì chạy — dùng quyền gia hạn duy nhất để che một lần chưa bắt đầu là tiêu mất lưới an toàn trước khi cần. Quyền đó **vẫn còn nguyên** sau quyết định này.
+
+**Điều kiện kèm theo:** ngày 15-09 chỉ có hiệu lực khi đợt outreach đầu đã gửi và đã ghi vào `01-outreach-tracker.md` trong ngày. Không có lần chốt thứ ba.
+
+| Vai trò | Tên | Quyết định | Ngày |
+|---|---|---|---|
+| Người giữ quyền kill gate | `tvinhthanhsg@gmail.com` | Đường C | 11-09-2026 |
+
+---
 
 ## Sáu điều kiện PASS — phải đủ CẢ SÁU (SPEC §4.5)
 

@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.14 · **Ngày:** 11-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — hết tuần 2/6, mốc 01-09 và 08-09 đã trượt, xem `phase0/README.md`**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 59 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50) và một vòng soát harness ↔ tài liệu (N56–N59)
+> **Phiên bản:** v3.15 · **Ngày:** 11-09-2026 · **Trạng thái:** 10 ADR đã chốt; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 59 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50) và một vòng soát harness ↔ tài liệu (N56–N59)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -673,7 +673,7 @@ GATE KỸ THUẬT             ·    T0 T1 T4          ·    T2-EX     ·      ·
 ## 5. Phase 0 Playbook
 
 > Mục tiêu: chứng minh hoặc bác bỏ 3 giả thuyết bằng dữ liệu, trong 6 tuần, **không viết code sản phẩm**.
-> **Đang chạy từ 26-08-2026.** Lịch ngày thật ở §5.8; bộ công cụ thi hành ở `phase0/`.
+> **Khởi động lại 15-09-2026.** Lần chốt 26-08 không diễn ra — xem §5.8. Lịch ngày thật ở §5.8; bộ công cụ thi hành ở `phase0/`.
 
 ### 5.1 Ba giả thuyết phải kiểm chứng
 
@@ -763,26 +763,31 @@ Dùng **cả hai** phương pháp cho mỗi partner:
 
 ---
 
-### 5.8 Lịch Phase 0 — ngày thật, đã khởi động
+### 5.8 Lịch Phase 0 — ngày thật, khởi động lại
 
-> **Phase 0 bắt đầu 26-08-2026.** Người giữ quyền kill gate: `tvinhthanhsg@gmail.com` (§1.6, ký 26-08-2026).
+> **Phase 0 bắt đầu 15-09-2026** — lần chốt thứ hai. Người giữ quyền kill gate: `tvinhthanhsg@gmail.com` (§1.6, ký 26-08-2026).
 > Mọi mốc dưới đây là **ngày cứng**, không phải ước lượng. Bộ công cụ thi hành nằm ở `phase0/`.
+
+**Lần chốt đầu không diễn ra.** Ngày 26-08-2026 từng được ghi là ngày bắt đầu, nhưng đến 11-09 — ngày 17/42 — tracker vẫn 0/30 contact, 0 phỏng vấn, 0 partner. Hai mốc 01-09 và 08-09 trượt không phải vì kết quả xấu, mà vì **chưa có hành động nào để có kết quả**. Ngày 11-09, chủ dự án chọn đường C trong `phase0/README.md`: thừa nhận Phase 0 chưa khởi động và chốt lại ngày. **Đây không phải quyền gia hạn một lần của §5.6** — gia hạn là kéo dài một Phase 0 đang chạy; đây là ghi nhận nó chưa chạy. Quyền gia hạn vẫn còn nguyên, và vẫn chỉ có một lần.
+
+**Điều kiện để ngày bắt đầu có hiệu lực:** đợt outreach đầu tiên **đã gửi và đã ghi vào `01-outreach-tracker.md`** trong ngày 15-09. Hết 15-09 mà tracker vẫn 0 → ngày bắt đầu chưa xảy ra, không đếm ngày, và không có lần chốt thứ ba trước khi trả lời được câu hỏi vì sao lần hai cũng không gửi.
 
 | Tuần | Ngày | Việc chính | Mốc cứng |
 |---|---|---|---|
-| 1 | **26-08 → 01-09** | Outreach ≥ 30 contact; 3–5 phỏng vấn đầu | < 3 booking cuối tuần → **đổi kênh ngay** |
-| 2 | **02-09 → 08-09** | 5 phỏng vấn; partner #1 ký; bắt đầu baseline #1 | |
-| 3 | **09-09 → 15-09** | 5 phỏng vấn; partner #2 ký; baseline #2; **prototype test identity** | Prototype chạy trên ≥ 500 test result thật |
-| 4 | **16-09 → 22-09** | Phỏng vấn bù; **partner #3 ký** | **22-09 là hạn chót ký partner #3.** Trễ một ngày là baseline tiến cứu không đủ 14 ngày trước Gate-0 |
-| 5 | **23-09 → 29-09** | Duy trì baseline cả 3; tổng hợp H1/H2/H3 | H2 hoặc H3 yếu → chuẩn bị kill/pivot, không "làm đẹp" dữ liệu |
-| 6 | **30-09 → 06-10** | Đủ 14 ngày baseline #3; chốt bảng | |
-| — | **06-10-2026** | **HỌP GATE-0** | Đối chiếu đủ 6 điều kiện §4.5; ra biên bản pass/kill có chữ ký |
+| 0 | **11-09 → 14-09** | Lập danh sách ≥ 30 contact vào tracker — không cần ai trả lời | Hết 14-09 chưa đủ 30 tên → chưa được bấm bắt đầu |
+| 1 | **15-09 → 21-09** | Gửi outreach ≥ 30 contact; 3–5 phỏng vấn đầu | < 3 booking cuối 21-09 → **đổi kênh ngay** |
+| 2 | **22-09 → 28-09** | 5 phỏng vấn; partner #1 ký; bắt đầu baseline #1 | |
+| 3 | **29-09 → 05-10** | 5 phỏng vấn; partner #2 ký; baseline #2; **prototype test identity** trên ≥ 500 test result thật | Prototype đã xong trên corpus tổng hợp (§9.6); mục này chỉ còn chờ dữ liệu partner |
+| 4 | **06-10 → 12-10** | Phỏng vấn bù; **partner #3 ký** | **12-10 là hạn chót ký partner #3.** Trễ một ngày là baseline tiến cứu không đủ 14 ngày trước Gate-0 |
+| 5 | **13-10 → 19-10** | Duy trì baseline cả 3; tổng hợp H1/H2/H3 | H2 hoặc H3 yếu → chuẩn bị kill/pivot, không "làm đẹp" dữ liệu |
+| 6 | **20-10 → 26-10** | Đủ 14 ngày baseline #3; chốt bảng | |
+| — | **26-10-2026** | **HỌP GATE-0** | Đối chiếu đủ 6 điều kiện §4.5; ra biên bản pass/kill có chữ ký |
 
-**Số học của lịch này** — lý do 22-09 là hạn chót không thương lượng: baseline tiến cứu cần **14 ngày** (§5.4). Ký partner #3 ngày 22-09 → baseline chạy 22-09 → 05-10 → vừa đủ trước Gate-0 ngày 06-10. Ký ngày 23-09 là **toán học không cho phép** pass Gate-0 đúng hạn, bất kể mọi thứ khác tốt đến đâu.
+**Số học của lịch này** — lý do 12-10 là hạn chót không thương lượng: baseline tiến cứu cần **14 ngày** (§5.4). Ký partner #3 ngày 12-10 → baseline chạy 12-10 → 25-10 → vừa đủ trước Gate-0 ngày 26-10. Ký ngày 13-10 là **toán học không cho phép** pass Gate-0 đúng hạn, bất kể mọi thứ khác tốt đến đâu.
 
 **Cam kết đi kèm việc bấm nút bắt đầu:**
 
-- Ngày 06-10-2026, nếu không đủ 3 design partner đạt chuẩn §5.2 → thi hành QĐ-6: **dừng, đổi wedge, hoặc đóng dự án**. Người ký ở §1.6 là người tuyên bố, không phải cả team.
+- Ngày 26-10-2026, nếu không đủ 3 design partner đạt chuẩn §5.2 → thi hành QĐ-6: **dừng, đổi wedge, hoặc đóng dự án**. Người ký ở §1.6 là người tuyên bố, không phải cả team.
 - Gia hạn tối đa **một lần**, phải do chính người đó ký, và phải ghi lý do vào biên bản.
 - Trong 6 tuần này **cấm viết code sản phẩm** (§5.7). Ngoại lệ duy nhất: prototype test identity ở tuần 3.
 
@@ -2264,7 +2269,7 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 | # | Việc | Ai | Deadline |
 |---|---|---|---|
 | 1 | ~~Điền tên người giữ quyền kill gate~~ → **xong** 26-08-2026: `tvinhthanhsg@gmail.com` (§1.6) | Owner dự án | ✅ |
-| 2 | ~~Chốt ngày bắt đầu Phase 0~~ → **xong**: bắt đầu 26-08-2026, Gate-0 ngày 06-10-2026 (§5.8) | Owner dự án | ✅ |
+| 2 | ~~Chốt ngày bắt đầu Phase 0~~ → **chốt lại 11-09-2026**: bắt đầu 15-09-2026, Gate-0 26-10-2026 (§5.8). Lần chốt đầu (26-08 → 06-10) không diễn ra — 0 outreach sau 17 ngày | Owner dự án | ✅ |
 | 3 | ~~Viết lại + sinh bản đối ngoại~~ → **xong**: `docs/external/` có nguồn Markdown, `build.mjs` sinh `.docx`, `verify.sh` gác checklist §4.7 (11/11 pass). `.pptx` chưa làm — có lý do ghi ở README | Doc owner | ✅ |
 | 4 | Bỏ mọi claim competitor chưa có bằng chứng; benchmark Currents/Azure/ReportPortal | Product/tech | Trong P0; trước public comparison |
 | 5 | Có đủ 3 design partner **chậm nhất cuối tuần 4** để đủ baseline | Product | Tuần 4 |
@@ -2272,7 +2277,7 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 | 7 | Chạy shadow pricing meter; chưa charge theo `stableTestId` | Product/engineering | P1 → trước Gate-1.5 |
 | 8 | **Khóa model LLM cùng lúc với giá** — benchmark hypothesis trên vài model; model hạng Opus đẩy biến phí $9–10 → ~$24/team và phá sàn giá $49 (QĐ-9, §10.3) | Product/engineering | P1.5, trước Gate-1.5 |
 
-**Phase 0 đã khởi động 26-08-2026** (§5.8). Mục 1 và 2 — hai blocker cuối — đã đóng. Mốc kế tiếp: **22-09 hạn chót partner #3**, rồi **06-10 họp Gate-0**.  
+**Phase 0 khởi động lại 15-09-2026** (§5.8) — lần chốt 26-08 không diễn ra. Mục 1 và 2 đã đóng. Mốc kế tiếp: **14-09 đủ 30 tên trong tracker**, **21-09 chốt ≥ 3 booking**, **12-10 hạn chót partner #3**, rồi **26-10 họp Gate-0**.  
 **Blocker để gửi tài liệu đối ngoại:** chỉ còn mục 4 — mọi claim competitor chưa kiểm chứng. Mục 3 đã đóng: `.md` và `.docx` đều sẵn sàng, `verify.sh` gác 11/11. `.pptx` chưa có nguồn, và đó là lựa chọn có lý do ghi ở `docs/external/README.md`.  
 **P1-min/P1-full không chặn phỏng vấn; nó chặn việc bắt đầu build sau Gate-0.**
 
