@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
@@ -116,19 +117,27 @@ func (s *service) RecomputeRun(ctx context.Context, projectID, runID string) (in
 	if err != nil {
 		return 0, err
 	}
+	// Distinct identities in id order: this runs inside the run.finished
+	// job's transaction, so two workers recomputing two runs of the same
+	// suite upsert the same flaky_signals rows — in result-arrival order they
+	// can wait on each other in a cycle (deadlock), in one fixed order the
+	// second queues behind the first.
 	seen := map[string]bool{}
-	n := 0
+	var ids []string
 	for _, tr := range list {
 		if tr.StableTestID == "" || seen[tr.StableTestID] {
 			continue
 		}
 		seen[tr.StableTestID] = true
-		if _, err := s.Recompute(ctx, projectID, tr.StableTestID, run.EnvironmentID); err != nil {
-			return n, fmt.Errorf("identity %s: %w", tr.StableTestID, err)
-		}
-		n++
+		ids = append(ids, tr.StableTestID)
 	}
-	return n, nil
+	sort.Strings(ids)
+	for n, id := range ids {
+		if _, err := s.Recompute(ctx, projectID, id, run.EnvironmentID); err != nil {
+			return n, fmt.Errorf("identity %s: %w", id, err)
+		}
+	}
+	return len(ids), nil
 }
 
 func (s *service) Recompute(ctx context.Context, projectID, identityID, environmentID string) (Signal, error) {

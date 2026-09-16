@@ -67,7 +67,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `cmd/migrate` | ✅ | áp migration rồi thoát; mã 0 xong, 1 migration lỗi, 2 config/kết nối |
 | `cmd/admin` | ✅ | script vận hành P1-min: `org/ws/project create`, `user create [-password -verified]`, `user set-password/verify`, `role grant`, `token issue/revoke/list`, `identity show/merge/undo-merge/split`, `review list [-csv]/decide`, `flaky list`, `triage record/list`, `dash runs/run/history/triage/trend`. Cách duy nhất có ingest token — không có UI để demo (QĐ-11 #5) |
 
-`GATES.md` — bằng chứng gate kỹ thuật T0–T5 (§14): cái gì đã chạy thật, ngày, lệnh tái lập. T0 ✅, T4 tenant isolation ✅ (16-09), T1 một phần, T2/T3/T5 chưa.
+`GATES.md` — bằng chứng gate kỹ thuật T0–T5 (§14): cái gì đã chạy thật, ngày, lệnh tái lập. T0 ✅, T1 ✅ (`test/failure/`: binary thật bị kill/đứt DB, invariant kiểm bằng SQL), T4 tenant isolation ✅ (16-09); T2/T3/T5 chưa.
 | `cmd/worker` | ✅ | cùng code, process thứ hai (§6.9.8 bước 2): pool `run.finished` ×4 (tier 2 → flaky, cùng tx, ghép ở `cmd/` theo §6.9.3 luật 3) + sweep mỗi phút (auto-close run, link artifact, retention, abort multipart bỏ dở); `/metrics` + `/healthz` riêng |
 | `test/arch` | ✅ | 6 test (thêm `TestQueryNeverWrites`): tên package cấm, luật tầng, fan-out ≤ 3, chu trình, graph không rỗng. Bỏ qua `_test.go` (external test package không phải self-import). **Đã chứng minh bắt được vi phạm giả** — kiểm lại 13-09 sau khi thêm `tenancy` |
 

@@ -10,7 +10,7 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | Gate | Trạng thái | Ngày | Bằng chứng |
 |---|---|---|---|
 | **T0** core flow end-to-end | ✅ đạt | 16-09-2026 | §T0 dưới |
-| **T1** không mất dữ liệu, idempotency, retry | ⏳ một phần — unit test có, chưa bắn vào process thật | — | §T1 |
+| **T1** không mất dữ liệu, idempotency, retry | ✅ đạt — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm ra và sửa 1 deadlock | 16-09-2026 | §T1 |
 | **T2** load 100 request đồng thời, p95 < 1 s | ✗ chưa chạy | — | — |
 | **T3** failure recovery + observability | ✗ chưa chạy | — | metrics §6.4 đã có, chưa có kịch bản |
 | **T4** security + tenant isolation | ✅ tenant isolation đạt (mọi route); phần security còn mục mở | 16-09-2026 | §T4 |
@@ -75,9 +75,33 @@ cd ../../frontend && npm ci && npm run dev                      # http://localho
 `finished` nhưng identity/flaky trống, dashboard "đúng" nhưng thiếu. `memory`
 store mất artifact khi tắt api — chỉ để dev.
 
-## T1 — không mất dữ liệu ⏳
+## T1 — không mất dữ liệu ✅ 16-09-2026
 
-Có (unit/integration test trên Postgres thật):
+**Harness `test/failure/`** — build `cmd/api` và `cmd/worker` từ cây nguồn, chạy
+thật trên Postgres thật (schema riêng, `DATABASE_URL=…&search_path=t_xxxx`),
+"crash" = `os.Process.Kill` (TerminateProcess, không có shutdown hook), invariant
+kiểm bằng SQL. Chạy: `TEST_DATABASE_URL=… go test -count=1 -v ./test/failure/`
+(≈ 9 s). Đã chạy 16-09, 4 lần liên tiếp đều pass.
+
+| Kịch bản §14.3 | Test | Điều đã thấy |
+|---|---|---|
+| Kill API giữa batch ingest → retry cùng `(localRunId, sequence)` không nhân đôi | `TestKillAPIMidBatchThenReplay` — 4 reporter goroutine stream 40 batch × 25 event, giết api sau 120 ms, bật lại, replay **toàn bộ** 40 batch | kill rơi giữa dòng (2/40 batch ack, 50 event commit, "connection forcibly closed"); replay: `accepted + đã commit = 1000`, `duplicates = đã commit`; 1000 `run_events`, 1000 result, `attempt_count` = 1 tất cả; finish 200 |
+| Kill worker giữa job → job được recover, không mất kết quả | `TestKillWorkerMidJobThenRecover` — 36 run × 12 test **cùng fingerprint**, giết worker khi đang drain (thấy `running: 4`), lease 2 phút được "tua" trong DB, bật worker mới | 36/36 job done, 0 dead; mọi result có `stable_test_id`; **đúng 12 identity** dù 4 worker song song + job chạy lại; re-run = đúng số job đang lease lúc chết |
+| Queue không khả dụng → ingest vẫn nhận, xử lý trễ, không 5xx | nửa đầu test trên: 36 run ingest + finish khi **không có worker** | 108 request đều 201/200, 36 job pending, 0 result resolve sớm; worker lên là xử lý hết |
+| Restart kết nối DB → không run nào kẹt `running` | `TestDBConnectionsDroppedUnderTraffic` — `pg_terminate_backend` mọi backend của api + worker, 4 lần, giữa lúc có traffic | request đầu sau khi đứt: 503 `AUTH_UNAVAILABLE` (đúng — 5xx để reporter retry, **không** 4xx đổ lỗi client), retry lần 2 là qua; worker sống, drain tiếp; 0 run `running`, 0 job dead; cả hai process còn sống |
+
+**Lỗi thật harness bắt được (không có ở unit test):** 4 worker resolve song song
+các run **cùng bộ test** — chính là ca thường gặp nhất (CI của một project chạy
+suite giống nhau) — **deadlock Postgres 40P01** vì `ResolveRun` duyệt ref theo
+thứ tự map ngẫu nhiên nên hai transaction insert cùng bộ unique key theo thứ tự
+khác nhau. Queue retry che mất lỗi (job vẫn xong) nhưng mỗi lần là backoff 5 s —
+vượt target resolver p99 < 5 s (§14.2) ngay ở tải nhỏ. Sửa: resolve theo thứ tự
+fingerprint (`identity.ResolveDeferred`) và recompute flaky theo thứ tự identity
+id (`flaky.RecomputeRun`) — cùng thứ tự thì transaction sau chỉ xếp hàng chờ rồi
+đi đường `ON CONFLICT`. Harness giờ khẳng định `last_error IS NULL` cho mọi job:
+re-run chỉ được đến từ lease hết hạn. Thời gian kịch bản 14–20 s → 4 s.
+
+Unit/integration test cho phần còn lại (Postgres thật):
 
 | Kịch bản §14.3 | Test | Ghi chú |
 |---|---|---|
@@ -87,10 +111,10 @@ Có (unit/integration test trên Postgres thật):
 | S3 timeout khi upload → artifact retry được, run hợp lệ | `internal/artifact` với `memory.Fail` injection | §10.4 |
 | Worker crash giữa job → lease hết hạn, job được nhận lại | `internal/platform/queue` `TestLeaseExpiryRecoversCrashedWorker`, `TestBackoff` | `FOR UPDATE SKIP LOCKED` |
 
-**Chưa có — và đây là phần T1 thật sự:** kill `cmd/worker` / `cmd/api` *process
-thật* giữa chừng, restart Postgres, queue mất 30 s — rồi kiểm invariant bằng
-truy vấn DB, không phải bằng mock. Cần một harness `test/failure/` chạy các
-binary thật. Chưa viết.
+**Còn ngoài harness:** S3 timeout chỉ ở mức unit (`memory.Fail`; store thật cần
+staging); reporter mất mạng chỉ ở test của reporter; restore backup — Gate-1
+(§11.5). "Queue không khả dụng" đọc là *worker không khả dụng* vì queue của P1
+là bảng Postgres — queue chết = DB chết = kịch bản DB.
 
 ## T4 — tenant isolation ✅ 16-09-2026 · security còn mục mở
 

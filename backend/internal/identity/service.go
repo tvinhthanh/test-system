@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/identity/internal/match"
@@ -126,12 +127,27 @@ func (s *service) ResolveDeferred(ctx context.Context, projectID, runID string, 
 		}
 		now := s.now().UTC()
 		decided := map[string]string{} // fingerprint → identity, within this call
+		// Fingerprint order, always. Two workers resolving two runs of the same
+		// suite insert the same unique keys inside one transaction each; in
+		// random order they wait on each other in a cycle (40P01 deadlock, seen
+		// in test/failure), in the same order the second one simply queues
+		// behind the first and takes the ON CONFLICT path in create/bind.
+		ordered := make([]keyed, 0, len(refs))
 		for _, r := range refs {
 			if !validSignals(r.Signals) {
 				continue
 			}
 			ms := toMatch(r.Signals)
-			fp := ms.Fingerprint()
+			ordered = append(ordered, keyed{ref: r, ms: ms, fp: ms.Fingerprint()})
+		}
+		sort.Slice(ordered, func(i, j int) bool {
+			if ordered[i].fp != ordered[j].fp {
+				return ordered[i].fp < ordered[j].fp
+			}
+			return ordered[i].ref.Key < ordered[j].ref.Key
+		})
+		for _, k := range ordered {
+			r, ms, fp := k.ref, k.ms, k.fp
 			if id, ok := decided[fp]; ok {
 				out[r.Key] = id
 				continue
@@ -182,6 +198,13 @@ func (s *service) ResolveDeferred(ctx context.Context, projectID, runID string, 
 		return nil, nil, err
 	}
 	return out, outcomes, nil
+}
+
+// keyed is a Ref with its match signals and fingerprint computed once.
+type keyed struct {
+	ref Ref
+	ms  match.Signals
+	fp  string
 }
 
 // candidates is §9.3 step 2 in SQL: same project, active, and at least one
