@@ -1,24 +1,40 @@
 // Command api is the HTTP server for the /v1 API (§6.5, §6.9.2).
 //
-// It owns process lifecycle only: load config, build the logger, wire
-// middleware, listen, and shut down cleanly on SIGINT/SIGTERM. Business
-// handlers arrive as domain modules are built (§6.9.11, P1-min column) and
-// are mounted here — cmd/* is the one place allowed to import everything
-// (§6.9.3).
+// It owns process lifecycle only: load config, build the logger, connect the
+// pool, wire middleware, listen, and shut down cleanly on SIGINT/SIGTERM.
+// Business handlers arrive as domain modules are built (§6.9.11, P1-min
+// column) and are mounted here — cmd/* is the one place allowed to import
+// everything (§6.9.3).
 package main
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
+	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/identity"
+	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	platlog "github.com/vinh/automation-testing-platform/backend/internal/platform/log"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
+	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/memory" // OBJSTORE=memory (dev)
+	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/s3"     // OBJSTORE=s3
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
+	"github.com/vinh/automation-testing-platform/backend/internal/query"
+	"github.com/vinh/automation-testing-platform/backend/internal/results"
+	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/triage"
 )
 
 func main() {
@@ -30,32 +46,85 @@ func main() {
 	}
 	logger := platlog.New(cfg.Env)
 
-	mux := http.NewServeMux()
-	mux.Handle("GET /healthz", httpx.Health())
-
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpx.RequestID(httpx.Logging(logger)(mux)),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		logger.Info("api listening", "addr", cfg.HTTPAddr, "env", cfg.Env)
+	db, err := pg.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("boot", "err", err)
+		os.Exit(2)
+	}
+
+	reg := metric.New()
+	reg.GaugeFunc("go_goroutines", "Number of goroutines.", func() float64 { return float64(runtime.NumGoroutine()) })
+
+	store, err := objstore.Open(cfg)
+	if err != nil {
+		logger.Error("boot", "err", err)
+		os.Exit(2)
+	}
+	handler := buildHandler(cfg, db, store, reg, logger)
+
+	api := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	// /metrics on its own listener, loopback by default (config.MetricsAddr).
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", reg.Handler())
+	metricsSrv := &http.Server{Addr: cfg.MetricsAddr, Handler: metricsMux, ReadHeaderTimeout: 5 * time.Second}
+
+	serve := func(name string, srv *http.Server) {
+		logger.Info(name+" listening", "addr", srv.Addr, "env", cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("api stopped", "err", err)
+			logger.Error(name+" stopped", "err", err)
 			stop()
 		}
-	}()
+	}
+	go serve("api", api)
+	go serve("metrics", metricsSrv)
 
 	<-ctx.Done()
 	logger.Info("api shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown", "err", err)
-		os.Exit(1)
+	exit := 0
+	for _, srv := range []*http.Server{api, metricsSrv} {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Error("shutdown", "addr", srv.Addr, "err", err)
+			exit = 1
+		}
 	}
+	db.Close()
+	os.Exit(exit)
+}
+
+// buildHandler wires every module onto one mux (§6.9.3: cmd/* is the one
+// place that imports everything) and wraps it in the middleware stack.
+// Separate from main so the HTTP integration test drives the exact
+// handler the binary serves.
+func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metric.Registry, logger *slog.Logger) http.Handler {
+	// Modules, in dependency order (§6.9.3).
+	ten := tenancy.New(db)
+	az := authz.New(db, []byte(cfg.TokenPepper))
+	res := results.New(db)
+	idn := identity.New(db)
+	art := artifact.New(db, store, res)
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /healthz", httpx.Health())
+	ingest.Routes(mux, ingest.Deps{
+		DB: db, Queue: queue.New(db), Tenancy: ten, Authz: az, Results: res, Identity: idn,
+		Metrics: reg, Logger: logger,
+	})
+	artifact.Routes(mux, artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: art, Metrics: reg, Logger: logger})
+
+	// Dashboard: cookie sessions (§11.2) and the read model (§6.9.5).
+	web := authz.WebOptions{AllowedOrigins: cfg.DashboardOrigins, Secure: cfg.CookieSecure}
+	authz.AuthRoutes(mux, az, web)
+	(&dashboard{tenancy: ten, authz: az, query: query.New(db), triage: triage.New(db, res), logger: logger}).routes(mux)
+
+	// Metrics must wrap the mux directly: it reads the matched route pattern.
+	return httpx.RequestID(httpx.Logging(logger)(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux))))
 }

@@ -129,16 +129,16 @@ Chưa gửi được thì đơn vị công việc là **tên thêm vào tracker*
 | Ngày | Tên thêm vào tracker | Cộng dồn / 30 | Code? | Ghi chú |
 |---|---|---|---|---|
 | T6 11-09 | 0 | 0 | ✅ *(ngoại lệ ghi ở QĐ-11: dựng khung + test kiến trúc cùng ngày quyết định)* | Ngày quyết định |
-| T7 12-09 | | | | |
-| CN 13-09 | | | | |
-| T2 14-09 | | | | **Chốt: đủ 30 tên chưa? Chưa → 15-09 không phải ngày bắt đầu** |
+| T7 12-09 | 0 | 0 | ✗ | Không code, không thêm tên |
+| CN 13-09 | 0 | 0 | ✗ **đã code — vi phạm điều kiện 1** | `platform/metric`, `platform/pg`, `migrations/0001`+`0002`, `tenancy`, `authz`, `cmd/migrate`; test chạy trên Postgres thật. Chủ dự án quyết code dù 0 tên; ghi thật để bảng còn dùng được ở Gate-0 |
+| T2 14-09 | 0 | 0 | ✗ **đã code — vi phạm điều kiện 1** | `results`, `ingest` (3 endpoint §7.2 chạy end-to-end), `identity` (port §9 kèm test khóa, hai tầng, rename auto-match qua HTTP), `platform/queue` + `cmd/worker` (tier 2 ra khỏi request, auto-close 6 h), `artifact` + `platform/objstore` (S3 SigV4 khớp vector AWS, upload/multipart/verify end-to-end), `flaky`, `triage`, `query` (read-only, arch test cưỡng chế), `cmd/admin`, `migrations/0003`–`0008`. **Cột P1-min §6.9.11 đủ module.** **Chốt: đủ 30 tên chưa? Chưa → 15-09 không phải ngày bắt đầu** |
 
 ## Theo dõi hằng ngày trong tuần 1
 
 | Ngày | Contact gửi | Phản hồi | Booking | Code? | Ghi chú |
 |---|---|---|---|---|---|
 | T3 15-09 | | | | | **Ngày bắt đầu — gửi đợt 1, ghi tracker ngay** |
-| T4 16-09 | | | | | |
+| T4 16-09 | | | | ✗ **đã code** | login §11.2 (argon2id, session, rate limit theo IP+account, CSRF hai lớp), dashboard API trên `query`, `migrations/0009`, **reporter Playwright** (npm, 14 test, chạy thật 3 test qua backend). Review nội bộ "Block live integration" (API lệch frontend) → chốt `frontend/API_CONTRACT.md` là hợp đồng duy nhất, viết lại `query` + `cmd/api` + `/v1/session` theo đó, thêm `cmd/api/api_test.go` (HTTP end-to-end trên Postgres thật), toàn bộ `go test ./...` 22 gói pass 0 skip, và chạy live Vue thật → Go thật: 18 call `/v1` đều 200/201. Cột `Contact gửi` để trống chờ người thật điền |
 | T5 17-09 | | | | | |
 | T6 18-09 | | | | | |
 | T7 19-09 | | | | — | *(không gửi cuối tuần — không code)* |

@@ -1,0 +1,367 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
+	"github.com/vinh/automation-testing-platform/backend/internal/identity"
+	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/memory"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg/pgtest"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
+	"github.com/vinh/automation-testing-platform/backend/internal/results"
+	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/migrations"
+)
+
+// The HTTP integration test: the exact handler the binary serves, driven
+// the way the two clients drive it — the reporter with a bearer token on
+// the ingest routes, then a browser with cookies on the dashboard routes of
+// frontend/API_CONTRACT.md. Tenant boundaries and CSRF are asserted here
+// because §11.3.3 makes the cross-tenant pass a release gate.
+
+const origin = "http://localhost:5173"
+
+type client struct {
+	t    *testing.T
+	srv  *httptest.Server
+	http *http.Client
+	csrf string
+}
+
+type resp struct {
+	code int
+	body map[string]any
+	raw  string
+}
+
+func (c *client) do(method, path string, body any, headers map[string]string) resp {
+	c.t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		_ = json.NewEncoder(&buf).Encode(body)
+	}
+	req, _ := http.NewRequest(method, c.srv.URL+path, &buf)
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", origin)
+		if c.csrf != "" {
+			req.Header.Set(authz.CSRFHeader, c.csrf)
+		}
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	out := resp{code: res.StatusCode, raw: string(raw)}
+	_ = json.Unmarshal(raw, &out.body)
+	return out
+}
+
+func (c *client) get(path string) resp { return c.do("GET", path, nil, nil) }
+
+func (c *client) post(path string, body any) resp { return c.do("POST", path, body, nil) }
+
+func (r resp) errCode() string {
+	if e, ok := r.body["error"].(map[string]any); ok {
+		s, _ := e["code"].(string)
+		return s
+	}
+	return ""
+}
+
+func (r resp) items() []any {
+	it, _ := r.body["items"].([]any)
+	return it
+}
+
+func newClient(t *testing.T, srv *httptest.Server) *client {
+	jar, _ := cookiejar.New(nil)
+	return &client{t: t, srv: srv, http: &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+}
+
+// bootstrap does GET /v1/session and remembers the CSRF token.
+func (c *client) bootstrap() resp {
+	r := c.get("/v1/session")
+	c.csrf, _ = r.body["csrfToken"].(string)
+	return r
+}
+
+func TestDashboardContractEndToEnd(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false}
+	reg := metric.New()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(buildHandler(cfg, db, store, reg, logger))
+	t.Cleanup(srv.Close)
+
+	// Seed: org → ws → two projects; alice is a member of checkout only;
+	// bob is a viewer of search; an ingest token for checkout.
+	ten, az := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper))
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
+	checkout, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
+	search, _ := ten.CreateProject(ctx, ws.ID, "search", "")
+	alice, _ := az.CreateUser(ctx, "alice@example.com")
+	_ = az.SetPassword(ctx, alice.ID, "correct horse battery staple", "")
+	_ = az.VerifyEmail(ctx, alice.ID)
+	_, _ = az.GrantRole(ctx, alice.ID, authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, authz.RoleMember)
+	bob, _ := az.CreateUser(ctx, "bob@example.com")
+	_ = az.SetPassword(ctx, bob.ID, "another long passphrase!", "")
+	_ = az.VerifyEmail(ctx, bob.ID)
+	_, _ = az.GrantRole(ctx, bob.ID, authz.ScopeRef{Level: authz.LevelProject, ID: string(search.ID)}, authz.RoleViewer)
+	tok, _ := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, Permissions: []authz.Permission{authz.PermProjectIngest}, Name: "ci"})
+
+	// A reporter pushes two runs through the real ingest routes; the worker
+	// pipeline (tier 2 + flaky) is drained in-process.
+	bearer := newClient(t, srv)
+	auth := map[string]string{"Authorization": "Bearer " + tok.Plaintext}
+	res := results.New(db)
+	jobs := ingest.NewJobs(ingest.Deps{DB: db, Queue: queue.New(db), Tenancy: ten, Authz: az, Results: res, Identity: identity.New(db), Metrics: metric.New(), Logger: logger})
+	flk := flaky.New(db, res)
+	worker := jobs.Worker(1, func(ctx context.Context, projectID string, runID results.RunID) error {
+		_, err := flk.RecomputeRun(ctx, projectID, string(runID))
+		return err
+	})
+	ev := func(seq int, client, title, status, outcome string) map[string]any {
+		return map[string]any{
+			"sequence": seq, "type": "test.finished", "clientTestId": client, "occurrenceIndex": 0, "attempt": 0,
+			"identity": map[string]any{"framework": "playwright", "filePath": "tests/checkout.spec.ts", "titlePath": []string{"Checkout", title}, "paramSignature": ""},
+			"status":   status, "outcome": outcome, "durationMs": 100,
+			"error": map[string]any{"message": "expected 402", "stack": "at checkout.spec.ts:12"},
+		}
+	}
+	var runIDs []string
+	for i, payStatus := range []string{"failed", "passed"} {
+		local := fmt.Sprintf("0198c3e1-7b1a-7c3d-9e4f-0000000000%02d", i)
+		r := bearer.do("POST", "/v1/runs", map[string]any{"localRunId": local, "environmentKey": "staging", "trigger": map[string]any{"ref": "refs/heads/main", "commitSha": fmt.Sprintf("c%d", i)}, "startedAt": time.Now().Add(-time.Duration(2-i) * time.Hour).UTC().Format(time.RFC3339)}, auth)
+		if r.code != 201 {
+			t.Fatalf("create run: %d %s", r.code, r.raw)
+		}
+		runIDs = append(runIDs, r.body["runId"].(string))
+		outcome := "expected"
+		if payStatus == "failed" {
+			outcome = "unexpected"
+		}
+		if r := bearer.do("POST", "/v1/runs/"+local+"/events", map[string]any{"events": []any{ev(1, "ct_pay", "declines expired card", payStatus, outcome), ev(2, "ct_cart", "keeps state", "passed", "expected")}}, auth); r.code != 200 {
+			t.Fatalf("events: %d %s", r.code, r.raw)
+		}
+		if r := bearer.do("POST", "/v1/runs/"+local+"/finish", nil, auth); r.code != 200 {
+			t.Fatalf("finish: %d %s", r.code, r.raw)
+		}
+		if _, err := worker.Drain(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// ---- Session bootstrap and login (contract: GET /v1/session, POST /v1/session) ----
+	web := newClient(t, srv)
+	boot := web.bootstrap()
+	if boot.code != 200 || boot.body["user"] != nil || web.csrf == "" {
+		t.Fatalf("anonymous bootstrap: %d %s", boot.code, boot.raw)
+	}
+	if r := web.get("/v1/projects"); r.code != 401 {
+		t.Errorf("projects before login: %d", r.code)
+	}
+	// Login without the CSRF token from bootstrap is refused; wrong password is a generic 401.
+	noCSRF := newClient(t, srv)
+	noCSRF.bootstrap()
+	noCSRF.csrf = ""
+	if r := noCSRF.post("/v1/session", map[string]string{"email": "alice@example.com", "password": "correct horse battery staple"}); r.code != 403 || r.errCode() != "CSRF" {
+		t.Errorf("login without CSRF token: %d %s", r.code, r.raw)
+	}
+	if r := web.post("/v1/session", map[string]string{"email": "alice@example.com", "password": "wrong wrong wrong wrong"}); r.code != 401 || r.errCode() != "INVALID_CREDENTIALS" {
+		t.Errorf("wrong password: %d %s", r.code, r.raw)
+	}
+	login := web.post("/v1/session", map[string]string{"email": "alice@example.com", "password": "correct horse battery staple"})
+	user, _ := login.body["user"].(map[string]any)
+	if login.code != 200 || user["email"] != "alice@example.com" || user["name"] != "alice" || user["id"] != alice.ID || login.body["csrfToken"] == web.csrf {
+		t.Fatalf("login: %d %s", login.code, login.raw)
+	}
+	web.csrf = login.body["csrfToken"].(string) // rotated
+	if r := web.bootstrap(); r.body["user"] == nil || r.body["csrfToken"] != web.csrf {
+		t.Errorf("bootstrap after login: %s", r.raw)
+	}
+
+	// ---- Projects ----
+	pr := web.get("/v1/projects?limit=50")
+	if pr.code != 200 || len(pr.items()) != 1 || pr.body["nextCursor"] != nil {
+		t.Fatalf("projects: %d %s", pr.code, pr.raw)
+	}
+	p0 := pr.items()[0].(map[string]any)
+	if p0["id"] != string(checkout.ID) || p0["name"] != "checkout" || p0["workspaceName"] != "Payments" {
+		t.Errorf("project DTO: %v", p0)
+	}
+	base := "/v1/projects/" + string(checkout.ID)
+
+	// ---- Runs: envelope, DTO, sort, cursor, filters ----
+	rs := web.get(base + "/runs?limit=1&sort=-startedAt")
+	if rs.code != 200 || len(rs.items()) != 1 || rs.body["nextCursor"] == nil {
+		t.Fatalf("runs page 1: %d %s", rs.code, rs.raw)
+	}
+	run := rs.items()[0].(map[string]any)
+	if run["id"] != runIDs[1] || run["status"] != "passed" || run["environmentName"] != "staging" || run["branch"] != "main" || run["commitSha"] != "c1" ||
+		run["totalCount"] != float64(2) || run["passedCount"] != float64(2) || run["failedCount"] != float64(0) || run["flakyCount"] != float64(0) || run["durationMs"] == nil {
+		t.Errorf("run DTO: %v", run)
+	}
+	rs2 := web.get(base + "/runs?limit=1&sort=-startedAt&cursor=" + url.QueryEscape(rs.body["nextCursor"].(string)))
+	if rs2.code != 200 || len(rs2.items()) != 1 || rs2.items()[0].(map[string]any)["id"] != runIDs[0] || rs2.body["nextCursor"] != nil {
+		t.Errorf("runs page 2: %d %s", rs2.code, rs2.raw)
+	}
+	if r := web.get(base + "/runs?status=failed"); len(r.items()) != 1 || r.items()[0].(map[string]any)["failedCount"] != float64(1) {
+		t.Errorf("status filter: %s", r.raw)
+	}
+	if r := web.get(base + "/runs?q=c0"); len(r.items()) != 1 {
+		t.Errorf("q filter: %s", r.raw)
+	}
+	if r := web.get(base + "/runs?environment=prod"); len(r.items()) != 0 {
+		t.Errorf("environment filter: %s", r.raw)
+	}
+	if r := web.get(base + "/runs?sort=startedAt"); r.code != 400 || r.errCode() != "INVALID_SORT" {
+		t.Errorf("unsupported sort: %d %s", r.code, r.raw)
+	}
+	if r := web.get(base + "/runs?cursor=bogus"); r.code != 400 || r.errCode() != "INVALID_CURSOR" {
+		t.Errorf("bad cursor: %d %s", r.code, r.raw)
+	}
+	if r := web.get(base + "/runs/" + runIDs[0]); r.code != 200 || r.body["id"] != runIDs[0] || r.body["status"] != "failed" {
+		t.Errorf("run detail: %d %s", r.code, r.raw)
+	}
+
+	// ---- Results and result detail ----
+	rr := web.get(base + "/runs/" + runIDs[0] + "/results?limit=50")
+	if rr.code != 200 || len(rr.items()) != 2 || rr.body["nextCursor"] != nil {
+		t.Fatalf("results: %d %s", rr.code, rr.raw)
+	}
+	failed := rr.items()[0].(map[string]any)
+	if failed["displayName"] != "declines expired card" || failed["finalStatus"] != "failed" || failed["filePath"] != "tests/checkout.spec.ts" || failed["attemptCount"] != float64(1) || failed["stableTestId"] == nil {
+		t.Errorf("result DTO (failures first): %v", failed)
+	}
+	resultID := failed["id"].(string)
+	det := web.get(base + "/results/" + resultID)
+	if det.code != 200 {
+		t.Fatalf("result detail: %d %s", det.code, det.raw)
+	}
+	attempts, _ := det.body["attempts"].([]any)
+	events, _ := det.body["events"].([]any)
+	if len(attempts) != 1 || attempts[0].(map[string]any)["error"].(map[string]any)["message"] != "expected 402" || len(events) != 0 {
+		t.Errorf("detail attempts/events: %s", det.raw)
+	}
+
+	// ---- Triage events: allowed types, dedupe, then visible in the detail ----
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}}); r.code != 201 || r.body["actorName"] != "alice@example.com" {
+		t.Errorf("FAILURE_SEEN: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}}); r.code != 200 {
+		t.Errorf("FAILURE_SEEN dedupe: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "payload": map[string]any{}}); r.code != 201 {
+		t.Errorf("MARKED_FLAKY: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "payload": map[string]any{}}); r.code != 400 {
+		t.Errorf("type outside the UI set: %d %s", r.code, r.raw)
+	}
+	det = web.get(base + "/results/" + resultID)
+	events, _ = det.body["events"].([]any)
+	if len(events) != 2 || events[0].(map[string]any)["type"] != "FAILURE_SEEN" || events[1].(map[string]any)["type"] != "MARKED_FLAKY" {
+		t.Errorf("events after triage: %s", det.raw)
+	}
+	// POST without the CSRF header is refused even with a valid session.
+	saved := web.csrf
+	web.csrf = ""
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "RESOLVED", "payload": map[string]any{}}); r.code != 403 || r.errCode() != "CSRF" {
+		t.Errorf("POST without CSRF: %d %s", r.code, r.raw)
+	}
+	web.csrf = saved
+	if r := web.do("POST", base+"/results/"+resultID+"/triage-events", map[string]any{"type": "RESOLVED", "payload": map[string]any{}}, map[string]string{"Origin": "https://evil.example"}); r.code != 403 {
+		t.Errorf("POST from a foreign origin: %d %s", r.code, r.raw)
+	}
+
+	// ---- Identities ----
+	ids := web.get(base + "/identities?limit=20")
+	if ids.code != 200 || len(ids.items()) != 2 {
+		t.Fatalf("identities: %d %s", ids.code, ids.raw)
+	}
+	pay := ids.items()[0].(map[string]any)
+	if pay["canonicalTitle"] != "declines expired card" || pay["canonicalFilePath"] != "tests/checkout.spec.ts" || pay["totalRuns"] != float64(2) || pay["flakyScore"] == nil {
+		t.Errorf("identity DTO: %v", pay)
+	}
+	if statuses, _ := pay["recentStatuses"].([]any); len(statuses) != 2 || statuses[0] != "passed" || statuses[1] != "failed" {
+		t.Errorf("recentStatuses: %v", pay["recentStatuses"])
+	}
+	if r := web.get(base + "/identities?view=flaky"); r.code != 200 {
+		t.Errorf("view=flaky: %d", r.code)
+	}
+	payID := pay["id"].(string)
+	if r := web.get(base + "/identities/" + payID); r.code != 200 || r.body["id"] != payID {
+		t.Errorf("identity detail: %d %s", r.code, r.raw)
+	}
+	hist := web.get(base + "/identities/" + payID + "/runs?limit=20")
+	if hist.code != 200 || len(hist.items()) != 2 || hist.items()[0].(map[string]any)["id"] != runIDs[1] {
+		t.Errorf("identity runs: %d %s", hist.code, hist.raw)
+	}
+
+	// ---- Cross-tenant: bob (viewer of search) sees nothing of checkout ----
+	bobc := newClient(t, srv)
+	bobc.bootstrap()
+	if r := bobc.post("/v1/session", map[string]string{"email": "bob@example.com", "password": "another long passphrase!"}); r.code != 200 {
+		t.Fatalf("bob login: %d %s", r.code, r.raw)
+	}
+	bobc.csrf, _ = bobc.get("/v1/session").body["csrfToken"].(string)
+	for _, path := range []string{base + "/runs", base + "/runs/" + runIDs[0], base + "/runs/" + runIDs[0] + "/results", base + "/results/" + resultID, base + "/identities", base + "/identities/" + payID, base + "/identities/" + payID + "/runs"} {
+		if r := bobc.get(path); r.code != 404 || r.errCode() != "PROJECT_NOT_FOUND" {
+			t.Errorf("bob GET %s: %d %s", path, r.code, r.raw)
+		}
+	}
+	if r := bobc.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}}); r.code != 404 {
+		t.Errorf("bob triage on checkout: %d %s", r.code, r.raw)
+	}
+	if r := bobc.get("/v1/projects"); len(r.items()) != 1 || r.items()[0].(map[string]any)["name"] != "search" {
+		t.Errorf("bob's projects: %s", r.raw)
+	}
+	// Viewer role: may see, may mark seen, may not triage (403, not 404).
+	searchBase := "/v1/projects/" + string(search.ID)
+	if r := bobc.get(searchBase + "/runs"); r.code != 200 || len(r.items()) != 0 {
+		t.Errorf("bob's own project: %d %s", r.code, r.raw)
+	}
+	if r := bobc.post(searchBase+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "payload": map[string]any{}}); r.code != 403 || r.errCode() != "FORBIDDEN" {
+		t.Errorf("viewer triaging: %d %s", r.code, r.raw)
+	}
+
+	// ---- Logout ----
+	if r := web.post("/v1/session/logout", map[string]any{}); r.code != 204 {
+		t.Errorf("logout: %d %s", r.code, r.raw)
+	}
+	if r := web.get("/v1/projects"); r.code != 401 {
+		t.Errorf("projects after logout: %d", r.code)
+	}
+	if r := web.get("/v1/session"); r.code != 200 || r.body["user"] != nil {
+		t.Errorf("bootstrap after logout: %d %s", r.code, r.raw)
+	}
+	if !strings.Contains(reg.Expose(), `route="GET /v1/projects/{projectId}/runs"`) {
+		t.Error("route-pattern metrics lost behind the session middleware")
+	}
+}

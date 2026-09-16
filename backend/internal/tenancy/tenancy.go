@@ -1,0 +1,117 @@
+// Package tenancy owns the Organization → Workspace → Project → Environment
+// hierarchy (§6.3, §8.2) and the four tables behind it (§6.9.5). Everything
+// else in the system hangs off a ProjectID: ingest tokens, test identity,
+// runs. Run itself is not a level here — it is data, not a boundary (§8.8).
+//
+// This file is the module's whole contract (§6.9.4). The interface lives on
+// the owner side because more than one module needs it — authz walks the
+// scope chain, ingest resolves environmentKey, query reads names.
+//
+// tenancy imports only platform/* (§6.9.3); the architecture test enforces
+// that, and the compiler enforces that nothing below this file is reachable
+// from outside.
+package tenancy
+
+import (
+	"context"
+	"errors"
+	"regexp"
+	"time"
+)
+
+// IDs are the canonical text form of a uuid. Distinct types so a
+// WorkspaceID cannot be passed where a ProjectID is expected.
+type (
+	OrganizationID string
+	WorkspaceID    string
+	ProjectID      string
+	EnvironmentID  string
+)
+
+// Organization is the billing unit (§8.2).
+type Organization struct {
+	ID        OrganizationID
+	Name      string
+	Slug      string
+	PlanID    string
+	CreatedAt time.Time
+}
+
+// Workspace groups projects by department or product.
+type Workspace struct {
+	ID        WorkspaceID
+	OrgID     OrganizationID
+	Name      string
+	CreatedAt time.Time
+}
+
+// Project is the unit of ingest tokens and test identity.
+type Project struct {
+	ID            ProjectID
+	WorkspaceID   WorkspaceID
+	WorkspaceName string // filled by ListProjects; "" from Create/Get
+	Name          string
+	DefaultBranch string
+	CreatedAt     time.Time
+}
+
+// Environment separates histories of the same test (§8.2). Key is what the
+// reporter sends as environmentKey (§7.3).
+type Environment struct {
+	ID        EnvironmentID
+	ProjectID ProjectID
+	Key       string
+	CreatedAt time.Time
+}
+
+// Scope is a project's ancestry — the chain authorize() walks up (§8.8).
+type Scope struct {
+	OrgID       OrganizationID
+	WorkspaceID WorkspaceID
+	ProjectID   ProjectID
+}
+
+var (
+	// ErrNotFound: the id does not exist. Callers that must not reveal
+	// existence across tenants (§7.2: wrong project → 404) map it themselves.
+	ErrNotFound = errors.New("tenancy: not found")
+	// ErrConflict: a unique field (slug, name within parent, key within
+	// project) is already taken.
+	ErrConflict = errors.New("tenancy: already exists")
+	// ErrInvalid: input failed shape validation before reaching the database.
+	ErrInvalid = errors.New("tenancy: invalid input")
+)
+
+// Service is what other modules program against. Writes take the caller's
+// transaction from ctx (§6.9.6) and never open their own.
+type Service interface {
+	CreateOrganization(ctx context.Context, name, slug string) (Organization, error)
+	CreateWorkspace(ctx context.Context, org OrganizationID, name string) (Workspace, error)
+	CreateProject(ctx context.Context, ws WorkspaceID, name, defaultBranch string) (Project, error)
+
+	GetProject(ctx context.Context, id ProjectID) (Project, error)
+	GetOrganization(ctx context.Context, id OrganizationID) (Organization, error)
+	// ListProjects returns the projects under a node of the tree — all of an
+	// organization, one workspace, or just the one project — which is how a
+	// membership at that level maps to visible projects (§11.3.1).
+	ListProjects(ctx context.Context, level string, id string) ([]Project, error)
+	ListEnvironments(ctx context.Context, project ProjectID) ([]Environment, error)
+	// ProjectScope returns the ancestry of a project, or ErrNotFound.
+	ProjectScope(ctx context.Context, id ProjectID) (Scope, error)
+
+	// EnsureEnvironment returns the environment with the given key, creating
+	// it on first sight. Ingest calls this for every POST /v1/runs (§7.3), so
+	// it must be idempotent under concurrent first sightings.
+	EnsureEnvironment(ctx context.Context, project ProjectID, key string) (Environment, error)
+}
+
+// slugRe is the shape shared by Organization.Slug and Environment.Key: lower
+// case, digits, single hyphens between segments. Mirrors the CHECK constraint
+// in migrations/0001_tenancy.sql so bad input is refused before a round trip.
+var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// ValidSlug reports whether s can be an organization slug or environment key.
+func ValidSlug(s string) bool { return len(s) <= 64 && slugRe.MatchString(s) }
+
+// ValidName reports whether s can be a display name.
+func ValidName(s string) bool { return len(s) >= 1 && len(s) <= 200 }

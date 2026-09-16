@@ -17,7 +17,36 @@ type Config struct {
 	Env string
 	// HTTPAddr is the listen address for cmd/api, e.g. ":8080".
 	HTTPAddr string
+	// MetricsAddr is where cmd/api serves /metrics (§6.4). It is a second
+	// listener so the scrape endpoint never shares a port with tenant traffic:
+	// per-project labels are internal data, not something a bearer token
+	// should be able to read.
+	MetricsAddr string
+	// DatabaseURL is the postgres:// URL every binary connects to.
+	DatabaseURL string
+	// TokenPepper is the HMAC key for API token hashes (§11.4). It lives in
+	// the environment, not the database, so a database dump alone cannot
+	// verify a token. Rotating it invalidates every token.
+	TokenPepper string
+	// ObjStore selects the artifact store (§7.7): "s3" (S3 or R2, needs the
+	// OBJSTORE_* settings below) or "memory" (in-process, dev only —
+	// objects vanish with the process).
+	ObjStore          string
+	ObjStoreEndpoint  string
+	ObjStoreRegion    string
+	ObjStoreBucket    string
+	ObjStoreAccessKey string
+	ObjStoreSecretKey string
+	// DashboardOrigins are the browser origins allowed to make
+	// cookie-authenticated state-changing requests (§11.2 Origin allowlist,
+	// §11.5 CORS: named origins, never *).
+	DashboardOrigins []string
+	// CookieSecure sets Secure on session cookies. Only dev may turn it off.
+	CookieSecure bool
 }
+
+// devPepper is only ever accepted when APP_ENV=dev.
+const devPepper = "dev-only-pepper-not-a-secret-0000"
 
 var validEnvs = map[string]bool{"dev": true, "staging": true, "prod": true}
 
@@ -25,8 +54,19 @@ var validEnvs = map[string]bool{"dev": true, "staging": true, "prod": true}
 // present-but-invalid values are an error, never silently corrected.
 func Load() (Config, error) {
 	c := Config{
-		Env:      getenv("APP_ENV", "dev"),
-		HTTPAddr: getenv("HTTP_ADDR", ":8080"),
+		Env:               getenv("APP_ENV", "dev"),
+		HTTPAddr:          getenv("HTTP_ADDR", ":8080"),
+		MetricsAddr:       getenv("METRICS_ADDR", "127.0.0.1:9090"),
+		DatabaseURL:       getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/atp?sslmode=disable"),
+		TokenPepper:       getenv("TOKEN_PEPPER", devPepper),
+		ObjStore:          getenv("OBJSTORE", "memory"),
+		ObjStoreEndpoint:  os.Getenv("OBJSTORE_ENDPOINT"),
+		ObjStoreRegion:    getenv("OBJSTORE_REGION", "auto"),
+		ObjStoreBucket:    os.Getenv("OBJSTORE_BUCKET"),
+		ObjStoreAccessKey: os.Getenv("OBJSTORE_ACCESS_KEY"),
+		ObjStoreSecretKey: os.Getenv("OBJSTORE_SECRET_KEY"),
+		DashboardOrigins:  splitList(getenv("DASHBOARD_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080")),
+		CookieSecure:      getenv("COOKIE_SECURE", "true") != "false",
 	}
 	return c, c.validate()
 }
@@ -39,10 +79,56 @@ func (c Config) validate() error {
 	if !strings.Contains(c.HTTPAddr, ":") {
 		errs = append(errs, fmt.Sprintf("HTTP_ADDR=%q: want host:port or :port", c.HTTPAddr))
 	}
+	if !strings.Contains(c.MetricsAddr, ":") {
+		errs = append(errs, fmt.Sprintf("METRICS_ADDR=%q: want host:port or :port", c.MetricsAddr))
+	}
+	if !strings.HasPrefix(c.DatabaseURL, "postgres://") && !strings.HasPrefix(c.DatabaseURL, "postgresql://") {
+		errs = append(errs, "DATABASE_URL: want a postgres:// URL")
+	}
+	if c.Env == "prod" && strings.Contains(c.DatabaseURL, "sslmode=disable") {
+		errs = append(errs, "DATABASE_URL: sslmode=disable is not allowed when APP_ENV=prod (§11.5)")
+	}
+	if len(c.TokenPepper) < 32 {
+		errs = append(errs, "TOKEN_PEPPER: want at least 32 bytes")
+	}
+	if c.Env != "dev" && c.TokenPepper == devPepper {
+		errs = append(errs, "TOKEN_PEPPER: the dev default is not allowed when APP_ENV="+c.Env)
+	}
+	if !c.CookieSecure && c.Env != "dev" {
+		errs = append(errs, "COOKIE_SECURE=false is dev-only (§11.5 TLS everywhere)")
+	}
+	for _, o := range c.DashboardOrigins {
+		if o == "*" || (!strings.HasPrefix(o, "http://") && !strings.HasPrefix(o, "https://")) {
+			errs = append(errs, fmt.Sprintf("DASHBOARD_ORIGINS: %q must be a scheme://host origin, never *", o))
+		}
+	}
+	switch c.ObjStore {
+	case "memory":
+		if c.Env != "dev" {
+			errs = append(errs, "OBJSTORE=memory is dev-only; set OBJSTORE=s3 when APP_ENV="+c.Env)
+		}
+	case "s3":
+		if c.ObjStoreEndpoint == "" || c.ObjStoreBucket == "" || c.ObjStoreAccessKey == "" || c.ObjStoreSecretKey == "" {
+			errs = append(errs, "OBJSTORE=s3 needs OBJSTORE_ENDPOINT, OBJSTORE_BUCKET, OBJSTORE_ACCESS_KEY and OBJSTORE_SECRET_KEY")
+		}
+	default:
+		errs = append(errs, fmt.Sprintf("OBJSTORE=%q: want s3|memory", c.ObjStore))
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// splitList parses a comma-separated list, trimming blanks.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, strings.TrimSuffix(p, "/"))
+		}
+	}
+	return out
 }
 
 func getenv(key, def string) string {

@@ -13,10 +13,12 @@
 package arch
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -69,7 +71,10 @@ func graph(t *testing.T) map[string]map[string]bool {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		// The rules govern what ships. A _test.go file is not linked into the
+		// binary, and an external test package (foo_test) importing foo would
+		// otherwise read as a self-import.
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		rel, _ := filepath.Rel(internalDir, filepath.Dir(path))
@@ -256,5 +261,43 @@ func TestGraphIsNotEmpty(t *testing.T) {
 	g := graph(t)
 	if _, ok := g["platform/config"]; !ok {
 		t.Fatalf("expected internal/platform/config in the graph; got %d packages — is the test running from backend/test/arch?", len(g))
+	}
+}
+
+// TestQueryNeverWrites is §6.9.5's controlled exception made mechanical:
+// query may read every table, and not one statement in it may write.
+// Comments are stripped first so a rule can be explained without tripping
+// it; string literals are where SQL lives, so they are what is scanned.
+func TestQueryNeverWrites(t *testing.T) {
+	dir := filepath.Join(root(t), "internal", "query")
+	writes := regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|CREATE|DROP|GRANT)\b`)
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("no internal/query yet: %v", err)
+	}
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			checked++
+			if m := writes.FindString(lit.Value); m != "" {
+				t.Errorf("internal/query/%s:%s: string literal contains %q — query is read-only (§6.9.5)", e.Name(), fset.Position(lit.Pos()), m)
+			}
+			return true
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no string literals scanned in internal/query — the walker found nothing")
 	}
 }

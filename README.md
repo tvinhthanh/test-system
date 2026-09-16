@@ -58,6 +58,7 @@ npm install && npm run build
 SPEC.md              nguồn sự thật — quyết định, kiến trúc, schema, thuật toán, gate
 phase0/              bộ công cụ thi hành: outreach, phỏng vấn, baseline TTRC, biên bản Gate-0
 backend/             Go monolith P1-min theo §6.9 — QĐ-11; test kiến trúc cưỡng chế §6.9.3
+reporter/playwright/ npm reporter §7.5 — batch, retry, spool, artifact, fingerprint §9.2 khớp Go
 prototype/identity/  Go — thuật toán test identity §9, có loader Playwright thật
 docs/external/       bản đối ngoại + pipeline sinh .docx + verify.sh gác checklist §4.7
 docs/go/             hướng dẫn học Go qua codebase này

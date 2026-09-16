@@ -1,0 +1,400 @@
+package authz
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
+)
+
+// lastUsedThrottle bounds writes from Authenticate (§11.4: "throttle 5 min").
+const lastUsedThrottle = 5 * time.Minute
+
+// defaultTokenTTL is §11.4's one-year default expiry.
+const defaultTokenTTL = 365 * 24 * time.Hour
+
+type service struct {
+	db     *pg.DB
+	pepper []byte
+	now    func() time.Time // swapped in tests
+}
+
+// New returns the Service. pepper is the HMAC key for token hashes
+// (config.TokenPepper); rotating it invalidates every token, which is the
+// point of keeping it out of the database.
+func New(db *pg.DB, pepper []byte) Service {
+	if len(pepper) < 16 {
+		panic("authz: token pepper must be at least 16 bytes")
+	}
+	return &service{db: db, pepper: pepper, now: time.Now}
+}
+
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func isUUID(s string) bool { return uuidRe.MatchString(s) }
+
+// nullable maps "" to SQL NULL for optional uuid parameters.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// ---- Authorize -----------------------------------------------------------
+
+func (s *service) Authorize(ctx context.Context, p Principal, r Resource, a Action) error {
+	if r.OrgID == "" {
+		return fmt.Errorf("%w: resource has no organization", ErrInvalid)
+	}
+	switch p.Kind {
+	case PrincipalToken:
+		return authorizeToken(p, r, a)
+	case PrincipalUser:
+		return s.authorizeUser(ctx, p, r, a)
+	}
+	return fmt.Errorf("%w: principal kind %q", ErrInvalid, p.Kind)
+}
+
+// authorizeToken needs no database: Authenticate already loaded everything.
+// A token whose node is not on the resource's chain gets ErrNoAccess (404 —
+// §7.2 "right token, wrong project"); one that is on the chain but lacks
+// the permission gets ErrForbidden.
+func authorizeToken(p Principal, r Resource, a Action) error {
+	if p.TokenScope.ID == "" || r.idAt(p.TokenScope.Level) != p.TokenScope.ID {
+		return ErrNoAccess
+	}
+	if !permissionsAllow(p.Permissions, a) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// authorizeUser walks up the tree in one query (§11.3.3). The tenant
+// condition is in the WHERE clause, not applied afterwards.
+func (s *service) authorizeUser(ctx context.Context, p Principal, r Resource, a Action) error {
+	if !isUUID(p.UserID) {
+		return ErrNoAccess
+	}
+	if !isUUID(r.OrgID) || (r.WorkspaceID != "" && !isUUID(r.WorkspaceID)) || (r.ProjectID != "" && !isUUID(r.ProjectID)) {
+		return fmt.Errorf("%w: resource ids", ErrInvalid)
+	}
+	// Absent levels are passed as NULL: `scope_id = NULL` is never true, so
+	// an org-level action simply does not match workspace or project rows.
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT role FROM memberships
+		 WHERE user_id = $1
+		   AND ((scope_level = 'organization' AND scope_id = $2)
+		     OR (scope_level = 'workspace'    AND scope_id = $3)
+		     OR (scope_level = 'project'      AND scope_id = $4))`,
+		p.UserID, r.OrgID, nullable(r.WorkspaceID), nullable(r.ProjectID))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var best Role
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return err
+		}
+		best = stronger(best, Role(role))
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if best == "" {
+		return ErrNoAccess
+	}
+	if !roleAllows(best, a) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// ---- Tokens --------------------------------------------------------------
+
+func (s *service) Authenticate(ctx context.Context, bearer string) (Principal, error) {
+	prefix, secret, ok := splitBearer(strings.TrimSpace(bearer))
+	if !ok {
+		return Principal{}, ErrUnauthenticated
+	}
+	want := hashSecret(s.pepper, secret)
+
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT id, token_hash, scope_level, scope_id, permissions, last_used_at, expires_at, revoked_at
+		  FROM api_tokens WHERE prefix = $1`, prefix)
+	if err != nil {
+		return Principal{}, err
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		id, level, scopeID string
+		hash               []byte
+		perms              []string
+		lastUsed, revoked  *time.Time
+		expires            time.Time
+	}
+	var match *candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.hash, &c.level, &c.scopeID, &c.perms, &c.lastUsed, &c.expires, &c.revoked); err != nil {
+			return Principal{}, err
+		}
+		// Compare every candidate; do not break early. Prefix collisions
+		// are rare and the loop is short, so there is no timing to leak.
+		if hashEqual(c.hash, want) && match == nil {
+			cc := c
+			match = &cc
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return Principal{}, err
+	}
+	rows.Close()
+
+	now := s.now()
+	if match == nil || match.revoked != nil || !now.Before(match.expires) {
+		return Principal{}, ErrUnauthenticated
+	}
+
+	if match.lastUsed == nil || now.Sub(*match.lastUsed) >= lastUsedThrottle {
+		// Best effort: a lost touch costs nothing but a stale "last used"
+		// column, and the next request past the throttle retries it.
+		_, _ = s.db.Q(ctx).Exec(ctx, `UPDATE api_tokens SET last_used_at = $2 WHERE id = $1`, match.id, now)
+	}
+
+	perms := make([]Permission, len(match.perms))
+	for i, p := range match.perms {
+		perms[i] = Permission(p)
+	}
+	return Principal{
+		Kind:        PrincipalToken,
+		TokenID:     match.id,
+		TokenScope:  ScopeRef{Level: Level(match.level), ID: match.scopeID},
+		Permissions: perms,
+	}, nil
+}
+
+func (s *service) IssueToken(ctx context.Context, spec TokenSpec) (Issued, error) {
+	if !tokenLevels[spec.Scope.Level] || !isUUID(spec.Scope.ID) {
+		return Issued{}, fmt.Errorf("%w: token scope", ErrInvalid)
+	}
+	if len(spec.Permissions) == 0 {
+		return Issued{}, fmt.Errorf("%w: token needs at least one permission", ErrInvalid)
+	}
+	perms := make([]string, 0, len(spec.Permissions))
+	for _, p := range spec.Permissions {
+		if !validPermissions[p] {
+			return Issued{}, fmt.Errorf("%w: permission %q", ErrInvalid, p)
+		}
+		perms = append(perms, string(p))
+	}
+	if l := len(spec.Name); l < 1 || l > 200 {
+		return Issued{}, fmt.Errorf("%w: token name", ErrInvalid)
+	}
+	var createdBy *string
+	if spec.CreatedBy != "" {
+		if !isUUID(spec.CreatedBy) {
+			return Issued{}, ErrNotFound
+		}
+		createdBy = &spec.CreatedBy
+	}
+	now := s.now()
+	expires := spec.ExpiresAt
+	if expires.IsZero() {
+		expires = now.Add(defaultTokenTTL)
+	}
+	if !expires.After(now) {
+		return Issued{}, fmt.Errorf("%w: expiry is in the past", ErrInvalid)
+	}
+
+	secret := newSecret()
+	var t Token
+	var cb *string
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO api_tokens (prefix, token_hash, scope_level, scope_id, permissions, name, created_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, prefix, scope_level, scope_id, name, created_by, created_at, expires_at`,
+		secret[:prefixLen], hashSecret(s.pepper, secret), string(spec.Scope.Level), spec.Scope.ID, perms, spec.Name, createdBy, expires,
+	).Scan(&t.ID, &t.Prefix, &t.Scope.Level, &t.Scope.ID, &t.Name, &cb, &t.CreatedAt, &t.ExpiresAt)
+	if err != nil {
+		return Issued{}, mapErr(err)
+	}
+	if cb != nil {
+		t.CreatedBy = *cb
+	}
+	t.Permissions = append([]Permission(nil), spec.Permissions...)
+	return Issued{Token: t, Plaintext: TokenPrefix + secret}, nil
+}
+
+func (s *service) RevokeToken(ctx context.Context, id string) error {
+	if !isUUID(id) {
+		return ErrNotFound
+	}
+	tag, err := s.db.Q(ctx).Exec(ctx, `UPDATE api_tokens SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, id, s.now())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	// Zero rows: either unknown or already revoked. Revoking twice is fine.
+	var exists bool
+	if err := s.db.Q(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM api_tokens WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *service) ListTokens(ctx context.Context, scope ScopeRef) ([]Token, error) {
+	if !tokenLevels[scope.Level] || !isUUID(scope.ID) {
+		return nil, fmt.Errorf("%w: token scope", ErrInvalid)
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT id, prefix, scope_level, scope_id, permissions, name, created_by, created_at, last_used_at, expires_at, revoked_at
+		  FROM api_tokens WHERE scope_level = $1 AND scope_id = $2 ORDER BY created_at`, string(scope.Level), scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Token
+	for rows.Next() {
+		var t Token
+		var perms []string
+		var cb *string
+		var lastUsed, revoked *time.Time
+		if err := rows.Scan(&t.ID, &t.Prefix, &t.Scope.Level, &t.Scope.ID, &perms, &t.Name, &cb, &t.CreatedAt, &lastUsed, &t.ExpiresAt, &revoked); err != nil {
+			return nil, err
+		}
+		for _, p := range perms {
+			t.Permissions = append(t.Permissions, Permission(p))
+		}
+		if cb != nil {
+			t.CreatedBy = *cb
+		}
+		if lastUsed != nil {
+			t.LastUsedAt = *lastUsed
+		}
+		if revoked != nil {
+			t.RevokedAt = *revoked
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ---- Users and memberships ----------------------------------------------
+
+func normalizeEmail(email string) (string, bool) {
+	e := strings.ToLower(strings.TrimSpace(email))
+	at := strings.IndexByte(e, '@')
+	if at < 1 || at == len(e)-1 || len(e) > 254 || strings.ContainsAny(e, " \t\r\n") {
+		return "", false
+	}
+	return e, true
+}
+
+func (s *service) CreateUser(ctx context.Context, email string) (User, error) {
+	e, ok := normalizeEmail(email)
+	if !ok {
+		return User{}, fmt.Errorf("%w: email", ErrInvalid)
+	}
+	u, err := scanUser(s.db.Q(ctx).QueryRow(ctx, `INSERT INTO users (email) VALUES ($1) RETURNING `+userColumns, e))
+	return u, mapErr(err)
+}
+
+func (s *service) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	e, ok := normalizeEmail(email)
+	if !ok {
+		return User{}, ErrNotFound
+	}
+	u, err := scanUser(s.db.Q(ctx).QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE email = $1`, e))
+	return u, mapErr(err)
+}
+
+func (s *service) GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error) {
+	if !membershipLevels[scope.Level] || !isUUID(scope.ID) {
+		return Membership{}, fmt.Errorf("%w: membership scope", ErrInvalid)
+	}
+	if !validRoles[role] {
+		return Membership{}, fmt.Errorf("%w: role %q", ErrInvalid, role)
+	}
+	if !isUUID(userID) {
+		return Membership{}, ErrNotFound
+	}
+	var m Membership
+	// Granting again changes the role: one row per (user, node).
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO memberships (user_id, scope_level, scope_id, role) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, scope_level, scope_id) DO UPDATE SET role = EXCLUDED.role
+		RETURNING id, user_id, scope_level, scope_id, role, created_at`,
+		userID, string(scope.Level), scope.ID, string(role),
+	).Scan(&m.ID, &m.UserID, &m.Scope.Level, &m.Scope.ID, &m.Role, &m.CreatedAt)
+	return m, mapErr(err)
+}
+
+func (s *service) RevokeRole(ctx context.Context, userID string, scope ScopeRef) error {
+	if !membershipLevels[scope.Level] || !isUUID(scope.ID) {
+		return fmt.Errorf("%w: membership scope", ErrInvalid)
+	}
+	if !isUUID(userID) {
+		return ErrNotFound
+	}
+	tag, err := s.db.Q(ctx).Exec(ctx,
+		`DELETE FROM memberships WHERE user_id = $1 AND scope_level = $2 AND scope_id = $3`,
+		userID, string(scope.Level), scope.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *service) ListMemberships(ctx context.Context, userID string) ([]Membership, error) {
+	if !isUUID(userID) {
+		return nil, ErrNotFound
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT id, user_id, scope_level, scope_id, role, created_at
+		  FROM memberships WHERE user_id = $1 ORDER BY created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Membership
+	for rows.Next() {
+		var m Membership
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Scope.Level, &m.Scope.ID, &m.Role, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func mapErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, pg.ErrNoRows):
+		return ErrNotFound
+	case pg.IsUniqueViolation(err):
+		return ErrConflict
+	case pg.IsForeignKeyViolation(err):
+		return ErrNotFound
+	case pg.IsCheckViolation(err):
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return err
+}
