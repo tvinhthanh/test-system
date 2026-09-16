@@ -1,0 +1,221 @@
+# Frontend Rules
+
+These rules adapt the shared engineering skills in
+`C:/wamp64/www/agents/skills` to this Vue.js client. Read this file before
+adding a page, component, API call, or visual pattern.
+
+## Stack
+
+- Vue 3 Composition API with TypeScript strict mode.
+- Vue Router for navigation and URL state.
+- Pinia for app-wide state only; use feature composables for local screen
+  state.
+- Repository classes own API access and DTO mapping.
+- Components render state and emit user intent; they do not call `fetch` or
+  contain authorization rules.
+- Use the existing package versions in `package.json`; verify APIs before
+  adding dependencies.
+
+## Boundaries
+
+```text
+View -> composable / ViewModel -> repository -> ApiClient -> Go API
+```
+
+- Keep feature code under `src/features/<feature>`.
+- Keep shared UI primitives under `src/shared`.
+- Keep cross-feature services under `src/core`.
+- Do not create `utils`, `common`, or `models` dumping grounds.
+- Do not duplicate API clients, DTOs, pagination, error mapping, or status
+  badges. Search before adding one.
+- Server owns tenant isolation, authorization, flaky scoring, identity
+  resolution, and run aggregation.
+
+## API Contract
+
+- Use typed DTOs mapped field-by-field. Never expose raw database entities.
+- All list calls use bounded cursor pagination. The cursor is opaque; the
+  client must not parse it.
+- Branch on stable error `code`, never on error message text.
+- Preserve the server `X-Request-Id` for actionable error diagnostics.
+- Use the established error envelope:
+
+```json
+{
+  "error": {
+    "code": "MACHINE_CODE",
+    "message": "Human-readable message",
+    "details": {}
+  }
+}
+```
+
+- State-changing requests carry the CSRF token and session cookies according
+  to the backend contract.
+- Live API errors must not silently fall back to fixtures. Fixture mode must be
+  explicit and visible in development configuration.
+- Do not invent or consume an endpoint without recording its contract in
+  `PLAN.md`.
+
+## Vue Component Rules
+
+- Keep page components focused on composition and layout. Move data loading,
+  mutations, pagination, and URL synchronization into composables/ViewModels.
+- A component over roughly 300 lines needs a decomposition review.
+- Props are readonly inputs; emits describe user intent. Avoid hidden mutation
+  through shared objects.
+- Use semantic HTML: links navigate, buttons act, labels label inputs.
+- Every icon-only button has an accessible label and tooltip where useful.
+- Do not place business or security checks only in the UI.
+- Keep route filters, search, sort, and cursor state shareable through the URL.
+
+## Required UI States
+
+Every async screen and mutation must design these states:
+
+- Loading: stable skeleton/layout, disabled in-flight controls, no layout jump.
+- Empty: distinguish first-run empty from filtered-to-empty and offer the next
+  useful action.
+- Error: explain what failed, preserve user input, provide retry/back action,
+  and show request ID when available.
+- Success: show visible confirmation and updated data.
+- Disabled/blocked: explain missing permission or prerequisite.
+- Permission denied: hide inaccessible actions when known; server remains the
+  authority.
+
+Never leave an eternal spinner or rely on a toast as the only confirmation for
+a persistent state change.
+
+## Product-Specific UX Rules
+
+- A run with `status=passed` and `flakyCount > 0` is amber and labeled
+  `Passed with flaky tests`; it is never presented as clean green.
+- Failure, stack, log, and report text must be selectable.
+- Every technical text block has an explicit Copy action with success/failure
+  feedback.
+- Never render report content through raw HTML. Treat names, errors, stacks,
+  HAR data, and attachments as untrusted input.
+- Triage actions emit the corresponding server event. The client does not
+  update TTRC or derive a replacement score locally.
+- Use color plus text/icon for status; color must not be the sole signal.
+
+## Visual System
+
+- Use a small, documented token set for color, spacing, type, radius, and
+  elevation. Do not mix arbitrary values beside tokens.
+- Use a restrained operational dashboard style: dense, scannable, calm, and
+  focused on comparison and repeated triage work.
+- Avoid nested cards, decorative gradients, excessive shadows, generic purple
+  palettes, and marketing-style hero layouts.
+- Reject AI-slop patterns: no generic hero/marketing shell for the product
+  dashboard, no decorative blobs, no gratuitous gradients, no one-note color
+  palette, no oversized headings in operational screens, and no card-inside-
+  card composition without a real framing need.
+- Use real product signals in the first viewport: project, run status, failure
+  state, or test history. Do not fill empty space with decorative copy.
+- Reuse the design system's icon, button, table, badge, and empty/error states.
+  A new visual variant needs a reason recorded in the slice plan.
+- Keep spacing on a consistent 4/8px rhythm and establish hierarchy through
+  size, weight, and grouping.
+- Keep normal text contrast at least WCAG AA. Check gray secondary text rather
+  than trusting visual judgment.
+- Use one primary action per region. Destructive actions need confirmation or
+  undo.
+
+## Responsive And Accessibility
+
+- Verify approximately 360px, 768px, and wide desktop layouts.
+- No accidental horizontal scrolling. Long names wrap or truncate with a
+  deliberate tooltip/title strategy.
+- Touch targets are at least 44px.
+- Keyboard order follows visual order and every control has a visible focus
+  state.
+- Dialogs trap focus, close with Escape, and restore focus to the opener.
+- Respect reduced-motion preferences.
+- Loading content reserves space to prevent layout shift.
+
+## Testing And Review
+
+- Run typecheck and unit/component tests for affected behavior.
+- Test repositories with mocked transport; test ViewModels/composables for
+  loading, error, retry, pagination, stale responses, and mutation guards.
+- For UI changes, verify real browser behavior at desktop and mobile widths.
+- Watch browser console and network requests. Repeated requests or render
+  loops are defects.
+- Verify the visible result and persisted result after mutations.
+- Test one permitted role and one denied role for permission-sensitive flows.
+- Report verified, untested, and broken behavior separately.
+
+## Bundle And Loading Performance
+
+- Keep the initial route small. App shell, auth guard, router, and the current
+  page are initial-load dependencies; reports, trace viewers, charts, and
+  secondary feature code are lazy-loaded by route or explicit interaction.
+- Do not import a whole icon, chart, editor, trace viewer, or utility library
+  when a single module or native browser API is enough.
+- Avoid barrel exports that cause unrelated feature modules to enter the
+  initial graph. Import feature dependencies from their owning module.
+- Never fetch all projects, runs, results, identities, or history into memory
+  for a screen that displays one page. Use server-side filters and opaque
+  cursor pagination.
+- Never render an unbounded list. Use pagination or virtualization before the
+  UI can receive thousands of rows.
+- Do not load trace/artifact content until the user opens the relevant detail
+  view. Do not preload large report payloads merely because a row is visible.
+- Keep fixture payloads and development-only tooling out of production builds.
+  Use build-time explicit mode selection and verify the production bundle does
+  not contain fixture-only data or debug panels.
+
+## Render And Request Discipline
+
+- A reactive state update must have an identifiable owner. Do not mutate a
+  shared reactive object from multiple components without a store/composable
+  contract.
+- Do not start requests from template expressions, render functions, computed
+  getters, or watchers without a precise dependency and cleanup strategy.
+- Every watcher that fetches data must use the smallest dependency set, cancel
+  or invalidate stale requests, and avoid writing back to the state that
+  triggers itself.
+- Do not use `setInterval`, recursive timers, or polling without an explicit
+  lifecycle owner, backoff/visibility behavior, and cleanup on unmount.
+- A route change must produce one intentional request per resource. Shared
+  parent data must be reused; child components must not independently refetch
+  the same resource.
+- Debounce search and filter inputs before network calls. Do not debounce
+  button mutations that need immediate feedback; disable them while pending.
+- Use stable keys for lists. Never use array indexes when rows can be inserted,
+  removed, sorted, or paginated.
+- Keep expensive formatting, filtering, and derived summaries out of repeated
+  templates. Prefer server-side aggregation or memoized computed values with
+  bounded inputs.
+- Avoid `deep: true` watchers and broad reactive objects unless the change
+  boundary is documented and measured.
+- Verify render/request behavior with browser network logs: no duplicate
+  initial fetch, no request loop, no N+1 row fetch, and no request after the
+  owning route/component is disposed.
+
+## Performance Acceptance Checks
+
+For every new page or dependency-heavy feature, record:
+
+- initial route chunks and the reason for any large dependency;
+- lazy-loaded routes/components and deferred artifact/report resources;
+- number of API requests on first load and after filter/page changes;
+- maximum rendered row count and pagination/virtualization behavior;
+- browser console and network results at wide and narrow viewport sizes.
+
+Treat a duplicated request, unbounded render, accidental eager trace/chart
+import, or production fixture payload as a defect. Do not hide it with a
+longer debounce or a loading spinner.
+
+## Definition Of Done
+
+A frontend slice is complete only when:
+
+- The route, API contract, state model, and permission behavior are documented.
+- The six async states are handled.
+- No HTTP or business logic leaks into presentation components.
+- Technical text is selectable and copyable where required.
+- Responsive and keyboard behavior has been checked.
+- Typecheck, relevant tests, and browser verification are recorded in
+  `PLAN.md`.
