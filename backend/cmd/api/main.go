@@ -63,7 +63,7 @@ func main() {
 		logger.Error("boot", "err", err)
 		os.Exit(2)
 	}
-	handler := buildHandler(cfg, db, store, reg, logger)
+	handler, _ := buildHandler(cfg, db, store, reg, logger)
 
 	api := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -103,8 +103,9 @@ func main() {
 // buildHandler wires every module onto one mux (§6.9.3: cmd/* is the one
 // place that imports everything) and wraps it in the middleware stack.
 // Separate from main so the HTTP integration test drives the exact
-// handler the binary serves.
-func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metric.Registry, logger *slog.Logger) http.Handler {
+// handler the binary serves; the Router is returned so the test can walk
+// every mounted pattern (§14.3 cross-tenant is per endpoint, not per sample).
+func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metric.Registry, logger *slog.Logger) (http.Handler, *httpx.Router) {
 	// Modules, in dependency order (§6.9.3).
 	ten := tenancy.New(db)
 	az := authz.New(db, []byte(cfg.TokenPepper))
@@ -112,7 +113,7 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	idn := identity.New(db)
 	art := artifact.New(db, store, res)
 
-	mux := http.NewServeMux()
+	mux := httpx.NewRouter()
 	mux.Handle("GET /healthz", httpx.Health())
 	ingest.Routes(mux, ingest.Deps{
 		DB: db, Queue: queue.New(db), Tenancy: ten, Authz: az, Results: res, Identity: idn,
@@ -126,5 +127,5 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	(&dashboard{tenancy: ten, authz: az, query: query.New(db), triage: triage.New(db, res), logger: logger}).routes(mux)
 
 	// Metrics must wrap the mux directly: it reads the matched route pattern.
-	return httpx.RequestID(httpx.Logging(logger)(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux))))
+	return httpx.RequestID(httpx.Logging(logger)(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux)))), mux
 }

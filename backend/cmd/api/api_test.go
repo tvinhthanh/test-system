@@ -116,7 +116,8 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false}
 	reg := metric.New()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(buildHandler(cfg, db, store, reg, logger))
+	handler, _ := buildHandler(cfg, db, store, reg, logger)
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
 	// Seed: org → ws → two projects; alice is a member of checkout only;

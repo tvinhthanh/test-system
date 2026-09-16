@@ -39,7 +39,7 @@ type handlers struct {
 
 // Routes mounts §7.2 endpoints 4 and 6 behind bearer auth; endpoint 5 is
 // the presigned URL itself and never touches this server.
-func Routes(mux *http.ServeMux, d Deps) {
+func Routes(mux httpx.Mux, d Deps) {
 	h := &handlers{
 		Deps:    d,
 		uploads: d.Metrics.Counter("artifact_uploads_total", "Artifact declare/complete outcomes by project (§6.4 artifact row).", "project", "result"),

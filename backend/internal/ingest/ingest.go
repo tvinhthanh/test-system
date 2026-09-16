@@ -49,7 +49,7 @@ const (
 
 // Routes mounts the P1 endpoints on mux, each behind bearer auth and the
 // per-token rate limit. Mount once; metric names are registered here.
-func Routes(mux *http.ServeMux, d Deps) {
+func Routes(mux httpx.Mux, d Deps) {
 	h := newHandlers(d)
 	auth := authz.Middleware(d.Authz)
 	limit := httpx.RateLimit(RatePerMinute, RateBurst, func(r *http.Request) string {

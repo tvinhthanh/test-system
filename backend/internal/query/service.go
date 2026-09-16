@@ -183,6 +183,17 @@ func (s *service) Results(ctx context.Context, projectID, runID string, limit in
 	if err := rows.Err(); err != nil {
 		return Page[Result]{}, err
 	}
+	if len(items) == 0 {
+		// An empty page is only an answer when the run is this project's; a
+		// foreign or unknown run is 404, never "no results" (§11.3.3).
+		var one int
+		if err := s.db.Q(ctx).QueryRow(ctx, `SELECT 1 FROM runs WHERE project_id = $1 AND id = $2`, projectID, runID).Scan(&one); err != nil {
+			if errors.Is(err, pg.ErrNoRows) {
+				return Page[Result]{}, ErrNotFound
+			}
+			return Page[Result]{}, err
+		}
+	}
 	page := Page[Result]{Items: items}
 	if len(items) > limit {
 		page.Items = items[:limit]

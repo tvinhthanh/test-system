@@ -46,7 +46,7 @@ type dashboard struct {
 	logger  *slog.Logger
 }
 
-func (d *dashboard) routes(mux *http.ServeMux) {
+func (d *dashboard) routes(mux httpx.Mux) {
 	mux.HandleFunc("GET /v1/projects", d.projects)
 	mux.HandleFunc("GET /v1/projects/{projectId}/runs", d.runs)
 	mux.HandleFunc("GET /v1/projects/{projectId}/runs/{runId}", d.run)

@@ -119,7 +119,8 @@ Confirmed semantics: `user.name` is the email local part until profiles exist;
 `environment` filters by environment key; `q` matches branch, commit and
 localRunId (≤ 200 chars, `%`/`_` literal); result ordering is failures first
 then `displayName, id`; identity `flakyScore`/`verdict` are the worst signal
-across environments, `recentStatuses` newest first (≤ 30); `view=flaky` keeps
+across environments, `recentStatuses` newest first (≤ 30); `…/runs/{runId}/results`
+for a run outside the project is 404, never an empty page; `view=flaky` keeps
 `suspect|flaky|quarantine_suggested`; `HYPOTHESIS_ACCEPTED` is not a UI type yet
 (400) — the operator CLI records it with a category.
 

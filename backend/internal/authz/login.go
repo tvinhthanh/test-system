@@ -161,7 +161,7 @@ func originCheck(r *http.Request, opts WebOptions, requireHeader bool) string {
 // itself can carry X-CSRF-Token (double submit) — the browser never
 // submits credentials without first having been handed a token by us.
 // Mount SessionMiddleware around the whole mux separately.
-func AuthRoutes(mux *http.ServeMux, svc Service, opts WebOptions) {
+func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	h := &webHandlers{svc: svc, opts: opts}
 	mux.Handle("GET /v1/session", http.HandlerFunc(h.session))
 	mux.Handle("POST /v1/session", http.HandlerFunc(h.login))
