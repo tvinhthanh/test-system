@@ -44,6 +44,8 @@ type Signal struct {
 	Verdict       Verdict
 	LastFailedAt  time.Time
 	ComputedAt    time.Time
+	LastOutcome   int       // fold state, see Stats
+	RebuiltAt     time.Time // last exact rebuild from the window
 }
 
 // Tunables of §8.6, all [ASSUMPTION].
@@ -66,8 +68,11 @@ type Service interface {
 	// finished run (§8.6: "recompute on run finish, incremental"). Results
 	// without a stable id are skipped. Returns how many signals it wrote.
 	RecomputeRun(ctx context.Context, projectID, runID string) (int, error)
-	// Recompute rebuilds one signal from results.History.
+	// Recompute rebuilds one signal exactly from its window.
 	Recompute(ctx context.Context, projectID, identityID, environmentID string) (Signal, error)
+	// Sweep rebuilds up to limit signals not rebuilt for olderThan, so
+	// results that left the window drop out of the counts (RebuildAfter).
+	Sweep(ctx context.Context, olderThan time.Duration, limit int) (int, error)
 	Get(ctx context.Context, identityID, environmentID string) (Signal, error)
 	// ListWorst returns a project's signals with a score, highest first.
 	ListWorst(ctx context.Context, projectID string, limit int) ([]Signal, error)

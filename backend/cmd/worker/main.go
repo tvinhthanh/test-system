@@ -107,6 +107,11 @@ func main() {
 			} else if n > 0 {
 				logger.Info("sweep", "auto_closed", n)
 			}
+			if n, err := flk.Sweep(ctx, flaky.RebuildAfter, 500); err != nil {
+				logger.Error("flaky sweep", "err", err)
+			} else if n > 0 {
+				logger.Info("flaky signals rebuilt from window", "n", n)
+			}
 			if err := artJobs.Sweep(ctx); err != nil {
 				logger.Error("artifact sweep", "err", err)
 			}

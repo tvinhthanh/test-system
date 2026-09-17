@@ -212,6 +212,25 @@ func (h *handlers) appendEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Tier 1 (§7.6) first: exact alias match only, one read, so a known test
+	// lands with its stable id in the same row write instead of a second
+	// update of every row (test/load, §14.2). A failure here is not the
+	// reporter's problem — the events are stored unresolved and tier 2
+	// resolves them at finish.
+	identityMap := map[string]string{}
+	list := make([]identity.Ref, 0, len(refs))
+	for _, ref := range refs {
+		list = append(list, ref)
+	}
+	if m, err := h.Identity.ResolveInline(r.Context(), string(c.project), list); err != nil {
+		h.Logger.Warn("inline resolve failed", "request_id", httpx.RequestIDFrom(r.Context()), "project", c.project, "err", err)
+	} else if len(m) > 0 {
+		identityMap = m
+		for i := range attempts {
+			attempts[i].StableTestID = m[attempts[i].ClientTestID]
+		}
+	}
+
 	var appended results.Appended
 	err := h.DB.WithTx(r.Context(), func(ctx context.Context) error {
 		var err error
@@ -234,22 +253,6 @@ func (h *handlers) appendEvents(w http.ResponseWriter, r *http.Request) {
 	h.events.Add(float64(appended.Accepted), string(c.project), "accepted")
 	h.events.Add(float64(appended.Duplicates), string(c.project), "duplicate")
 
-	// Tier 1 (§7.6): exact alias match only, then pin the hits onto the
-	// results just written. A failure here is not the reporter's problem —
-	// the events are stored and tier 2 resolves them at finish.
-	identityMap := map[string]string{}
-	list := make([]identity.Ref, 0, len(refs))
-	for _, ref := range refs {
-		list = append(list, ref)
-	}
-	if m, err := h.Identity.ResolveInline(r.Context(), string(c.project), list); err != nil {
-		h.Logger.Warn("inline resolve failed", "request_id", httpx.RequestIDFrom(r.Context()), "project", c.project, "err", err)
-	} else if len(m) > 0 {
-		identityMap = m
-		if _, err := h.Results.SetStableIDs(r.Context(), run.ID, m); err != nil {
-			h.Logger.Warn("stable id backfill failed", "request_id", httpx.RequestIDFrom(r.Context()), "run", run.ID, "err", err)
-		}
-	}
 	h.write(w, http.StatusOK, batchResponse{Accepted: appended.Accepted, Duplicates: appended.Duplicates, IdentityMap: identityMap})
 }
 

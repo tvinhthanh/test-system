@@ -3,10 +3,8 @@ package flaky
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"regexp"
-	"sort"
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
@@ -33,6 +31,7 @@ func isUUID(s string) bool { return uuidRe.MatchString(s) }
 // a database and so a future recalibration is a diff on one function.
 type Stats struct {
 	TotalRuns, FailedRuns, FlakyPassRuns, FlipCount int
+	LastOutcome                                     int // fold state: 1 pass, -1 fail, 0 none yet
 	LastFailedAt                                    time.Time
 	Score                                           float64
 	HasScore                                        bool
@@ -44,34 +43,46 @@ type Stats struct {
 // series (the test did pass) and separately as a flaky pass.
 func Compute(history []results.HistoryPoint, now time.Time) Stats {
 	var st Stats
-	prev := 0 // 0 none, 1 pass, -1 fail
 	for _, h := range history {
-		var cur int
-		switch h.FinalStatus {
-		case results.FinalPassed:
-			cur = 1
-		case results.FinalFlakyPass:
-			cur = 1
-			st.FlakyPassRuns++
-		case results.FinalFailed, results.FinalTimedOut, results.FinalInterrupted:
-			cur = -1
-			st.FailedRuns++
-			at := h.ObservedAt
-			if at.IsZero() {
-				at = h.StartedAt
-			}
-			if at.After(st.LastFailedAt) {
-				st.LastFailedAt = at
-			}
-		default:
-			continue // skipped: no evidence either way
-		}
-		st.TotalRuns++
-		if prev != 0 && cur != prev {
-			st.FlipCount++
-		}
-		prev = cur
+		st.Apply(h)
 	}
+	return st.Finalize(now)
+}
+
+// Apply folds one more result into the counts. It is the whole of the
+// incremental path: a finish applies its results to the stored fold state
+// and the numbers are what Compute over the history would give.
+func (st *Stats) Apply(h results.HistoryPoint) {
+	var cur int
+	switch h.FinalStatus {
+	case results.FinalPassed:
+		cur = 1
+	case results.FinalFlakyPass:
+		cur = 1
+		st.FlakyPassRuns++
+	case results.FinalFailed, results.FinalTimedOut, results.FinalInterrupted:
+		cur = -1
+		st.FailedRuns++
+		at := h.ObservedAt
+		if at.IsZero() {
+			at = h.StartedAt
+		}
+		if at.After(st.LastFailedAt) {
+			st.LastFailedAt = at
+		}
+	default:
+		return // skipped: no evidence either way
+	}
+	st.TotalRuns++
+	if st.LastOutcome != 0 && cur != st.LastOutcome {
+		st.FlipCount++
+	}
+	st.LastOutcome = cur
+}
+
+// Finalize derives score and verdict from the counts (§8.6 formula).
+func (st Stats) Finalize(now time.Time) Stats {
+	st.Score, st.HasScore = 0, false
 	if st.TotalRuns < 2 {
 		st.Verdict = VerdictInsufficientData
 		return st
@@ -99,84 +110,13 @@ func Compute(history []results.HistoryPoint, now time.Time) Stats {
 	return st
 }
 
-func (s *service) RecomputeRun(ctx context.Context, projectID, runID string) (int, error) {
-	if !isUUID(projectID) || !isUUID(runID) {
-		return 0, ErrNotFound
-	}
-	run, err := s.results.GetRunByID(ctx, results.RunID(runID))
-	if err != nil {
-		if errors.Is(err, results.ErrNotFound) {
-			return 0, ErrNotFound
-		}
-		return 0, err
-	}
-	if run.ProjectID != projectID {
-		return 0, ErrNotFound
-	}
-	list, err := s.results.ListResults(ctx, run.ID)
-	if err != nil {
-		return 0, err
-	}
-	// Distinct identities in id order: this runs inside the run.finished
-	// job's transaction, so two workers recomputing two runs of the same
-	// suite upsert the same flaky_signals rows — in result-arrival order they
-	// can wait on each other in a cycle (deadlock), in one fixed order the
-	// second queues behind the first.
-	seen := map[string]bool{}
-	var ids []string
-	for _, tr := range list {
-		if tr.StableTestID == "" || seen[tr.StableTestID] {
-			continue
-		}
-		seen[tr.StableTestID] = true
-		ids = append(ids, tr.StableTestID)
-	}
-	sort.Strings(ids)
-	for n, id := range ids {
-		if _, err := s.Recompute(ctx, projectID, id, run.EnvironmentID); err != nil {
-			return n, fmt.Errorf("identity %s: %w", id, err)
-		}
-	}
-	return len(ids), nil
-}
-
-func (s *service) Recompute(ctx context.Context, projectID, identityID, environmentID string) (Signal, error) {
-	if !isUUID(projectID) || !isUUID(identityID) || !isUUID(environmentID) {
-		return Signal{}, ErrNotFound
-	}
-	now := s.now().UTC()
-	history, err := s.results.History(ctx, identityID, environmentID, now.Add(-WindowDays*24*time.Hour))
-	if err != nil {
-		return Signal{}, err
-	}
-	st := Compute(history, now)
-	var score *float64
-	if st.HasScore {
-		score = &st.Score
-	}
-	var lastFailed *time.Time
-	if !st.LastFailedAt.IsZero() {
-		lastFailed = &st.LastFailedAt
-	}
-	sig, err := scan(s.db.Q(ctx).QueryRow(ctx, `
-		INSERT INTO flaky_signals (project_id, identity_id, environment_id, window_days, total_runs, failed_runs, flaky_pass_runs, flip_count, flaky_score, verdict, last_failed_at, computed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (identity_id, environment_id) DO UPDATE SET
-			total_runs = EXCLUDED.total_runs, failed_runs = EXCLUDED.failed_runs, flaky_pass_runs = EXCLUDED.flaky_pass_runs,
-			flip_count = EXCLUDED.flip_count, flaky_score = EXCLUDED.flaky_score, verdict = EXCLUDED.verdict,
-			last_failed_at = EXCLUDED.last_failed_at, computed_at = EXCLUDED.computed_at
-		RETURNING `+columns,
-		projectID, identityID, environmentID, WindowDays, st.TotalRuns, st.FailedRuns, st.FlakyPassRuns, st.FlipCount, score, string(st.Verdict), lastFailed, now))
-	return sig, mapErr(err)
-}
-
-const columns = `id, project_id, identity_id, environment_id, window_days, total_runs, failed_runs, flaky_pass_runs, flip_count, flaky_score, verdict, last_failed_at, computed_at`
+const columns = `id, project_id, identity_id, environment_id, window_days, total_runs, failed_runs, flaky_pass_runs, flip_count, flaky_score, verdict, last_failed_at, computed_at, last_outcome, rebuilt_at`
 
 func scan(row interface{ Scan(dest ...any) error }) (Signal, error) {
 	var s Signal
 	var score *float64
 	var lastFailed *time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.IdentityID, &s.EnvironmentID, &s.WindowDays, &s.TotalRuns, &s.FailedRuns, &s.FlakyPassRuns, &s.FlipCount, &score, &s.Verdict, &lastFailed, &s.ComputedAt)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.IdentityID, &s.EnvironmentID, &s.WindowDays, &s.TotalRuns, &s.FailedRuns, &s.FlakyPassRuns, &s.FlipCount, &score, &s.Verdict, &lastFailed, &s.ComputedAt, &s.LastOutcome, &s.RebuiltAt)
 	if err != nil {
 		return Signal{}, err
 	}
@@ -186,7 +126,7 @@ func scan(row interface{ Scan(dest ...any) error }) (Signal, error) {
 	if lastFailed != nil {
 		s.LastFailedAt = lastFailed.UTC()
 	}
-	s.ComputedAt = s.ComputedAt.UTC()
+	s.ComputedAt, s.RebuiltAt = s.ComputedAt.UTC(), s.RebuiltAt.UTC()
 	return s, nil
 }
 

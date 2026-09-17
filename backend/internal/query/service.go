@@ -455,19 +455,26 @@ func (s *service) Triage(ctx context.Context, projectID string, since time.Time)
 	var m TriageMetrics
 	var ttrc, first *float64
 	err := s.db.Q(ctx).QueryRow(ctx, `
+		-- One pass over the window's failures and one over their triage
+		-- events: per-failure subselects were 2 index probes × every failure
+		-- (1.5 s at 100k failures, test/load); the grouped join is one scan.
 		WITH failures AS (
-			SELECT t.id, t.failure_observed_at,
-			       (SELECT min(e.occurred_at) FROM triage_events e WHERE e.test_result_id = t.id AND e.type = 'HYPOTHESIS_ACCEPTED') AS accepted_at,
-			       (SELECT min(e.occurred_at) FROM triage_events e WHERE e.test_result_id = t.id AND e.type = 'FAILURE_SEEN') AS seen_at
+			SELECT t.id, t.failure_observed_at
 			  FROM test_results t JOIN runs r ON r.id = t.run_id
 			 WHERE r.project_id = $1 AND t.failure_observed_at >= $2
+		), firsts AS (
+			SELECT e.test_result_id,
+			       min(e.occurred_at) FILTER (WHERE e.type = 'HYPOTHESIS_ACCEPTED') AS accepted_at,
+			       min(e.occurred_at) FILTER (WHERE e.type = 'FAILURE_SEEN') AS seen_at
+			  FROM triage_events e JOIN failures f ON f.id = e.test_result_id
+			 GROUP BY e.test_result_id
 		)
 		SELECT count(*),
 		       count(*) FILTER (WHERE accepted_at IS NOT NULL),
 		       count(*) FILTER (WHERE seen_at IS NOT NULL),
 		       percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM accepted_at - failure_observed_at)) FILTER (WHERE accepted_at IS NOT NULL),
 		       percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM seen_at - failure_observed_at)) FILTER (WHERE seen_at IS NOT NULL)
-		  FROM failures`, projectID, since.UTC()).Scan(&m.Failures, &m.Triaged, &m.Seen, &ttrc, &first)
+		  FROM failures f LEFT JOIN firsts x ON x.test_result_id = f.id`, projectID, since.UTC()).Scan(&m.Failures, &m.Triaged, &m.Seen, &ttrc, &first)
 	if err != nil {
 		return TriageMetrics{}, err
 	}

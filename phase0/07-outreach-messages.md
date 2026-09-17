@@ -139,7 +139,7 @@ Chưa gửi được thì đơn vị công việc là **tên thêm vào tracker*
 |---|---|---|---|---|---|
 | T3 15-09 | | | | | **Ngày bắt đầu — gửi đợt 1, ghi tracker ngay** |
 | T4 16-09 | | | | ✗ **đã code** | login §11.2 (argon2id, session, rate limit theo IP+account, CSRF hai lớp), dashboard API trên `query`, `migrations/0009`, **reporter Playwright** (npm, 14 test, chạy thật 3 test qua backend). Review nội bộ "Block live integration" (API lệch frontend) → chốt `frontend/API_CONTRACT.md` là hợp đồng duy nhất, viết lại `query` + `cmd/api` + `/v1/session` theo đó, thêm `cmd/api/api_test.go` (HTTP end-to-end trên Postgres thật), toàn bộ `go test ./...` 22 gói pass 0 skip, và chạy live Vue thật → Go thật: 18 call `/v1` đều 200/201. Cột `Contact gửi` để trống chờ người thật điền |
-| T5 17-09 | | | | | |
+| T5 17-09 | | | | ✗ **đã code** | T2 §14.2: harness `test/load` (100 reporter đồng thời, resolver, dashboard 100k→1M result). Đường ghi ingest từ 5 round trip/event → 5 statement/batch, tier-1 resolve trước khi ghi, flaky recompute set-based: batch 500 event từ ~250 ms → ~30 ms; p95 dưới 100 đồng thời 8,4 s → ~1,8 s trên laptop — **chưa đạt < 1 s**, cần đo trên server. Dashboard 100k: mọi route p95 < 210 ms ✓. Cột `Contact gửi` vẫn trống |
 | T6 18-09 | | | | | |
 | T7 19-09 | | | | — | *(không gửi cuối tuần — không code)* |
 | CN 20-09 | | | | — | *(không gửi cuối tuần — không code)* |

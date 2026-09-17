@@ -112,6 +112,7 @@ type AttemptEvent struct {
 	DisplayName     string
 	SuiteName       string
 	IdentityRaw     json.RawMessage // {framework, filePath, titlePath, paramSignature}
+	StableTestID    string          // tier-1 hit known at ingest, "" when unresolved
 	Status          AttemptStatus
 	Outcome         Outcome
 	DurationMs      int
@@ -194,6 +195,8 @@ type Service interface {
 	// environment whose run started at or after since — the input of §8.6.
 	// Uses the §8.9 (stableTestId, createdAt) index.
 	History(ctx context.Context, stableTestID, environmentID string, since time.Time) ([]HistoryPoint, error)
+	// HistoryMany is History for many identities in one query, keyed by id.
+	HistoryMany(ctx context.Context, stableTestIDs []string, environmentID string, since time.Time) (map[string][]HistoryPoint, error)
 	// GetResult returns one TestResult by id within a project, for triage.
 	GetResult(ctx context.Context, projectID string, id TestResultID) (TestResult, error)
 	// SetFailureCategory records the §8.7 category a human accepted for a
@@ -207,6 +210,7 @@ type HistoryPoint struct {
 	StartedAt   time.Time
 	FinalStatus FinalStatus
 	ObservedAt  time.Time // failure_observed_at, zero when the run passed
+	Occurrence  int       // occurrence_index: the order of a test's results inside one run
 }
 
 // FinalStatusOf is the N41 table: the framework's outcome decides, and the

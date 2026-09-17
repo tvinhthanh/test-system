@@ -11,7 +11,7 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 |---|---|---|---|
 | **T0** core flow end-to-end | ✅ đạt | 16-09-2026 | §T0 dưới |
 | **T1** không mất dữ liệu, idempotency, retry | ✅ đạt — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm ra và sửa 1 deadlock | 16-09-2026 | §T1 |
-| **T2** load 100 request đồng thời, p95 < 1 s | ✗ chưa chạy | — | — |
+| **T2** load §14.2 | ⏳ dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời ✗ trên laptop (p95 ≈ 2 s; từ 8,4 s) — cần đo trên server | 17-09-2026 | §T2 |
 | **T3** failure recovery + observability | ✗ chưa chạy | — | metrics §6.4 đã có, chưa có kịch bản |
 | **T4** security + tenant isolation | ✅ tenant isolation đạt (mọi route); phần security còn mục mở | 16-09-2026 | §T4 |
 | **T5** soak 24–72 h | ✗ chưa chạy | — | — |
@@ -115,6 +115,52 @@ Unit/integration test cho phần còn lại (Postgres thật):
 staging); reporter mất mạng chỉ ở test của reporter; restore backup — Gate-1
 (§11.5). "Queue không khả dụng" đọc là *worker không khả dụng* vì queue của P1
 là bảng Postgres — queue chết = DB chết = kịch bản DB.
+
+## T2 — load §14.2 ⏳ 17-09-2026: dashboard ✅, resolver p99 ✅, ingest 100 đồng thời ✗ trên laptop
+
+**Harness `test/load/`** (chung `test/harness/` với T1): binary thật, Postgres thật,
+số đo ghi đầy đủ và target §14.2 được *assert* — tụt là fail, không có chuyện số
+lặng lẽ đổi trong tài liệu. Chạy: `LOAD_TEST=1 TEST_DATABASE_URL=… go test -count=1
+-v -timeout 20m ./test/load/`; `LOAD_SCALE=10` cho 1M result. Máy đo: laptop
+Windows, 12 CPU logic, **Postgres + api + worker + máy phát tải cùng một máy** —
+đây là số "chỉ dấu", không phải số của môi trường triển khai.
+
+| Target §14.2 | Đo được 17-09 | Kết luận |
+|---|---|---|
+| Ingest: 500 event/request, 100 request đồng thời, error < 1 %, p95 < 1 s | `TestIngest100ConcurrentReporters`: 100 project/token, mỗi reporter 1 run × 500 event, bắn cùng lúc. **0 lỗi**; events p50 1,2–1,4 s, **p95 1,7–2,3 s** (dao động giữa các lần chạy); cô lập một reporter: 30–50 ms/batch | **✗ p95** trên laptop. Cùng bài này lúc bắt đầu ngày là **8,4 s** — xem "đã sửa" dưới. Phần còn lại là CPU của một máy: 100 batch × ~40 ms = 4 s CPU Postgres chia cho ~6 nhân vật lý, cộng api + worker + generator. Cần đo trên server + máy phát tải riêng trước khi gọi là đạt |
+| Resolver `clientTestId → stableTestId` p50 < 1 s, p99 < 5 s | 50 000/50 000 result của vòng đo resolve **inline lúc ingest** (tier 1, suite đã biết) — tức là xong trước cả finish. Đo khắt khe hơn: độ trễ job `run.finished` từ lúc enqueue đến done: **p50 1,1–1,5 s, p99 1,6–2,2 s** | p99 ✅; p50 sát ngưỡng (queue poll 1 s + 100 job dồn cùng lúc). Trước khi sửa flaky: p50 5,4 s / p99 9,8 s |
+| Dashboard: 100k–1M result trong project, query thường dùng p95 < 500 ms | `TestDashboardQueriesAt100kResults`, 16 route hợp đồng + 2 metrics, 30 lần mỗi route. **100k**: mọi route p95 ≤ 160 ms. **1M** (`LOAD_SCALE=10`, 1 000 run trải 6 tháng): runs list 65 ms, run results 3 ms, result detail 4 ms, identities 24 ms, identity runs 58 ms, `q=`/`status=` 52 ms, metrics/trend 433 ms, metrics/triage 439 ms | **✅** cả hai cỡ. Lưu ý: hai route metrics tính cửa sổ 30 ngày lúc request; nếu 1M result **dồn hết vào một tháng** thì ~1,1 s — đã có index `test_results_failure_observed` (`0010`) và query dạng join thay subselect; sau đó là rollup theo ngày, chưa cần ở P1 |
+| Queue: không mất job, retry backoff, duplicate-safe, worker crash recover | T1 | ✅ |
+| Artifact: upload fail < 2 %, checksum mismatch, không `unlinked` > 1 h | chưa đo dưới tải (store `memory`) | ✗ chưa chạy |
+
+**Đã sửa nhờ harness (mỗi mục đều là lỗi kiến trúc thật, không phải tinh chỉnh):**
+
+1. **Ingest ghi từng event** — `AppendAttempts` chạy 5 statement *mỗi event* (2 500
+   round trip cho batch 500) → viết lại thành 5 statement *mỗi batch* (`unnest`
+   arrays; `ON CONFLICT` cần gom trùng key trong Go trước vì một statement không
+   được chạm một hàng hai lần). p95 8,4 s → ~3 s.
+2. **Update ngay sau insert** — tier 1 resolve chạy *sau* khi ghi rồi `UPDATE` 500
+   hàng vừa insert (non-HOT, chạm mọi index), và aggregate cũng `UPDATE` lại 500
+   hàng ấy. Đảo thứ tự: resolve trước, `stable_test_id` và aggregate đi cùng
+   INSERT; chỉ hàng đã tồn tại (retry, attempt sau) mới recompute. p95 → ~1,8 s,
+   batch cô lập 250 ms → 30 ms.
+3. **Flaky không incremental** — §8.6 ghi "incremental, không full scan" nhưng mỗi
+   finish đọc lại cả cửa sổ 30 ngày của mọi identity trong run: O(run × test) —
+   ở 1 000 run × 1 000 test là **1M dòng mỗi finish**, queue 1M result *không bao
+   giờ drain* (10 phút vẫn 673 pending). Sửa (`0010`): fold state lưu trong
+   `flaky_signals.last_outcome`, finish chỉ `Apply` kết quả của run đó; `Sweep`
+   mỗi phút rebuild chính xác các dòng `rebuilt_at` > 24 h để kết quả rời cửa sổ
+   rớt khỏi đếm. Công thức vẫn một chỗ (`Stats.Apply` + `Finalize`, `Compute` là
+   fold). `TestIncrementalFoldMatchesExactRebuild` giữ hai đường bằng nhau và
+   kiểm sweep rớt đúng số run. 1M result: drain xong trong < 1 phút.
+4. **Metrics subselect tương quan** — 2 index probe cho *mỗi* failure trong cửa
+   sổ → join gộp một lần; index partial cho `failure_observed_at`.
+
+**Điều harness cho thấy nhưng không sửa được ở đây:** thời gian statement dưới
+100 đồng thời gấp 5–7 lần lúc cô lập (`pg_stat_statements`: mean vs min) — tranh
+chấp CPU của một máy chạy cả bốn thứ. `synchronous_commit=off` không đổi gì (không
+phải fsync); bỏ index `test_results_client` không đổi gì (đã hoàn tác). Cách đo
+đúng: server, Postgres riêng, máy phát tải riêng, lặp lại hai bài trên.
 
 ## T4 — tenant isolation ✅ 16-09-2026 · security còn mục mở
 

@@ -149,3 +149,131 @@ func TestRecomputeAgainstPostgres(t *testing.T) {
 		t.Error("another project's run should not be found")
 	}
 }
+
+// TestIncrementalFoldMatchesExactRebuild is the guard on §8.6's
+// "incremental, không full scan": finishes applied one by one through
+// RecomputeRun must leave the same counts, score and verdict as a rebuild
+// from the whole window, for three identities with different patterns —
+// and then the sweep must drop the results that left the window.
+func TestIncrementalFoldMatchesExactRebuild(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	res := results.New(db)
+	svc := flaky.New(db, res)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	idents := []string{
+		"aaaaaaaa-1111-4111-8111-111111111111",
+		"aaaaaaaa-2222-4222-8222-222222222222",
+		"aaaaaaaa-3333-4333-8333-333333333333",
+	}
+	// pattern per identity per run: p pass, f fail, F flaky_pass, s skipped, - absent
+	patterns := []string{
+		"pfpfpfpFpppfs",
+		"ppppppppppppp",
+		"fff-pp-Fs-fpp",
+	}
+	const runs = 13
+	for i := 0; i < runs; i++ {
+		// Runs every two days from 28 days ago: all inside the window while
+		// they finish; the clock is moved later so the first ones leave it.
+		started := now.Add(-time.Duration(28-2*i) * 24 * time.Hour)
+		run, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: project, EnvironmentID: envA, LocalRunID: fmt.Sprintf("0198c3e1-7b1a-7c3d-9e4f-0000000001%02d", i), StartedAt: started})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var events []results.AttemptEvent
+		ids := map[string]string{}
+		for k, pat := range patterns {
+			var st results.AttemptStatus
+			var oc results.Outcome
+			switch pat[i] {
+			case 'p':
+				st, oc = results.AttemptPassed, results.OutcomeExpected
+			case 'f':
+				st, oc = results.AttemptFailed, results.OutcomeUnexpected
+			case 'F':
+				st, oc = results.AttemptPassed, results.OutcomeFlaky
+			case 's':
+				st, oc = results.AttemptSkipped, results.OutcomeSkipped
+			default:
+				continue
+			}
+			client := fmt.Sprintf("ct_%d", k)
+			events = append(events, results.AttemptEvent{
+				Sequence: int64(k + 1), ClientTestID: client, DisplayName: client, IdentityRaw: json.RawMessage(`{"framework":"playwright","filePath":"a.spec.ts","titlePath":["x"]}`),
+				Status: st, Outcome: oc, StableTestID: idents[k], StartedAt: started,
+			})
+			ids[client] = idents[k]
+		}
+		if len(events) > 0 {
+			if _, err := res.AppendAttempts(ctx, run.ID, events); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := res.FinishRun(ctx, run.ID, started.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		// The incremental step, as the worker does it at every finish.
+		if _, err := svc.RecomputeRun(ctx, project, string(run.ID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	same := func(what string, got, want flaky.Signal) {
+		t.Helper()
+		if got.TotalRuns != want.TotalRuns || got.FailedRuns != want.FailedRuns || got.FlakyPassRuns != want.FlakyPassRuns || got.FlipCount != want.FlipCount ||
+			got.HasScore != want.HasScore || math.Abs(got.Score-want.Score) > 0.0005 || got.Verdict != want.Verdict || !got.LastFailedAt.Equal(want.LastFailedAt) || got.LastOutcome != want.LastOutcome {
+			t.Errorf("%s:\n  incremental %+v\n  exact       %+v", what, got, want)
+		}
+	}
+	// Incremental state after 13 finishes vs Compute over the same runs.
+	for k, id := range idents {
+		inc, err := svc.Get(ctx, id, envA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all, err := res.History(ctx, id, envA, now.Add(-60*24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		exp := flaky.Compute(all, now)
+		same(fmt.Sprintf("identity %d fold vs Compute over all runs", k), inc, flaky.Signal{TotalRuns: exp.TotalRuns, FailedRuns: exp.FailedRuns, FlakyPassRuns: exp.FlakyPassRuns, FlipCount: exp.FlipCount, HasScore: exp.HasScore, Score: exp.Score, Verdict: exp.Verdict, LastFailedAt: exp.LastFailedAt, LastOutcome: exp.LastOutcome})
+		if inc.TotalRuns == 0 {
+			t.Errorf("identity %d: nothing folded", k)
+		}
+	}
+	// Ten days later the first five runs are outside the 30-day window.
+	// The deltas never dropped them; the sweep must.
+	later := now.Add(10 * 24 * time.Hour)
+	flaky.SetNow(svc, func() time.Time { return later })
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE flaky_signals SET rebuilt_at = now() - interval '2 days'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := svc.Sweep(ctx, flaky.RebuildAfter, 100); err != nil || n != len(idents) {
+		t.Fatalf("sweep: n=%d err=%v", n, err)
+	}
+	for k, id := range idents {
+		swept, err := svc.Get(ctx, id, envA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exact, err := svc.Recompute(ctx, project, id, envA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		same(fmt.Sprintf("identity %d after sweep vs exact", k), swept, exact)
+		window, _ := res.History(ctx, id, envA, later.Add(-30*24*time.Hour))
+		all, _ := res.History(ctx, id, envA, now.Add(-60*24*time.Hour))
+		if exp := flaky.Compute(window, later); swept.TotalRuns != exp.TotalRuns || len(window) >= len(all) {
+			t.Errorf("identity %d: sweep left %d runs, window has %d of %d", k, swept.TotalRuns, exp.TotalRuns, len(all))
+		}
+		if swept.RebuiltAt.Before(later.Add(-time.Minute)) {
+			t.Errorf("identity %d: rebuilt_at not advanced: %s", k, swept.RebuiltAt)
+		}
+	}
+	// A second sweep finds nothing stale.
+	if n, err := svc.Sweep(ctx, flaky.RebuildAfter, 100); err != nil || n != 0 {
+		t.Errorf("second sweep: n=%d err=%v", n, err)
+	}
+}
