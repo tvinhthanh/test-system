@@ -1,0 +1,278 @@
+// Live integration: the real Vue app against the real Go backend, no route
+// mocking. Every /v1 call the UI makes is recorded with its real status and
+// printed at the end; any console error or page error fails the run. This
+// is GATES.md T0 layer 3 ("dashboard thật, không mock") as a repeatable
+// command instead of a one-off script.
+//
+// Prerequisites (see backend/GATES.md "Tái lập" or backend/deploy/README.md):
+//   - api + worker running with a tenant, a member user and at least one
+//     finished run with a failure (e.g. `npm run example` in reporter/playwright)
+//   - the UI served in live mode with /v1 forwarded to the api:
+//       `npm run dev` (Vite proxy → 127.0.0.1:8080) or the Caddy of deploy/compose.yml
+//
+//   ATP_UI=http://127.0.0.1:5173 ATP_EMAIL=alice@example.com ATP_PASSWORD='…' \
+//     node scripts/live-check.mjs <installed-playwright-path>
+//
+// The playwright package path argument works like the other scripts here:
+// Playwright is not a dependency of the app, the host's install is borrowed.
+import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+const require = createRequire(import.meta.url);
+const pwPath = process.argv[2] ? resolve(process.argv[2]) : "playwright"; // relative to the cwd, like a CLI argument
+const { chromium } = require(pwPath);
+
+const base = (process.env.ATP_UI || "http://127.0.0.1:5173").replace(/\/$/, "");
+const email = process.env.ATP_EMAIL;
+const password = process.env.ATP_PASSWORD;
+if (!email || !password) {
+  console.error(
+    "ATP_EMAIL and ATP_PASSWORD are required (a member of at least one project)",
+  );
+  process.exit(2);
+}
+mkdirSync("test-results", { recursive: true });
+
+const browser = await chromium.launch({
+  channel: process.env.ATP_BROWSER_CHANNEL || "chrome",
+  headless: true,
+});
+const page = await browser.newPage({
+  viewport: { width: 1440, height: 960 },
+  ignoreHTTPSErrors: true, // Caddy's internal CA when ATP_UI is https://localhost
+});
+const calls = [];
+const errors = [];
+page.on("response", (res) => {
+  const u = new URL(res.url());
+  if (u.pathname.startsWith("/v1/"))
+    calls.push(
+      `${res.request().method()} ${u.pathname}${u.search} → ${res.status()}`,
+    );
+});
+page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+page.on("console", (m) => {
+  // Chrome logs its own line for every non-2xx resource; the deliberate
+  // wrong-password 401 below is the one such line allowed, and the /v1
+  // call list at the end asserts no other non-2xx happened.
+  if (m.type() === "error" && !/Failed to load resource:.*401/.test(m.text()))
+    errors.push("console: " + m.text());
+});
+
+const emailField =
+  "input[type=email], input[name=email], input[autocomplete=username]";
+const v1 =
+  (re, status = 200) =>
+  (r) =>
+    re.test(new URL(r.url()).pathname + new URL(r.url()).search) &&
+    r.status() === status;
+
+const step = async (name, fn) => {
+  try {
+    await fn();
+    console.log("OK   " + name);
+  } catch (e) {
+    console.log("FAIL " + name + ": " + String(e.message || e).split("\n")[0]);
+    await page.screenshot({
+      path: "test-results/live-fail.png",
+      fullPage: true,
+    });
+    await browser.close();
+    report();
+    process.exit(1);
+  }
+};
+
+const report = () => {
+  console.log("\n/v1 calls made by the real UI:");
+  for (const c of calls) console.log("  " + c);
+  if (errors.length) {
+    console.log("\nbrowser errors:");
+    for (const e of errors) console.log("  " + e);
+  }
+};
+
+let project = process.env.ATP_PROJECT || "";
+
+await step(
+  "open the app: anonymous bootstrap shows the sign-in form",
+  async () => {
+    await page.goto(base + "/", { waitUntil: "networkidle" });
+    await page.waitForSelector(emailField, { timeout: 10000 });
+  },
+);
+
+await step(
+  "wrong password → 401 and a generic message (no account enumeration)",
+  async () => {
+    await page.fill(emailField, email);
+    await page.fill("input[type=password]", "definitely not the password");
+    const [res] = await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.url().includes("/v1/session") && r.request().method() === "POST",
+      ),
+      page.click("button[type=submit]"),
+    ]);
+    if (res.status() !== 401)
+      throw new Error("expected 401, got " + res.status());
+    await page.waitForTimeout(300);
+    const text = await page.textContent("body");
+    if (!/incorrect|invalid|wrong|sign in/i.test(text))
+      throw new Error("no error shown: " + text.slice(0, 200));
+    if (/not found|no such|unknown user/i.test(text))
+      throw new Error("message enumerates accounts: " + text.slice(0, 200));
+  },
+);
+
+await step("sign in with the real account → projects load", async () => {
+  await page.fill("input[type=password]", password);
+  await Promise.all([
+    page.waitForResponse(v1(/^\/v1\/projects/), { timeout: 10000 }),
+    page.click("button[type=submit]"),
+  ]);
+  await page.waitForTimeout(500);
+});
+
+await step("projects page renders at least one project link", async () => {
+  const links = page.locator("a[href*='/p/']");
+  await links.first().waitFor({ timeout: 10000 });
+  const href = await links.first().getAttribute("href");
+  const m = href.match(/\/p\/([^/]+)/);
+  if (!m) throw new Error("no project id in " + href);
+  if (!project) project = m[1];
+});
+
+await step("runs page renders real runs with a status", async () => {
+  await page.goto(base + "/p/" + project + "/runs");
+  await page.waitForResponse(v1(/^\/v1\/projects\/[^/]+\/runs\?/), {
+    timeout: 10000,
+  });
+  await page
+    .locator("a.run-link")
+    .first()
+    .waitFor({ state: "attached", timeout: 10000 });
+  const text = await page.textContent("body");
+  if (!/passed|failed|error|running|cancelled/i.test(text))
+    throw new Error("no run status rendered: " + text.slice(0, 300));
+  await page.screenshot({ path: "test-results/live-runs.png", fullPage: true });
+});
+
+await step(
+  "run search that matches nothing shows the empty state, not an error",
+  async () => {
+    await page.goto(
+      base + "/p/" + project + "/runs?q=not-a-real-branch-" + Date.now(),
+    );
+    await page.waitForResponse(v1(/^\/v1\/projects\/[^/]+\/runs\?.*q=/), {
+      timeout: 10000,
+    });
+    await page.waitForTimeout(300);
+    const text = await page.textContent("body");
+    if (!/no matching runs|no runs/i.test(text))
+      throw new Error("empty state not shown: " + text.slice(0, 300));
+  },
+);
+
+await step("open a run → results page (failures first)", async () => {
+  await page.goto(base + "/p/" + project + "/runs");
+  await page
+    .locator("a.run-link")
+    .first()
+    .waitFor({ state: "attached", timeout: 10000 });
+  const href = await page.locator("a.run-link").first().getAttribute("href");
+  await page.goto(base + href);
+  await page.waitForResponse(v1(/\/results\?/), { timeout: 10000 });
+  await page.locator(".test-row").first().waitFor({ timeout: 10000 });
+});
+
+await step(
+  "open a result → detail with attempts; triage from the UI is accepted",
+  async () => {
+    await page.locator(".test-row.clickable, .test-row").first().click();
+    await page.waitForResponse(v1(/^\/v1\/projects\/[^/]+\/results\/[^/?]+$/), {
+      timeout: 10000,
+    });
+    await page.waitForTimeout(500);
+    const text = await page.textContent("body");
+    if (!/attempt/i.test(text))
+      throw new Error("detail not rendered: " + text.slice(0, 300));
+    const btn = page
+      .locator("button:has-text('flaky'), button:has-text('Flaky')")
+      .first();
+    if (!(await btn.count())) return; // a passed result has no triage actions
+    const [res] = await Promise.all([
+      page.waitForResponse((r) => /triage-events$/.test(r.url()), {
+        timeout: 10000,
+      }),
+      btn.click(),
+    ]);
+    if (res.status() !== 201 && res.status() !== 200)
+      throw new Error("triage POST → " + res.status());
+    await page.waitForTimeout(500);
+  },
+);
+
+await step(
+  "test intelligence (identities), flaky view and one identity's history",
+  async () => {
+    await page.goto(base + "/p/" + project + "/tests");
+    await page.waitForResponse(v1(/\/identities\?/), { timeout: 10000 });
+    await page
+      .locator("a[href*='/tests/']")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
+    await page.goto(base + "/p/" + project + "/flaky");
+    await page.waitForResponse(v1(/\/identities\?.*view=flaky/), {
+      timeout: 10000,
+    });
+    await page.waitForTimeout(300);
+    await page.goto(base + "/p/" + project + "/tests");
+    await page
+      .locator("a[href*='/history']")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
+    const href = await page
+      .locator("a[href*='/history']")
+      .first()
+      .getAttribute("href");
+    await page.goto(base + href);
+    await page.waitForResponse(v1(/\/identities\/[^/]+\/runs\?/), {
+      timeout: 10000,
+    });
+    await page.waitForTimeout(300);
+  },
+);
+
+await step("sign out → session gone, anonymous bootstrap again", async () => {
+  const btn = page
+    .locator("button[aria-label='Sign out'], button:has-text('Sign out')")
+    .first();
+  await btn.waitFor({ timeout: 5000 });
+  await Promise.all([
+    page.waitForResponse((r) => /\/v1\/session\/logout$/.test(r.url()), {
+      timeout: 10000,
+    }),
+    btn.click(),
+  ]);
+  await page.waitForSelector(emailField, { timeout: 10000 });
+});
+
+await page.screenshot({ path: "test-results/live-ok.png", fullPage: true });
+await browser.close();
+report();
+
+const bad = calls.filter(
+  (c) => !/→ (200|201|204)$/.test(c) && !/POST \/v1\/session → 401$/.test(c),
+);
+if (bad.length) {
+  console.log(
+    "\nunexpected statuses (only the deliberate wrong-password 401 is allowed):",
+  );
+  for (const c of bad) console.log("  " + c);
+  process.exit(1);
+}
+if (errors.length) process.exit(1);
+console.log(
+  `\n${calls.length} /v1 calls, all 2xx except the deliberate 401; no browser errors.`,
+);

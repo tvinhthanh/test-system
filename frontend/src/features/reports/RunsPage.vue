@@ -130,11 +130,13 @@ const {
               <RouterLink
                 class="run-link"
                 :to="`/p/${encodeURIComponent(project)}/runs/${encodeURIComponent(run.id)}`"
-                >{{ run.branch }}</RouterLink
+                >{{ run.branch || "(no branch)" }}</RouterLink
               >
               <div class="run-meta">
                 <code>{{ short(run.id) }}</code
-                ><span>/</span><code>{{ short(run.commitSha) }}</code
+                ><template v-if="run.commitSha"
+                  ><span>/</span
+                  ><code>{{ short(run.commitSha) }}</code></template
                 ><span>/</span><span>{{ run.environmentName }}</span>
               </div>
             </td>

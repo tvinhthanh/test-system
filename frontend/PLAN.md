@@ -23,14 +23,18 @@ QD-9's framework choice; do not revert to Flutter on resume.
 
 ## Current Status
 
-- Phase: Vue foundation/auth/shell/runs implemented and locally verified.
+- Phase: P1-min read/triage UI complete and verified against the real Go
+  backend (no mocks) on 2026-09-16 and again on 2026-09-17.
 - Target: Vue.js web client only.
-- Backend status: health and ingest routes are mounted; identity, queue and
-  object-store packages now exist. Dashboard session/query handlers are still
-  missing (checked against `cmd/api/main.go` on 2026-09-14).
+- Backend status: every route in `API_CONTRACT.md` is mounted and inventoried
+  in `../backend/deploy/routes.txt` (a test fails if the mux and the file
+  differ). `scripts/live-check.mjs` drives the real UI through the real api:
+  30 `/v1` calls, all 2xx except the deliberate wrong-password 401, console
+  clean. Production shape: `../backend/deploy/` (Caddy serves `dist/` and
+  proxies `/v1`).
 - Preview data: allowed only through an explicit fixture transport. Live API
   failures must never silently fall back to fixtures.
-- Last reviewed: 2026-09-14.
+- Last reviewed: 2026-09-17.
 - Latest verification: frontend typecheck, 17 unit tests, production build and
   bundle gate pass; backend `go test ./...` also passes. These are compile and
   contract checks only; they do not prove a live dashboard API exists.
@@ -120,22 +124,25 @@ Rules:
 
 ## API Contract To Confirm
 
-These routes are the frontend contract proposal. Before connecting live data,
-confirm each route and response against backend handlers and `SPEC.md`.
+`API_CONTRACT.md` is the single contract; the Go side implements exactly it
+(`../backend/cmd/api/dashboard.go`, driven end-to-end by
+`../backend/cmd/api/api_test.go`). State as of 2026-09-17:
 
 | Feature | Method and route | Backend state |
 | --- | --- | --- |
-| Session | `GET /v1/session` | Not mounted |
-| Login | `POST /v1/session` | Not mounted |
-| Logout | `POST /v1/session/logout` | Not mounted |
-| Projects | `GET /v1/projects` | Not mounted |
-| Runs | `GET /v1/projects/{projectId}/runs` | Query handler missing |
-| Run detail | `GET /v1/projects/{projectId}/runs/{runId}` | Query handler missing |
-| Results | `GET /v1/projects/{projectId}/runs/{runId}/results` | Query handler missing |
-| Result detail | `GET /v1/projects/{projectId}/results/{resultId}` | Query handler missing |
-| Triage event | `POST /v1/projects/{projectId}/results/{resultId}/triage-events` | Not mounted |
-| Identities | `GET /v1/projects/{projectId}/identities` | Query HTTP missing |
-| Identity history | `GET /v1/projects/{projectId}/identities/{identityId}/runs` | Query HTTP missing |
+| Session | `GET /v1/session` | Mounted; live-verified |
+| Login | `POST /v1/session` | Mounted; live-verified (401 generic on wrong password, CSRF rotates) |
+| Logout | `POST /v1/session/logout` | Mounted; live-verified (204) |
+| Projects | `GET /v1/projects` | Mounted; live-verified |
+| Runs | `GET /v1/projects/{projectId}/runs` | Mounted; live-verified (`q`, `status`, `environment`, cursor) |
+| Run detail | `GET /v1/projects/{projectId}/runs/{runId}` | Mounted; live-verified |
+| Results | `GET /v1/projects/{projectId}/runs/{runId}/results` | Mounted; live-verified (failures first) |
+| Result detail | `GET /v1/projects/{projectId}/results/{resultId}` | Mounted; live-verified (attempts + events) |
+| Triage event | `POST /v1/projects/{projectId}/results/{resultId}/triage-events` | Mounted; live-verified (201, 200 on dedupe) |
+| Identities | `GET /v1/projects/{projectId}/identities` | Mounted; live-verified (`view=flaky`) |
+| Identity detail | `GET /v1/projects/{projectId}/identities/{identityId}` | Mounted; live-verified |
+| Identity history | `GET /v1/projects/{projectId}/identities/{identityId}/runs` | Mounted; live-verified |
+| Triage / trend metrics | `GET /v1/projects/{projectId}/metrics/{triage,trend}` | Mounted (EM dashboard is P1.5; not consumed by the UI yet) |
 
 Required response conventions:
 
@@ -178,14 +185,14 @@ need cache invalidation; current data is route-owned and session scoped.
 - [x] Run models, repository contract, and route composable.
 - [x] Run list layout with URL filters and cursor controls.
 - [x] Wire router and shell.
-- [ ] Confirm backend response fields (live integration pending).
+- [x] Confirm backend response fields (live against the Go api, 2026-09-16/17).
 - [x] Add repository/composable tests, including stale requests and navigation.
 
 ### Slice 3: Run Detail
 
 - [x] Run summary and bounded result list.
 - [x] Add result pagination behavior tests through bounded DTO/repository checks.
-- [ ] Confirm aggregate fields are server-provided (live integration pending).
+- [x] Confirm aggregate fields are server-provided (run counts come from the api, live 2026-09-16/17).
 
 ### Slice 4: Failure And Triage
 
@@ -205,11 +212,14 @@ need cache invalidation; current data is route-owned and session scoped.
 
 - [x] `npm run typecheck`.
 - [x] `npm run test:unit`.
-- [ ] Live API integration against the mounted Go handlers.
+- [x] Live API integration against the mounted Go handlers (`scripts/live-check.mjs`, repeatable).
 - [x] Responsive web check at 360px, 768px and 1440px.
 - [x] Verify no raw HTML report rendering and no silent fixture fallback.
 - [x] Verify route chunks, lazy loading, request count, and no fetch loop.
-- [ ] Profile render/update cost with representative large customer datasets.
+- [ ] Profile render/update cost with representative large customer datasets
+      (the api side is measured: `../backend/test/load` holds every dashboard
+      route under 500 ms p95 at 1M results; the UI caps lists at 20/50 rows, so
+      what is left to measure is browser render time on a slow laptop).
 
 ## Existing Draft To Retire Or Port
 
@@ -221,6 +231,24 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-17 (live integration made repeatable; two fixes it found)
+
+- Added `scripts/live-check.mjs`: the real Vue app against the real Go api,
+  no route mocking. Sign-in (wrong password → generic 401), projects, runs,
+  empty search state, run → results → result detail, triage from the UI,
+  identities / flaky / history, sign-out. Every `/v1` call is listed with its
+  real status; any non-2xx other than the deliberate 401, or any console
+  error, fails the run. Screenshots in ignored `test-results/live-*.png`.
+- Fixed: signing out remounted the current protected page for one frame
+  (`RouterView` keyed on `session.user?.id`), which fired two unauthenticated
+  fetches → 401s in the console. `RouterView` now renders only while a user
+  is present.
+- Fixed: a run with no branch (a reporter outside CI) rendered an empty,
+  unclickable primary link and a `/ /` meta line. The link falls back to
+  `(no branch)`; the commit segment is hidden when absent.
+- Updated the API contract table: every route is mounted and live-verified;
+  the backend inventories routes in `../backend/deploy/routes.txt`.
 
 ### 2026-09-14 (Vue implementation)
 
@@ -258,8 +286,9 @@ All commands below ran from `frontend/` on 2026-09-14.
 | `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |
+| `ATP_UI=… ATP_EMAIL=… ATP_PASSWORD=… node scripts/live-check.mjs <installed-playwright-path>` (2026-09-17, real Go api on :8080 seeded by `reporter/playwright` `npm run example` ×2, Vite dev proxy) | PASS; 10 steps, 30 `/v1` calls all 2xx except the deliberate 401, console clean |
 | `go test ./...` from `backend/` | PASS; domain, authz, ingest, artifact, queue, architecture tests |
-| Real Go session/query integration | BLOCKED BY BACKEND SCOPE: required handlers and dashboard session schema absent |
+| Real Go session/query integration | PASS (2026-09-16 first pass; 2026-09-17 via `scripts/live-check.mjs`) |
 
 Browser evidence is in ignored `test-results/`: runs-desktop.png, runs-768.png,
 runs-360.png and run-detail-desktop.png. Browser scripts accept the host's

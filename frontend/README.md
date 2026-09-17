@@ -38,6 +38,18 @@ npm run test:unit
 npm run build
 ```
 
+Against the real backend (no mocks) — api + worker running, a member user and
+some ingested runs, the UI in live mode (`npm run dev`, or the Caddy of
+`../backend/deploy/`):
+
+```sh
+ATP_UI=http://127.0.0.1:5173 ATP_EMAIL=alice@example.com ATP_PASSWORD=… \n  node scripts/live-check.mjs ../reporter/playwright/node_modules/playwright
+```
+
+It lists every `/v1` call with its real status and fails on any non-2xx (other
+than the deliberate wrong-password 401) or console error. This is the
+repeatable form of GATES.md T0 layer 3.
+
 Build includes a bundle gate: initial JS and each lazy JS chunk at most 100 KiB
 gzip, at least four lazy route modules, no known fixture payload markers.
 These are initial project budgets, not performance measurements of a real

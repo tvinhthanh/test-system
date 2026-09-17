@@ -88,7 +88,14 @@ async function logout() {
         }}
       </p>
       <main id="main" tabindex="-1">
-        <RouterView :key="`${session.user?.id}:${project}`" />
+        <!-- Keyed so a user or project switch remounts the page; v-if so that
+             sign-out (user → null, key changes) does not remount a protected
+             page for an instant and fire unauthenticated fetches before the
+             router reaches /sign-in (live-check found two 401s here). -->
+        <RouterView
+          v-if="session.user"
+          :key="`${session.user.id}:${project}`"
+        />
       </main>
       <footer class="app-footer">
         <span>ATP / Report Center</span><span>P1-min</span>
