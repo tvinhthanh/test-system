@@ -12,3 +12,6 @@ protoident.exe
 # OS noise
 Thumbs.db
 .DS_Store
+
+# Deployment secrets (deploy/.env.example is the template).
+backend/deploy/.env

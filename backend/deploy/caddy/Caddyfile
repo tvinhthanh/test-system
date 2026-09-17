@@ -1,0 +1,26 @@
+# The only public listener (§11.5 TLS everywhere). Caddy gets a certificate
+# for $DOMAIN on its own (Let's Encrypt for a real name, its internal CA for
+# `localhost`), redirects http→https, and splits traffic exactly as
+# frontend/README.md asks: /v1 and /healthz go to the api, everything else is
+# the Vue build with a history fallback to index.html — API paths never
+# receive the SPA HTML. HSTS comes from the api itself (httpx.BrowserPolicy,
+# when COOKIE_SECURE=true), so one place owns the header.
+{$DOMAIN} {
+	encode zstd gzip
+
+	handle /v1/* {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	handle /healthz {
+		reverse_proxy api:8080
+	}
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+		header Cache-Control "no-cache"
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	}
+}

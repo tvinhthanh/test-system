@@ -1,0 +1,10 @@
+# The image build copies backend/ as its context (deploy/Dockerfile). Keep
+# out anything that is not source: tests still ship (they are cheap and
+# `go build ./cmd/...` ignores them), but not local databases, dumps or IDE noise.
+.git
+*.exe
+*.test
+*.dump
+*.csv
+*.log
+deploy/

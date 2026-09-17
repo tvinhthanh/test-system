@@ -1,0 +1,135 @@
+# CI = the release checklist of SPEC §11.6 ("chạy trước mọi release") made
+# mechanical, plus the gate suites that fit in minutes (backend/GATES.md):
+#
+#   backend   gofmt · go vet · go test ./... on real Postgres 17 — unit,
+#             cmd/api contract + tenant walk (T4), test/failure (T1),
+#             test/observe (T3), test/restore (§11.5 drill, needs pg_dump 17)
+#             · govulncheck · the image builds
+#   reporter  npm ci · test · npm audit
+#   frontend  npm ci · typecheck · unit · build (bundle gate) · npm audit
+#
+# test/load and test/soak are manual (LOAD_TEST=1 / SOAK_TEST=1): their
+# numbers only mean something on a quiet, known machine.
+name: ci
+
+on:
+  push:
+    branches: [main, p1-min]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        # Same major as deploy/compose.yml. UTF-8 locale is a hard requirement
+        # of the identity resolver (pg_trgm parity test); the image default
+        # is en_US.utf8.
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: atp_test
+        ports: ["5499:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d atp_test"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5499/atp_test?sslmode=disable
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The patched toolchain go.mod names (govulncheck 17-09); explicit so
+          # GOTOOLCHAIN=local below never has to download one.
+          go-version: "1.25.13"
+          cache-dependency-path: backend/go.sum
+
+      # pg_dump/pg_restore of the server's major, for test/restore. Ubuntu's
+      # own postgresql-client is 16 and refuses to dump a 17 server.
+      - name: Install PostgreSQL 17 client (restore drill)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+          echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+
+      - name: gofmt
+        run: test -z "$(gofmt -l ./cmd ./internal ./test ./migrations)" || { gofmt -l ./cmd ./internal ./test ./migrations; exit 1; }
+
+      - name: go vet
+        run: go vet ./...
+
+      # Everything Postgres-backed runs for real here: unit stores, the
+      # cmd/api contract and cross-tenant walk, test/failure (kills the real
+      # binaries), test/observe, test/restore (RESTORE_TEST=1 → a missing
+      # pg_dump fails instead of skipping).
+      - name: go test (real Postgres)
+        env:
+          RESTORE_TEST: "1"
+        run: go test -count=1 -timeout 15m ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: docker build (deploy/Dockerfile)
+        run: docker build -f deploy/Dockerfile -t atp/backend:ci .
+
+      - name: compose config
+        run: |
+          cp deploy/.env.example deploy/.env
+          docker compose -f deploy/compose.yml --env-file deploy/.env config --quiet
+
+  reporter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: reporter/playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: reporter/playwright/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: npm audit (§11.6 dependency review, dev deps included)
+        run: npm audit --audit-level=low
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run test:unit
+      - name: build (typecheck + bundle gate)
+        run: npm run build
+      - name: npm audit (§11.6 dependency review, dev deps included)
+        run: npm audit --audit-level=low

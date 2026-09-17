@@ -13,6 +13,7 @@
 //	SOAK_SUITE         tests per run (default 200)
 //	SOAK_RUN_INTERVAL  one run per reporter per interval (default 8s; §7.4 allows 60 req/min/token)
 //	SOAK_JOB_RETENTION JOB_RETENTION handed to the worker (default 2m, so the prune loop is observed)
+//	SOAK_OBJSTORE      s3 to upload to a real bucket (OBJSTORE_* from the environment); default memory
 //	SOAK_OUT           CSV of every sample (default: next to the test binary's temp dir, path logged)
 //
 // Traffic per run: create → 2 batches of events (every 25th test fails,
@@ -287,6 +288,12 @@ func TestSoakSteadyTraffic(t *testing.T) {
 
 	h := harness.New(t)
 	h.ExtraEnv = []string{"JOB_RETENTION=" + retention.String()}
+	// SOAK_OBJSTORE=s3 soaks against a real bucket (the OBJSTORE_* variables
+	// pass through from this process's environment); default is the harness's
+	// in-process memory store, whose payload the RSS trend subtracts.
+	if store := os.Getenv("SOAK_OBJSTORE"); store != "" {
+		h.ExtraEnv = append(h.ExtraEnv, "OBJSTORE="+store)
+	}
 	s := &soak{h: h, t: t}
 	api := h.StartAPI()
 	worker := h.StartWorker()

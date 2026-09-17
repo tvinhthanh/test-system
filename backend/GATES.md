@@ -250,7 +250,7 @@ Ngoài ra `(project, localRunId)` là duy nhất *theo project*: org B dùng l�
 | API5 Function-level | viewer gọi endpoint maintainer → 403 | bob viewer → `triage-events` 403 ✅ |
 | API6 Business flow | đăng ký/mời/quên mật khẩu có rate limit | P1-min **không có** các flow này (user do admin CLI tạo) — N/A, ghi để không quên khi thêm |
 | API7 SSRF | grep: không outbound fetch từ input | **mới**: `TestNoOutboundHTTPFromDomainModules` — `internal/` không dùng `http.Client`/`Get`/`NewRequest` ngoài `platform/objstore` ✅ |
-| API8 Misconfig | checklist config | config từ chối `sslmode=disable`, pepper dev, `COOKIE_SECURE=false` ngoài dev ✅; **mới**: `httpx.BrowserPolicy` — `nosniff`, `no-store`, `Referrer-Policy`, `X-Frame-Options`, HSTS khi cookie Secure, CORS chỉ cho `DASHBOARD_ORIGINS` (không bao giờ `*`, preflight từ origin lạ → 403), `TestBrowserPolicyHeadersAndCORS` ✅ |
+| API8 Misconfig | checklist config | config từ chối `sslmode=disable`, pepper dev, `COOKIE_SECURE=false` ngoài dev ✅; container non-root/pin/healthcheck + TLS proxy + `.env.example` (`deploy/`, dựng thật 17-09) ✅; `httpx.BrowserPolicy` — `nosniff`, `no-store`, `Referrer-Policy`, `X-Frame-Options`, HSTS khi cookie Secure, CORS chỉ cho `DASHBOARD_ORIGINS` (không bao giờ `*`, preflight từ origin lạ → 403), `TestBrowserPolicyHeadersAndCORS` ✅ |
 | API9 Inventory | chỉ `/v1/`, diff mỗi release, token `lastUsedAt` | **mới**: `deploy/routes.txt` = inventory, `TestRouteInventoryMatchesFile` fail nếu route mount khác file ✅; `api_tokens.last_used_at` cập nhật ≤ 5 phút/lần ✅. OpenAPI: chưa — route file là bản thay thế P1 |
 | API10 Unsafe consumption | LLM trả rác → bị loại | P1.5 (chưa có LLM) — N/A |
 
@@ -307,8 +307,24 @@ Revoke lần hai không thêm dòng (không có gì đổi). `admin token revoke
 `admin role revoke`, `admin audit list [-scope]`. Test: `internal/authz`
 (`TestTokensAgainstPostgres`, `TestMembershipsAgainstPostgres`). `identity_audit` (0004) vẫn là nơi của merge/undo/split.
 
-**Còn mở (§11.5, §11.7):** TLS/HSTS ở proxy khi deploy thật; cron backup +
-copy off-host khi có server; pentest thuê ngoài trước khách trả phí đầu tiên.
+**Hình dạng triển khai §11.5 ✅ 17-09-2026 — `deploy/`:** một image distroless
+`nonroot` (19,8 MB, mọi binary, `HEALTHCHECK` bằng `cmd/healthcheck` vì không có
+curl), `compose.yml` staging: Postgres 17.5 locale UTF-8, `migrate` một lần rồi
+`api`/`worker` mới lên, Caddy là listener TLS duy nhất (cert tự động, SPA +
+proxy `/v1`, API không bao giờ nhận HTML fallback), Prometheus nạp `alerts.yml`,
+container `backup` chạy `backup.sh` mỗi ngày; `read_only`, `cap_drop ALL`,
+`no-new-privileges`, mọi image pin tag, `.env.example` đủ biến, `deploy/.env`
+bị ignore. **Đã dựng thật trên Docker Desktop**: healthy, ingest qua
+`https://localhost` → worker resolve, header HSTS/nosniff/`Secure` qua proxy,
+3 target Prometheus `up`, dump đầu tiên 12 KB có `schema_migrations` — chi tiết
+`deploy/README.md`. CI `.github/workflows/ci.yml`: gofmt, vet, `go test ./...`
+trên Postgres 17 thật (T1/T3/T4 + restore drill với pg_dump 17), govulncheck,
+`docker build`, `compose config`, reporter/frontend test + `npm audit` — §11.6
+"chạy trước mọi release" thành máy chạy.
+
+**Còn mở (§11.5, §11.7):** prod cần Postgres có TLS (`APP_ENV=prod` từ chối
+`sslmode=disable`; compose là staging); copy volume `backups` ra khỏi host;
+pentest thuê ngoài trước khách trả phí đầu tiên.
 
 ## T5 — soak ⏳ 17-09-2026: harness chạy sạch 20 phút trên laptop; 24–72 h cần host riêng
 

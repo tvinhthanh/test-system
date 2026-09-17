@@ -17,6 +17,10 @@ go test ./...                    # gồm test kiến trúc; test cần Postgres 
 TEST_DATABASE_URL=postgres://user:pw@localhost:5432/atp_test?sslmode=disable go test ./...
 ```
 
+Staging đầy đủ bằng container (Postgres, migrate, api, worker, Prometheus, Caddy TLS,
+backup hằng ngày): [`deploy/README.md`](deploy/README.md) — `docker compose -f
+deploy/compose.yml --env-file deploy/.env up -d --build`. CI: `.github/workflows/ci.yml`.
+
 Biến môi trường (`internal/platform/config`): sai giá trị → thoát ngay lúc boot, mã 2.
 
 | Biến | Mặc định | Ghi chú |

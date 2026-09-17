@@ -1,0 +1,162 @@
+# Staging shape of the platform (SPEC §6.1, §11.5): Postgres, one-shot
+# migrate, api, worker, Prometheus with the §6.4 rules, Caddy as the single
+# TLS listener serving the Vue build and proxying /v1, and a daily backup.
+#
+#   cp deploy/.env.example deploy/.env   # fill POSTGRES_PASSWORD, TOKEN_PEPPER, DOMAIN, OBJSTORE_*
+#   (cd ../frontend && npm ci && npm run build)
+#   docker compose -f deploy/compose.yml --env-file deploy/.env up -d --build
+#   docker compose -f deploy/compose.yml --env-file deploy/.env run --rm admin org create -name Acme -slug acme
+#
+# Every image is pinned to a version. Application containers run as the
+# distroless `nonroot` user with a read-only root filesystem, no
+# capabilities and no-new-privileges; nothing but Caddy publishes a port.
+# Postgres speaks plaintext inside the compose network, which is why this is
+# APP_ENV=staging: prod refuses sslmode=disable (config) and needs a TLS
+# database (managed Postgres or a TLS-enabled server) — see deploy/README.md.
+
+name: atp
+
+x-app: &app
+  image: ${ATP_IMAGE:-atp/backend:local}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  env_file: .env
+  environment:
+    APP_ENV: ${APP_ENV:-staging}
+    DATABASE_URL: postgres://atp:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/atp?sslmode=disable
+    HTTP_ADDR: ":8080"
+    METRICS_ADDR: ":9090"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "50m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:17.5-alpine
+    environment:
+      POSTGRES_USER: atp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: atp
+      # UTF-8 locale is a hard requirement of the identity resolver
+      # (backend/README.md "Postgres cho identity"): pg_trgm under C/POSIX
+      # works on bytes and shreds every accented title.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+      LANG: en_US.UTF-8
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atp -d atp"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+  # Applies the migrations that are not yet recorded, then exits 0; api and
+  # worker wait for that (§8.10: the binary and the database agree on
+  # history before either serves). Idempotent — rerun on every deploy.
+  migrate:
+    <<: *app
+    entrypoint: ["/app/migrate"]
+    restart: "no"
+    healthcheck: { disable: true }
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    entrypoint: ["/app/api"]
+    expose: ["8080", "9090"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Tier-2 identity resolve, flaky fold, auto-close, artifact link/retention,
+  # job prune. Mandatory: without it runs finish but never resolve (GATES.md T0).
+  worker:
+    <<: *app
+    entrypoint: ["/app/worker"]
+    expose: ["9090"]
+    healthcheck:
+      test: ["CMD", "/app/healthcheck", "http://127.0.0.1:9090/healthz"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Operator CLI (org/ws/project/user/token/identity/audit). Not a long-running
+  # service: `docker compose run --rm admin <cmd>`.
+  admin:
+    <<: *app
+    entrypoint: ["/app/admin"]
+    restart: "no"
+    healthcheck: { disable: true }
+    profiles: ["tools"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.listen-address=0.0.0.0:9090
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    # Operator-only: loopback on the host, never the public interface.
+    ports:
+      - "127.0.0.1:9091:9090"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env (use localhost for a local staging)}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../frontend/dist:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Daily pg_dump (§11.5, RPO 24 h) with deploy/backup/backup.sh, into the
+  # `backups` volume. Copy that volume off-host — a backup beside the database
+  # is not a backup. Restore drill: test/restore and deploy/backup/restore.sh.
+  backup:
+    image: postgres:17.5-alpine
+    environment:
+      DATABASE_URL: postgres://atp:${POSTGRES_PASSWORD:?}@postgres:5432/atp?sslmode=disable
+      BACKUP_DIR: /backups
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    entrypoint: ["/bin/sh", "-c", "while true; do /backup/backup.sh || echo 'backup failed' >&2; sleep 86400; done"]
+    volumes:
+      - ./backup:/backup:ro
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  promdata:
+  backups:
+  caddy_data:
+  caddy_config:
