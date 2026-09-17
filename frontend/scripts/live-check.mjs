@@ -33,8 +33,11 @@ if (!email || !password) {
 }
 mkdirSync("test-results", { recursive: true });
 
+// ATP_BROWSER_CHANNEL: "chrome" (default, the host's Chrome), or "bundled" for
+// Playwright's own Chromium (CI: `npx playwright install chromium`).
+const channel = process.env.ATP_BROWSER_CHANNEL || "chrome";
 const browser = await chromium.launch({
-  channel: process.env.ATP_BROWSER_CHANNEL || "chrome",
+  ...(channel === "bundled" ? {} : { channel }),
   headless: true,
 });
 const page = await browser.newPage({

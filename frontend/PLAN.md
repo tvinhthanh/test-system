@@ -247,6 +247,9 @@ files and updating this plan.
   visible before the click. Contract recorded in `API_CONTRACT.md`.
 - `live-check.mjs` follows the first artifact link with the session cookie
   and asserts 200 + disposition + nosniff (skips when the run carried none).
+- CI job `e2e` (`.github/workflows/ci.yml`) stands the compose stack up, seeds
+  a tenant, pushes the reporter example over https and runs `live-check.mjs`
+  with Playwright's bundled Chromium (`ATP_BROWSER_CHANNEL=bundled`).
 - Vite dev proxy target is configurable (`ATP_API=http://host:port npm run dev`)
   so the live check can point at a soak's or a staging api.
 

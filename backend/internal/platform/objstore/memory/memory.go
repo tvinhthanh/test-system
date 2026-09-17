@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -49,6 +50,7 @@ type Store struct {
 	uploads map[string]*upload
 	grants  map[string]grant
 	srv     *httptest.Server
+	public  string // base of every presigned URL
 	// Now is the clock presign expiry is checked against; tests move it.
 	Now func() time.Time
 	// Fail makes the next Head/Get/Delete return this error (S3 timeout
@@ -56,18 +58,39 @@ type Store struct {
 	Fail error
 }
 
-// New starts the server.
-func New() *Store {
+// New starts the bucket on a loopback port with a random number — reachable
+// only from this process's host, which is what tests and `go run` want.
+func New() *Store { return NewAt("", "") }
+
+// NewAt starts the bucket on listenAddr (e.g. ":9100") and hands out
+// presigned URLs under publicURL (e.g. "https://localhost/_objstore"), for a
+// containerised dev/staging stack where the reporter is outside the api's
+// network namespace and a reverse proxy forwards the PUTs (deploy/caddy).
+// Empty values keep New's behaviour. Still dev-only: objects live in RAM.
+func NewAt(listenAddr, publicURL string) *Store {
 	s := &Store{objects: map[string]*object{}, uploads: map[string]*upload{}, grants: map[string]grant{}, Now: time.Now}
-	s.srv = httptest.NewServer(http.HandlerFunc(s.serve))
+	s.srv = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
+	if listenAddr != "" {
+		l, err := net.Listen("tcp", listenAddr)
+		if err != nil {
+			panic("objstore/memory: listen " + listenAddr + ": " + err.Error())
+		}
+		s.srv.Listener.Close()
+		s.srv.Listener = l
+	}
+	s.srv.Start()
+	s.public = strings.TrimSuffix(publicURL, "/")
+	if s.public == "" {
+		s.public = s.srv.URL
+	}
 	return s
 }
 
 // Close stops the server.
 func (s *Store) Close() { s.srv.Close() }
 
-// URL is the server's base URL.
-func (s *Store) URL() string { return s.srv.URL }
+// URL is the base URL presigned URLs are issued under.
+func (s *Store) URL() string { return s.public }
 
 func token() string {
 	var b [12]byte
@@ -91,7 +114,7 @@ func (s *Store) grantURL(g grant) string {
 	}
 	s.grants[tok] = g
 	s.mu.Unlock()
-	return s.srv.URL + "/upload?token=" + tok
+	return s.public + "/upload?token=" + tok
 }
 
 func (s *Store) PresignPut(_ context.Context, key, contentType string, ttl time.Duration) (string, error) {
@@ -269,5 +292,7 @@ func etag(data []byte) string {
 }
 
 func init() {
-	objstore.Register("memory", func(config.Config) (objstore.Store, error) { return New(), nil })
+	objstore.Register("memory", func(cfg config.Config) (objstore.Store, error) {
+		return NewAt(cfg.ObjStoreMemoryAddr, cfg.ObjStoreEndpoint), nil
+	})
 }

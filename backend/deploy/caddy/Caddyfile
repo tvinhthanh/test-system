@@ -16,6 +16,13 @@
 	handle /healthz {
 		reverse_proxy api:8080
 	}
+	# Dev/staging without a bucket: OBJSTORE=memory serves presigned PUTs from
+	# the api itself (OBJSTORE_MEMORY_ADDR=:9100, OBJSTORE_ENDPOINT=https://$DOMAIN/_objstore).
+	# With OBJSTORE=s3 nothing hits this route — the presigned URLs point at the bucket.
+	handle /_objstore/* {
+		uri strip_prefix /_objstore
+		reverse_proxy api:9100
+	}
 	handle {
 		root * /srv/frontend
 		try_files {path} /index.html

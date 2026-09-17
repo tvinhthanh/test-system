@@ -38,7 +38,9 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
    **`frontend/scripts/live-check.mjs`** (lặp lại được; 16-09 chạy từ scratchpad,
    17-09 chạy lại bản đã commit: 10 bước, **30 call `/v1`, tất cả 2xx** trừ 401
    cố ý, console sạch — và bắt được 2 lỗi UI: sign-out remount trang bảo vệ
-   → 2 GET 401, run không có branch thì link rỗng không bấm được; đã sửa): sign-in sai → lỗi chung; sign-in
+   → 2 GET 401, run không có branch thì link rỗng không bấm được; đã sửa):
+   **Từ 17-09 job `e2e` trong CI dựng compose thật (Caddy TLS, bucket giả qua
+   `/_objstore`), đẩy run bằng reporter npm rồi chạy đúng script này mỗi push.** sign-in sai → lỗi chung; sign-in
    đúng; projects hiện `checkout` / `Payments`; runs hiện run `staging`; mở
    run → results; mở result → detail có attempts; bấm nút triage từ UI →
    `POST …/triage-events` 201; `/tests` hiện `declines expired card`,

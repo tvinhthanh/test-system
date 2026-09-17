@@ -139,3 +139,77 @@ jobs:
         run: npm run build
       - name: npm audit (§11.6 dependency review, dev deps included)
         run: npm audit --audit-level=low
+
+  # GATES.md T0 layer 3 on every push: the compose stack (Postgres, migrate,
+  # api, worker, Caddy TLS serving the Vue build), a tenant made with the
+  # admin container, a real Playwright run pushed through the npm reporter
+  # over https, then the real UI driven through Caddy with no mocks.
+  # APP_ENV=dev + OBJSTORE=memory because CI has no bucket; everything else
+  # is the staging shape.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [backend, frontend, reporter]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the dashboard Caddy will serve
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Stack up
+        working-directory: backend
+        run: |
+          cp deploy/.env.example deploy/.env
+          sed -i 's/^APP_ENV=.*/APP_ENV=dev/; s/^OBJSTORE=.*/OBJSTORE=memory/; s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-password-0123456789abcdef/; s/^TOKEN_PEPPER=.*/TOKEN_PEPPER=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/' deploy/.env
+          docker compose -f deploy/compose.yml --env-file deploy/.env up -d --build
+          curl -sk --retry 40 --retry-delay 3 --retry-all-errors https://localhost/healthz
+          docker compose -f deploy/compose.yml --env-file deploy/.env ps
+      - name: Tenant, member and ingest token via the admin container
+        working-directory: backend
+        run: |
+          C="docker compose -f deploy/compose.yml --env-file deploy/.env run --rm -T admin"
+          jid() { grep -o "\"$1\": *\"[^\"]*\"" | head -1 | sed 's/.*: *"\(.*\)"/\1/'; }
+          ORG=$($C org create -name Acme -slug acme | jid ID)
+          WS=$($C ws create -org "$ORG" -name Payments | jid ID)
+          PROJ=$($C project create -ws "$WS" -name checkout | jid ID)
+          USER_ID=$($C user create -email alice@example.com -password 'correct horse battery staple' -verified | jid ID)
+          $C role grant -user "$USER_ID" -level project -scope "$PROJ" -role member >/dev/null
+          TOK=$($C token issue -project "$PROJ" -name ci | jid Plaintext)
+          test -n "$PROJ" && test -n "$TOK"
+          echo "::add-mask::$TOK"
+          echo "ATP_TOKEN=$TOK" >> "$GITHUB_ENV"
+      - name: Reporter pushes a real Playwright run through Caddy
+        working-directory: reporter/playwright
+        env:
+          ATP_URL: https://localhost
+          NODE_TLS_REJECT_UNAUTHORIZED: "0" # Caddy's internal CA on localhost
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run example 2>&1 | tail -3
+          npm run example 2>&1 | tail -1
+          sleep 65 # the worker links artifacts to attempts on its minute sweep
+      - name: Live check — the real UI against the real api, no mocks
+        working-directory: frontend
+        env:
+          ATP_UI: https://localhost
+          ATP_EMAIL: alice@example.com
+          ATP_PASSWORD: correct horse battery staple
+          ATP_BROWSER_CHANNEL: bundled
+        run: node scripts/live-check.mjs ../reporter/playwright/node_modules/playwright
+      - name: Logs on failure
+        if: failure()
+        working-directory: backend
+        run: docker compose -f deploy/compose.yml --env-file deploy/.env logs --tail=200 api worker caddy
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-check-screenshots
+          path: frontend/test-results/live-*.png
+          if-no-files-found: ignore
+      - name: Stack down
+        if: always()
+        working-directory: backend
+        run: docker compose -f deploy/compose.yml --env-file deploy/.env down -v

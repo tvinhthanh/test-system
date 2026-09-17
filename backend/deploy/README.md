@@ -45,6 +45,13 @@ chờ nó xong (`service_completed_successfully`) rồi mới lên.
 | Container non-root, image pin, healthcheck | distroless `nonroot` (uid 65532), mọi image pin tag, `HEALTHCHECK` bằng `cmd/healthcheck` (distroless không có curl); `read_only`, `cap_drop ALL`, `no-new-privileges` |
 | Backup hằng ngày + restore thử | container `backup` (volume `backups`), `test/restore/` + `backup/restore.sh` |
 
+**Không có bucket (dev/CI):** `OBJSTORE=memory`, `OBJSTORE_MEMORY_ADDR=:9100` (đã đặt
+trong compose) và `OBJSTORE_ENDPOINT=https://$DOMAIN/_objstore` — Caddy chuyển
+`/_objstore/*` vào bucket giả trong process api, reporter ngoài container upload
+được thật (kiểm 17-09: `npm run example` qua `https://localhost` → 6/6 artifact).
+Object mất khi api restart; chỉ để demo và cho job `e2e` của CI. Đổi Caddyfile
+phải `docker compose restart caddy` — bind mount không tự reload.
+
 **Prod khác staging ở đâu:** `APP_ENV=prod` từ chối `sslmode=disable` — compose
 này nói plaintext với Postgres trong mạng riêng nên là `staging`. Prod cần
 Postgres có TLS (managed, hoặc server bật `ssl=on`) và `DATABASE_URL` với
@@ -84,4 +91,7 @@ Config validation chạy trong container (`OBJSTORE=memory` với `APP_ENV=stagi
 `Secure`. Prometheus: 3 target `up`, rule §6.4 + `atp-soak` nạp đủ. Tenant tạo
 qua `run --rm admin`; ingest một run qua Caddy → 201/200/200; worker resolve
 xong (`stable_test_id` có, job `done`); `sum(ingest_requests_total)` thấy
-được từ Prometheus. `down -v` sạch.
+được từ Prometheus. `down -v` sạch. Lần hai (cùng ngày): reporter thật qua `https://localhost`
+với `OBJSTORE_ENDPOINT=https://localhost/_objstore` → 6/6 artifact upload;
+`frontend/scripts/live-check.mjs` với `ATP_UI=https://localhost` → 10 bước, 30 call
+`/v1` sạch — đúng chuỗi mà job `e2e` của `.github/workflows/ci.yml` chạy mỗi push.

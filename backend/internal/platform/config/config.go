@@ -39,6 +39,11 @@ type Config struct {
 	ObjStoreBucket    string
 	ObjStoreAccessKey string
 	ObjStoreSecretKey string
+	// ObjStoreMemoryAddr makes the dev memory store listen on a fixed address
+	// (e.g. ":9100") so a reverse proxy can forward presigned PUTs from
+	// outside the container; OBJSTORE_ENDPOINT is then the public base URL of
+	// those PUTs (deploy/compose.yml with OBJSTORE=memory). Dev only.
+	ObjStoreMemoryAddr string
 	// DashboardOrigins are the browser origins allowed to make
 	// cookie-authenticated state-changing requests (§11.2 Origin allowlist,
 	// §11.5 CORS: named origins, never *).
@@ -64,19 +69,20 @@ var validEnvs = map[string]bool{"dev": true, "staging": true, "prod": true}
 // present-but-invalid values are an error, never silently corrected.
 func Load() (Config, error) {
 	c := Config{
-		Env:               getenv("APP_ENV", "dev"),
-		HTTPAddr:          getenv("HTTP_ADDR", ":8080"),
-		MetricsAddr:       getenv("METRICS_ADDR", "127.0.0.1:9090"),
-		DatabaseURL:       getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/atp?sslmode=disable"),
-		TokenPepper:       getenv("TOKEN_PEPPER", devPepper),
-		ObjStore:          getenv("OBJSTORE", "memory"),
-		ObjStoreEndpoint:  os.Getenv("OBJSTORE_ENDPOINT"),
-		ObjStoreRegion:    getenv("OBJSTORE_REGION", "auto"),
-		ObjStoreBucket:    os.Getenv("OBJSTORE_BUCKET"),
-		ObjStoreAccessKey: os.Getenv("OBJSTORE_ACCESS_KEY"),
-		ObjStoreSecretKey: os.Getenv("OBJSTORE_SECRET_KEY"),
-		DashboardOrigins:  splitList(getenv("DASHBOARD_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080")),
-		CookieSecure:      getenv("COOKIE_SECURE", "true") != "false",
+		Env:                getenv("APP_ENV", "dev"),
+		HTTPAddr:           getenv("HTTP_ADDR", ":8080"),
+		MetricsAddr:        getenv("METRICS_ADDR", "127.0.0.1:9090"),
+		DatabaseURL:        getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/atp?sslmode=disable"),
+		TokenPepper:        getenv("TOKEN_PEPPER", devPepper),
+		ObjStore:           getenv("OBJSTORE", "memory"),
+		ObjStoreEndpoint:   os.Getenv("OBJSTORE_ENDPOINT"),
+		ObjStoreRegion:     getenv("OBJSTORE_REGION", "auto"),
+		ObjStoreBucket:     os.Getenv("OBJSTORE_BUCKET"),
+		ObjStoreAccessKey:  os.Getenv("OBJSTORE_ACCESS_KEY"),
+		ObjStoreSecretKey:  os.Getenv("OBJSTORE_SECRET_KEY"),
+		ObjStoreMemoryAddr: os.Getenv("OBJSTORE_MEMORY_ADDR"),
+		DashboardOrigins:   splitList(getenv("DASHBOARD_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080")),
+		CookieSecure:       getenv("COOKIE_SECURE", "true") != "false",
 	}
 	if v, err := strconv.Atoi(getenv("DASHBOARD_RATE_PER_MINUTE", "600")); err != nil || v < 0 {
 		return c, fmt.Errorf("DASHBOARD_RATE_PER_MINUTE: want a non-negative integer")

@@ -32,6 +32,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/atp?sslmode=disable` | `cmd/api` ping lúc boot, không có DB thì không lên |
 | `TOKEN_PEPPER` | *(pepper dev, ≥ 32 byte)* | khóa HMAC cho hash token (§11.4). `staging`/`prod` bắt buộc đặt riêng, từ chối giá trị dev |
 | `OBJSTORE` | `memory` | `s3` cho staging/prod (`OBJSTORE_ENDPOINT`, `OBJSTORE_REGION` mặc định `auto` cho R2, `OBJSTORE_BUCKET`, `OBJSTORE_ACCESS_KEY`, `OBJSTORE_SECRET_KEY`). `memory` chỉ dev: mỗi process một bucket riêng, mất khi tắt |
+| `OBJSTORE_MEMORY_ADDR` | *(trống → cổng loopback ngẫu nhiên)* | chỉ với `memory`: bucket giả nghe ở địa chỉ cố định (vd `:9100`) và `OBJSTORE_ENDPOINT` là URL công khai của nó (vd `https://localhost/_objstore`) để reverse proxy chuyển PUT từ ngoài container vào — `deploy/compose.yml` + Caddy dùng cho dev/CI không có bucket. Vẫn chỉ dev |
 | `DASHBOARD_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080` (5173 = Vite dev của `frontend/`) | allowlist Origin/Referer cho request đổi trạng thái bằng cookie (§11.2); không bao giờ `*` |
 | `COOKIE_SECURE` | `true` | `false` chỉ dev (§11.5 TLS mọi nơi) |
 | `DASHBOARD_RATE_PER_MINUTE` | `600` | trần request dashboard mỗi user đã đăng nhập, burst 2× (§11.6 API4); `0` tắt — chỉ cho test |
