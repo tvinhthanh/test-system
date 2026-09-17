@@ -34,3 +34,8 @@ export function tone(value: string, flaky = 0) {
   if (["running", "queued"].includes(value)) return "info";
   return "neutral";
 }
+export function bytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}

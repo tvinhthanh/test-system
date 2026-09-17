@@ -66,6 +66,9 @@ export function useResultDetail() {
   onScopeDispose(() => {
     disposed = true;
   });
+  // Same-origin URL for an artifact's bytes — the repository owns the path.
+  const artifactUrl = (artifactId: string) =>
+    reports.artifactContentUrl(project.value, artifactId);
   return {
     ...resource,
     project,
@@ -74,5 +77,6 @@ export function useResultDetail() {
     actionError,
     refresh,
     emit,
+    artifactUrl,
   };
 }

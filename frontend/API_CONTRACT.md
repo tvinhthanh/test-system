@@ -79,6 +79,21 @@ ordered by `attempt ASC` and include `attempt`, `status`, `durationMs`, and
 optional `error:{message,stack}`. Triage events include `id`, `type`,
 `actorName`, and `occurredAt`.
 
+Each attempt also carries `artifacts[]` — the **verified** uploads linked to
+it (§7.7), oldest first, at most 20: `{id,name,kind,contentType,sizeBytes,
+expiresAt}`. Pending, rejected or expired uploads are never listed. Linking is
+eventual (the worker sweep, within a minute of upload), so a run that finished
+seconds ago may show none yet.
+
+`GET /v1/projects/{projectId}/artifacts/{artifactId}/content` streams the
+bytes of a verified artifact to a project member (same session cookie, plain
+`<a href>`). The server owns rendering policy (§11.5): `Content-Disposition:
+inline` only for `image/png|webp|jpeg`, `video/webm|mp4` and `text/plain`,
+`attachment` for everything else (traces, HAR, logs, markdown), always
+`X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store` and a
+sandboxing CSP. The UI links to it and never embeds artifact bytes in its own
+document. Unknown, foreign-project or unverified ids are `404`.
+
 `POST /v1/projects/{projectId}/results/{resultId}/triage-events` takes
 `{type,payload}`. Allowed P1 types are `FAILURE_SEEN`, `MARKED_FLAKY`,
 `MARKED_KNOWN_ISSUE`, and `RESOLVED`; the server owns authorization, audit,

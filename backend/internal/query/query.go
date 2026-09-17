@@ -73,6 +73,19 @@ type Attempt struct {
 	Status     string        `json:"status"`
 	DurationMs int           `json:"durationMs"`
 	Error      *AttemptError `json:"error"`
+	// Artifacts are the verified uploads linked to this attempt (§7.7), oldest
+	// first, at most 20; bytes come from GET …/artifacts/{id}/content.
+	Artifacts []ArtifactRef `json:"artifacts"`
+}
+
+// ArtifactRef is what the failure detail needs to list and link an upload.
+type ArtifactRef struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
+	ContentType string    `json:"contentType"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
 type AttemptError struct {

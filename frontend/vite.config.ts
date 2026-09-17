@@ -6,7 +6,12 @@ export default defineConfig(({ command, mode }) => {
     throw new Error("Fixture mode is development only.");
   return {
     plugins: [vue()],
-    server: { port: 5173, proxy: { "/v1": "http://127.0.0.1:8080" } },
+    // ATP_API points the dev proxy at another api (a soak's, a staging box) for
+    // scripts/live-check.mjs; default is the local `go run ./cmd/api`.
+    server: {
+      port: 5173,
+      proxy: { "/v1": process.env.ATP_API || "http://127.0.0.1:8080" },
+    },
     build: { manifest: true, chunkSizeWarningLimit: 200 },
     test: {
       environment: "jsdom",

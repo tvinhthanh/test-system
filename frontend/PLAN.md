@@ -200,6 +200,10 @@ need cache invalidation; current data is route-owned and session scoped.
 - [x] Result detail page with attempts, error and stack blocks.
 - [x] Emit `FAILURE_SEEN` through the repository path; server dedupe remains authoritative.
 - [x] Add triage actions and event timeline.
+- [x] List each attempt's verified artifacts with links to the server's
+      content route (2026-09-17). The server decides inline vs download
+      (§11.5 allowlist); the UI never embeds artifact bytes. Trace viewer
+      integration is still out of scope (needs a safe iframe policy).
 
 ### Slice 5: History And Flaky
 
@@ -231,6 +235,20 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-17 (artifacts reach the user)
+
+- Result detail lists each attempt's verified artifacts (`artifacts[]` on
+  the attempt DTO, ≤ 20) with `Paperclip` links to
+  `GET …/artifacts/{id}/content`. Repository owns the path
+  (`artifactContentUrl`); the server owns rendering policy — inline only for
+  image/video/plain text, download otherwise, `nosniff`, `no-store`. Kinds the
+  server will not render inline get a `download` attribute so the intent is
+  visible before the click. Contract recorded in `API_CONTRACT.md`.
+- `live-check.mjs` follows the first artifact link with the session cookie
+  and asserts 200 + disposition + nosniff (skips when the run carried none).
+- Vite dev proxy target is configurable (`ATP_API=http://host:port npm run dev`)
+  so the live check can point at a soak's or a staging api.
 
 ### 2026-09-17 (live integration made repeatable; two fixes it found)
 

@@ -34,6 +34,16 @@ export interface Attempt {
   durationMs: number;
   message: string | null;
   stack: string | null;
+  artifacts: ArtifactRef[];
+}
+// A verified upload linked to an attempt; bytes come from the repository's
+// artifactContentUrl (the server decides inline vs download, §11.5).
+export interface ArtifactRef {
+  id: string;
+  name: string;
+  kind: string;
+  contentType: string;
+  sizeBytes: number;
 }
 export interface TriageEvent {
   id: string;
@@ -103,6 +113,16 @@ function result(value: unknown): TestResult {
     stableTestId: d.nullableString(x.stableTestId),
   };
 }
+function artifactRef(value: unknown): ArtifactRef {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    name: d.string(x.name),
+    kind: d.string(x.kind),
+    contentType: d.string(x.contentType),
+    sizeBytes: d.integer(x.sizeBytes),
+  };
+}
 function attempt(value: unknown): Attempt {
   const x = d.record(value);
   const error = x.error === null ? null : d.record(x.error);
@@ -112,6 +132,7 @@ function attempt(value: unknown): Attempt {
     durationMs: d.integer(x.durationMs),
     message: error ? d.nullableString(error.message) : null,
     stack: error ? d.nullableString(error.stack) : null,
+    artifacts: d.array(x.artifacts ?? [], artifactRef, 20),
   };
 }
 function triageEvent(value: unknown): TriageEvent {
@@ -202,6 +223,11 @@ export class ReportsRepository {
       attempts: d.array(x.attempts, attempt, 20),
       events: d.array(x.events, triageEvent, 100),
     };
+  }
+  // Same-origin URL of an artifact's bytes; the browser follows the server's
+  // Content-Disposition (inline for images/video/text, download otherwise).
+  artifactContentUrl(projectId: string, artifactId: string) {
+    return `${scope(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
   }
   async triage(
     projectId: string,

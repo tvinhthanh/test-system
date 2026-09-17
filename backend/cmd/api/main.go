@@ -127,7 +127,7 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// Dashboard: cookie sessions (§11.2) and the read model (§6.9.5).
 	web := authz.WebOptions{AllowedOrigins: cfg.DashboardOrigins, Secure: cfg.CookieSecure}
 	authz.AuthRoutes(mux, az, web)
-	(&dashboard{tenancy: ten, authz: az, query: query.New(db), triage: triage.New(db, res), logger: logger, ratePerMinute: cfg.DashboardRatePerMinute}).routes(mux)
+	(&dashboard{tenancy: ten, authz: az, query: query.New(db), triage: triage.New(db, res), artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it

@@ -229,26 +229,59 @@ func (s *service) ResultDetail(ctx context.Context, projectID, resultID string) 
 	d.Result.FailureObservedAt = utc(observed)
 
 	rows, err := s.db.Q(ctx).Query(ctx, `
-		SELECT attempt, status, duration_ms, error->>'message', error->>'stack'
+		SELECT id, attempt, status, duration_ms, error->>'message', error->>'stack'
 		  FROM test_result_attempts WHERE test_result_id = $1 ORDER BY attempt LIMIT 20`, resultID)
 	if err != nil {
 		return ResultDetail{}, err
 	}
 	d.Attempts = []Attempt{}
+	attemptIDs := []string{}
 	for rows.Next() {
 		var a Attempt
+		var id string
 		var msg, stack *string
-		if err := rows.Scan(&a.Attempt, &a.Status, &a.DurationMs, &msg, &stack); err != nil {
+		if err := rows.Scan(&id, &a.Attempt, &a.Status, &a.DurationMs, &msg, &stack); err != nil {
 			rows.Close()
 			return ResultDetail{}, err
 		}
 		if msg != nil || stack != nil {
 			a.Error = &AttemptError{Message: msg, Stack: stack}
 		}
+		a.Artifacts = []ArtifactRef{}
 		d.Attempts = append(d.Attempts, a)
+		attemptIDs = append(attemptIDs, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return ResultDetail{}, err
+	}
+	// Verified artifacts of those attempts, in one query; the project
+	// condition is on the artifact row too (§11.3.3), not inherited.
+	arts, err := s.db.Q(ctx).Query(ctx, `
+		SELECT test_result_attempt_id, id, name, kind, content_type, coalesce(actual_bytes, declared_bytes), expires_at
+		  FROM artifacts
+		 WHERE project_id = $1 AND test_result_attempt_id = ANY($2::uuid[]) AND status = 'verified'
+		 ORDER BY created_at, id`, projectID, attemptIDs)
+	if err != nil {
+		return ResultDetail{}, err
+	}
+	defer arts.Close()
+	index := map[string]int{}
+	for i, id := range attemptIDs {
+		index[id] = i
+	}
+	for arts.Next() {
+		var attemptID string
+		var ref ArtifactRef
+		if err := arts.Scan(&attemptID, &ref.ID, &ref.Name, &ref.Kind, &ref.ContentType, &ref.SizeBytes, &ref.ExpiresAt); err != nil {
+			return ResultDetail{}, err
+		}
+		ref.ExpiresAt = ref.ExpiresAt.UTC()
+		if i, ok := index[attemptID]; ok && len(d.Attempts[i].Artifacts) < 20 {
+			d.Attempts[i].Artifacts = append(d.Attempts[i].Artifacts, ref)
+		}
+	}
+	if err := arts.Err(); err != nil {
 		return ResultDetail{}, err
 	}
 

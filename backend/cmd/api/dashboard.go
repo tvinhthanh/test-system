@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
@@ -40,11 +44,13 @@ import (
 // contract but kept for the operator: GET …/metrics/triage and …/metrics/trend.
 
 type dashboard struct {
-	tenancy tenancy.Service
-	authz   authz.Service
-	query   query.Service
-	triage  triage.Service
-	logger  *slog.Logger
+	tenancy  tenancy.Service
+	authz    authz.Service
+	query    query.Service
+	triage   triage.Service
+	artifact artifact.Service
+	store    objstore.Store
+	logger   *slog.Logger
 
 	ratePerMinute int // per signed-in user; 0 = no limit
 }
@@ -70,6 +76,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	handle("GET /v1/projects/{projectId}/runs/{runId}/results", d.results)
 	handle("GET /v1/projects/{projectId}/results/{resultId}", d.resultDetail)
 	handle("POST /v1/projects/{projectId}/results/{resultId}/triage-events", d.triageEvent)
+	handle("GET /v1/projects/{projectId}/artifacts/{artifactId}/content", d.artifactContent)
 	handle("GET /v1/projects/{projectId}/identities", d.identities)
 	handle("GET /v1/projects/{projectId}/identities/{identityId}", d.identity)
 	handle("GET /v1/projects/{projectId}/identities/{identityId}/runs", d.identityRuns)
@@ -448,4 +455,89 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// inlineTypes is the §11.5 allowlist: only these render in the browser tab;
+// everything else is Content-Disposition: attachment. HTML, SVG and
+// anything a browser would execute never get here — AllowedContentType
+// refused them at declare — but the default is still "download", so a new
+// kind cannot become inline by accident.
+var inlineTypes = map[string]bool{
+	"image/png": true, "image/webp": true, "image/jpeg": true,
+	"video/webm": true, "video/mp4": true,
+	"text/plain": true,
+}
+
+// artifactContent streams a verified artifact's bytes to a member of its
+// project (§11.5: attachment by default, nosniff, never cached by a shared
+// cache). The api relays from the object store rather than redirecting to
+// a presigned URL so these headers are ours on every store, including the
+// dev one; at design-partner volumes the relay is cheap, and switching to a
+// presigned GET with response-content-disposition is a local change here.
+func (d *dashboard) artifactContent(w http.ResponseWriter, r *http.Request) {
+	scope, ok := d.viewer(w, r)
+	if !ok {
+		return
+	}
+	a, err := d.artifact.Get(r.Context(), string(scope.ProjectID), r.PathValue("artifactId"))
+	if err != nil {
+		if errors.Is(err, artifact.ErrNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, "ARTIFACT_NOT_FOUND", "artifact not found", nil)
+			return
+		}
+		d.internal(w, r, err)
+		return
+	}
+	if a.Status != artifact.StatusVerified {
+		// Pending, rejected, expired: there is nothing trustworthy to serve.
+		httpx.WriteError(w, http.StatusNotFound, "ARTIFACT_NOT_FOUND", "artifact not found", nil)
+		return
+	}
+	body, err := d.store.Get(r.Context(), a.StorageKey)
+	if err != nil {
+		if errors.Is(err, objstore.ErrNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, "ARTIFACT_NOT_FOUND", "artifact not found", nil)
+			return
+		}
+		httpx.Cause(r.Context(), err)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", "object store unavailable; retry", nil)
+		return
+	}
+	defer body.Close()
+	disposition := "attachment"
+	if inlineTypes[a.ContentType] {
+		disposition = "inline"
+	}
+	// The name is the reporter's (untrusted): quoted, with quotes and
+	// control characters removed, and the RFC 5987 form for anything non-ASCII.
+	w.Header().Set("Content-Disposition", disposition+"; "+dispositionFilename(a.Name))
+	w.Header().Set("Content-Type", a.ContentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	if a.ActualBytes > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(a.ActualBytes, 10))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, body)
+}
+
+// dispositionFilename renders filename= (ASCII, sanitized) and filename*=
+// (UTF-8, percent-encoded) for a Content-Disposition header.
+func dispositionFilename(name string) string {
+	ascii := make([]byte, 0, len(name))
+	for _, r := range name {
+		switch {
+		case r == '"' || r == '\\' || r < 0x20 || r == 0x7f:
+			ascii = append(ascii, '_')
+		case r > 0x7e:
+			ascii = append(ascii, '_')
+		default:
+			ascii = append(ascii, byte(r))
+		}
+	}
+	if len(ascii) == 0 {
+		ascii = []byte("artifact")
+	}
+	return `filename="` + string(ascii) + `"; filename*=UTF-8''` + url.PathEscape(name)
 }

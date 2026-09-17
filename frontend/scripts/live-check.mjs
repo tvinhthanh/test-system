@@ -67,10 +67,14 @@ const v1 =
     re.test(new URL(r.url()).pathname + new URL(r.url()).search) &&
     r.status() === status;
 
+const timings = [];
 const step = async (name, fn) => {
+  const started = performance.now();
   try {
     await fn();
-    console.log("OK   " + name);
+    const ms = Math.round(performance.now() - started);
+    timings.push([name, ms]);
+    console.log(`OK   ${name}  (${ms} ms)`);
   } catch (e) {
     console.log("FAIL " + name + ": " + String(e.message || e).split("\n")[0]);
     await page.screenshot({
@@ -197,6 +201,35 @@ await step(
     const text = await page.textContent("body");
     if (!/attempt/i.test(text))
       throw new Error("detail not rendered: " + text.slice(0, 300));
+    // Artifacts of the attempt (§7.7 / §11.5): when the run carried any, the
+    // link must serve bytes with the server's disposition and nosniff
+    // headers, through the same session cookie.
+    // Linking is eventual (the worker sweep, ≤ 1 min after upload), so a run
+    // finished seconds ago may legitimately show none yet.
+    const artifactLinks = page.locator(".artifact-list a");
+    await artifactLinks
+      .first()
+      .waitFor({ state: "attached", timeout: 2000 })
+      .catch(() => {});
+    if (await artifactLinks.count()) {
+      const href = await artifactLinks.first().getAttribute("href");
+      const res = await page.request.get(base + href);
+      if (res.status() !== 200)
+        throw new Error("artifact content → " + res.status());
+      const h = res.headers();
+      if (
+        !/^(inline|attachment); filename=/.test(
+          h["content-disposition"] || "",
+        ) ||
+        h["x-content-type-options"] !== "nosniff"
+      )
+        throw new Error("artifact headers: " + JSON.stringify(h));
+      console.log(
+        `     artifact bytes served: ${h["content-type"]}; ${h["content-disposition"]}`,
+      );
+    } else {
+      console.log("     (no artifacts on this attempt — link check skipped)");
+    }
     const btn = page
       .locator("button:has-text('flaky'), button:has-text('Flaky')")
       .first();
@@ -275,4 +308,12 @@ if (bad.length) {
 if (errors.length) process.exit(1);
 console.log(
   `\n${calls.length} /v1 calls, all 2xx except the deliberate 401; no browser errors.`,
+);
+// Wall time per step, browser included: navigation, every /v1 round trip,
+// render until the rows are in the DOM. Run against a project with 10^5–10^6
+// results to profile the UI at customer scale (the api side is measured by
+// backend/test/load); the fixed waits inside steps are part of the number.
+console.log(
+  "step timings (ms, wall, includes fixed waits):\n  " +
+    timings.map(([n, ms]) => `${String(ms).padStart(5)}  ${n}`).join("\n  "),
 );

@@ -4,11 +4,12 @@ import {
   Check,
   CircleAlert,
   Flag,
+  Paperclip,
   RefreshCw,
   UserRoundCheck,
 } from "@lucide/vue";
 import { useResultDetail } from "./useResultDetail";
-import { duration, time } from "../../shared/format";
+import { bytes, duration, time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import TechnicalBlock from "../../shared/TechnicalBlock.vue";
@@ -22,7 +23,11 @@ const {
   actionError,
   refresh,
   emit,
+  artifactUrl,
 } = useResultDetail();
+// Only these kinds are ever rendered inline by the server (§11.5 allowlist);
+// the rest download, so the link says so up front.
+const inlineKinds = new Set(["screenshot", "video", "log"]);
 </script>
 <template>
   <RouterLink class="back-link" :to="`/p/${encodeURIComponent(project)}/runs`"
@@ -112,6 +117,26 @@ const {
           <p v-if="!attempt.message && !attempt.stack" class="muted">
             No error payload for this attempt.
           </p>
+          <ul v-if="attempt.artifacts.length" class="artifact-list">
+            <li v-for="artifact in attempt.artifacts" :key="artifact.id">
+              <Paperclip :size="14" />
+              <!-- Report content is untrusted: rendered as text, never HTML.
+                   The server sets Content-Disposition; a download attribute
+                   is added only for kinds it will not render inline. -->
+              <a
+                :href="artifactUrl(artifact.id)"
+                target="_blank"
+                rel="noopener"
+                :download="
+                  inlineKinds.has(artifact.kind) ? null : artifact.name
+                "
+                >{{ artifact.name }}</a
+              >
+              <span class="muted"
+                >{{ artifact.kind }} / {{ bytes(artifact.sizeBytes) }}</span
+              >
+            </li>
+          </ul>
         </article>
       </section>
       <section class="event-list">

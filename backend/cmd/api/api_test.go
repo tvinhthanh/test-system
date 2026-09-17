@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -272,6 +274,74 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Errorf("detail attempts/events: %s", det.raw)
 	}
 
+	// ---- Artifacts on the failed attempt (§7.7 upload, §11.5 serving) ----
+	// A screenshot (inline in the browser), a trace (always a download) and
+	// one declared but never uploaded: only verified ones may be listed or
+	// served. The reporter uses the memory store's presigned PUT like S3's.
+	failedLocal := "0198c3e1-7b1a-7c3d-9e4f-000000000000"
+	upload := func(name, kind, contentType string, data []byte, complete bool) string {
+		sum := sha256.Sum256(data)
+		decl := bearer.do("POST", "/v1/artifacts", map[string]any{
+			"localRunId": failedLocal, "clientTestId": "ct_pay", "occurrenceIndex": 0, "attempt": 0,
+			"name": name, "kind": kind, "contentType": contentType, "sizeBytes": len(data), "sha256": hex.EncodeToString(sum[:]),
+		}, auth)
+		if decl.code != 201 {
+			t.Fatalf("declare %s: %d %s", name, decl.code, decl.raw)
+		}
+		id := decl.body["artifactId"].(string)
+		if !complete {
+			return id
+		}
+		up := decl.body["upload"].(map[string]any)
+		req, _ := http.NewRequest("PUT", up["url"].(string), bytes.NewReader(data))
+		for k, v := range up["headers"].(map[string]any) {
+			req.Header.Set(k, fmt.Sprint(v))
+		}
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		put, err := http.DefaultClient.Do(req)
+		if err != nil || put.StatusCode != 200 {
+			t.Fatalf("PUT %s: %v %v", name, err, put)
+		}
+		put.Body.Close()
+		if r := bearer.do("POST", "/v1/artifacts/"+id+"/complete", map[string]any{"sha256": hex.EncodeToString(sum[:])}, auth); r.code != 200 {
+			t.Fatalf("complete %s: %d %s", name, r.code, r.raw)
+		}
+		return id
+	}
+	png := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{7}, 300)...)
+	shotID := upload(`shot "1".png`, "screenshot", "image/png", png, true)
+	traceID := upload("trace.zip", "trace", "application/zip", bytes.Repeat([]byte("PK"), 200), true)
+	pendingID := upload("never.txt", "log", "text/plain", []byte("nope"), false)
+	det = web.get(base + "/results/" + resultID)
+	arts, _ := det.body["attempts"].([]any)[0].(map[string]any)["artifacts"].([]any)
+	if len(arts) != 2 || arts[0].(map[string]any)["id"] != shotID || arts[0].(map[string]any)["kind"] != "screenshot" || arts[0].(map[string]any)["sizeBytes"] != float64(len(png)) || arts[1].(map[string]any)["id"] != traceID {
+		t.Errorf("attempt artifacts (verified only, oldest first): %s", det.raw)
+	}
+	content := func(id string) (*http.Response, []byte) {
+		req, _ := http.NewRequest("GET", srv.URL+base+"/artifacts/"+id+"/content", nil)
+		res, err := web.http.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res, b
+	}
+	if res, body := content(shotID); res.StatusCode != 200 || !bytes.Equal(body, png) ||
+		res.Header.Get("Content-Type") != "image/png" || res.Header.Get("X-Content-Type-Options") != "nosniff" ||
+		res.Header.Get("Cache-Control") != "private, no-store" ||
+		res.Header.Get("Content-Disposition") != `inline; filename="shot _1_.png"; filename*=UTF-8''shot%20%221%22.png` {
+		t.Errorf("screenshot content: %d %v (%d bytes)", res.StatusCode, res.Header, len(body))
+	}
+	if res, _ := content(traceID); res.StatusCode != 200 || !strings.HasPrefix(res.Header.Get("Content-Disposition"), "attachment; ") || res.Header.Get("Content-Type") != "application/zip" {
+		t.Errorf("trace must download, never render: %d %v", res.StatusCode, res.Header)
+	}
+	if res, _ := content(pendingID); res.StatusCode != 404 {
+		t.Errorf("unverified artifact served: %d", res.StatusCode)
+	}
+
 	// ---- Triage events: allowed types, dedupe, then visible in the detail ----
 	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}}); r.code != 201 || r.body["actorName"] != "alice@example.com" {
 		t.Errorf("FAILURE_SEEN: %d %s", r.code, r.raw)
@@ -334,7 +404,7 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Fatalf("bob login: %d %s", r.code, r.raw)
 	}
 	bobc.csrf, _ = bobc.get("/v1/session").body["csrfToken"].(string)
-	for _, path := range []string{base + "/runs", base + "/runs/" + runIDs[0], base + "/runs/" + runIDs[0] + "/results", base + "/results/" + resultID, base + "/identities", base + "/identities/" + payID, base + "/identities/" + payID + "/runs"} {
+	for _, path := range []string{base + "/runs", base + "/runs/" + runIDs[0], base + "/runs/" + runIDs[0] + "/results", base + "/results/" + resultID, base + "/identities", base + "/identities/" + payID, base + "/identities/" + payID + "/runs", base + "/artifacts/" + shotID + "/content"} {
 		if r := bobc.get(path); r.code != 404 || r.errCode() != "PROJECT_NOT_FOUND" {
 			t.Errorf("bob GET %s: %d %s", path, r.code, r.raw)
 		}
