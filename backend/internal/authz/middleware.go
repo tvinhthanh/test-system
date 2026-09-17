@@ -23,7 +23,8 @@ func bearerMiddleware(svc Service) func(http.Handler) http.Handler {
 			if err != nil {
 				if !errors.Is(err, ErrUnauthenticated) {
 					// Database trouble is not the client's fault; say so
-					// without saying what (§11.5).
+					// without saying what (§11.5) — the access log gets the why.
+					httpx.Cause(r.Context(), err)
 					httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "authentication temporarily unavailable", nil)
 					return
 				}

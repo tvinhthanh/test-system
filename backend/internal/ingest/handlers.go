@@ -111,8 +111,7 @@ func (h *handlers) decode(w http.ResponseWriter, r *http.Request, limit int64, v
 }
 
 func (h *handlers) createRun(w http.ResponseWriter, r *http.Request) {
-	w, rec := h.observe(w, "runs")
-	defer rec.done()
+	rec := observed(r)
 	c, ok := h.authorize(w, r)
 	if !ok {
 		return
@@ -166,8 +165,7 @@ func (h *handlers) createRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) appendEvents(w http.ResponseWriter, r *http.Request) {
-	w, rec := h.observe(w, "events")
-	defer rec.done()
+	rec := observed(r)
 	c, ok := h.authorize(w, r)
 	if !ok {
 		return
@@ -257,8 +255,7 @@ func (h *handlers) appendEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) finishRun(w http.ResponseWriter, r *http.Request) {
-	w, rec := h.observe(w, "finish")
-	defer rec.done()
+	rec := observed(r)
 	c, ok := h.authorize(w, r)
 	if !ok {
 		return
@@ -365,7 +362,7 @@ func (h *handlers) invalidAt(w http.ResponseWriter, index int, err error) {
 // internal answers 500 without the cause (§11.5) and logs it with the
 // correlation id so the two can be joined.
 func (h *handlers) internal(w http.ResponseWriter, r *http.Request, what string, err error) {
-	h.Logger.Error("ingest "+what, "request_id", httpx.RequestIDFrom(r.Context()), "err", err)
+	httpx.Cause(r.Context(), fmt.Errorf("ingest %s: %w", what, err))
 	httpx.WriteError(w, http.StatusInternalServerError, "INTERNAL", "internal error; quote the X-Request-Id when reporting", nil)
 }
 
@@ -376,7 +373,8 @@ func (h *handlers) write(w http.ResponseWriter, status int, v any) {
 }
 
 // observation records one request's outcome for the §6.4 ingestion metrics.
-// The handler writes through the returned writer so the status is seen.
+// Everything inside observe writes through a capturing writer so the
+// status is seen whoever wrote it — auth, the rate limit or the handler.
 type observation struct {
 	h        *handlers
 	endpoint string
@@ -385,9 +383,26 @@ type observation struct {
 	rec      *statusCapture
 }
 
-func (h *handlers) observe(w http.ResponseWriter, endpoint string) (http.ResponseWriter, *observation) {
-	sc := &statusCapture{ResponseWriter: w, status: http.StatusOK}
-	return sc, &observation{h: h, endpoint: endpoint, project: "-", start: time.Now(), rec: sc}
+type observationKey struct{}
+
+// observe is the outermost ingest middleware: one observation per request,
+// reachable by the handler through observed(r) to set the project.
+func (h *handlers) observe(endpoint string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sc := &statusCapture{ResponseWriter: w, status: http.StatusOK}
+		ob := &observation{h: h, endpoint: endpoint, project: "-", start: time.Now(), rec: sc}
+		defer ob.done()
+		next.ServeHTTP(sc, r.WithContext(context.WithValue(r.Context(), observationKey{}, ob)))
+	})
+}
+
+// observed returns the request's observation; a detached one (never
+// recorded) when the handler is mounted without observe, as in unit tests.
+func observed(r *http.Request) *observation {
+	if ob, ok := r.Context().Value(observationKey{}).(*observation); ok {
+		return ob
+	}
+	return &observation{project: "-", start: time.Now(), rec: &statusCapture{}}
 }
 
 func (o *observation) done() {

@@ -254,6 +254,12 @@ func (s *service) audit(ctx context.Context, projectID, action, subject, target,
 
 // ---- Review Queue ----------------------------------------------------------
 
+func (s *service) PendingReviews(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM review_queue_items WHERE status = 'pending'`).Scan(&n)
+	return n, err
+}
+
 func (s *service) ListReview(ctx context.Context, projectID string, limit int) ([]ReviewItem, error) {
 	if !isUUID(projectID) {
 		return nil, ErrNotFound

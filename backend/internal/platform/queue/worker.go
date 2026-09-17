@@ -34,6 +34,8 @@ type Worker struct {
 	seconds *metric.Histogram
 	depth   *metric.Gauge
 	age     *metric.Gauge
+	latency *metric.Histogram
+	polled  *metric.Gauge
 }
 
 func (w *Worker) defaults() {
@@ -54,6 +56,8 @@ func (w *Worker) defaults() {
 		w.seconds = w.Metrics.Histogram("queue_job_seconds", "Handler duration by kind.", metric.DefaultLatencyBuckets, "kind")
 		w.depth = w.Metrics.Gauge("queue_pending", "Runnable jobs waiting, by kind.", "kind")
 		w.age = w.Metrics.Gauge("queue_oldest_pending_seconds", "Age of the oldest runnable job, by kind.", "kind")
+		w.latency = w.Metrics.Histogram("queue_job_latency_seconds", "Enqueue-to-done latency by kind — the §6.4 resolver latency for run.finished.", metric.DefaultLatencyBuckets, "kind")
+		w.polled = w.Metrics.Gauge("queue_worker_last_poll_timestamp_seconds", "Unix time this worker last looked at the queue, by kind; stale = stuck.", "kind")
 	}
 }
 
@@ -69,6 +73,9 @@ func (w *Worker) Run(ctx context.Context) {
 				did, err := w.RunOnce(ctx)
 				if err != nil {
 					w.Logger.Error("queue", "kind", w.Kind, "err", err)
+				}
+				if w.polled != nil {
+					w.polled.Set(float64(time.Now().Unix()), w.Kind)
 				}
 				if !did {
 					w.sample(ctx)
@@ -109,6 +116,9 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	}
 	if herr == nil {
 		w.count("done")
+		if w.latency != nil {
+			w.latency.Observe(time.Since(job.CreatedAt).Seconds(), w.Kind)
+		}
 		return true, nil
 	}
 	dead, ferr := w.Queue.Fail(ctx, job.ID, herr)

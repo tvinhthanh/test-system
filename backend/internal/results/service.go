@@ -508,6 +508,12 @@ func (s *service) SetStableIDs(ctx context.Context, run RunID, byClient map[stri
 	return int(tag.RowsAffected()), nil
 }
 
+func (s *service) OpenRuns(ctx context.Context, startedBefore time.Time) (int, error) {
+	var n int
+	err := s.db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM runs WHERE status = 'running' AND started_at < $1`, startedBefore.UTC()).Scan(&n)
+	return n, err
+}
+
 func (s *service) AutoClose(ctx context.Context, startedBefore time.Time) ([]Run, error) {
 	now := time.Now().UTC()
 	rows, err := s.db.Q(ctx).Query(ctx, `

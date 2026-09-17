@@ -30,6 +30,7 @@ type Job struct {
 	Attempts    int // including this one
 	MaxAttempts int
 	RunAt       time.Time
+	CreatedAt   time.Time // enqueue time: done − CreatedAt is the §6.4 queue latency
 }
 
 // Enqueue describes a job to add. Key deduplicates within Kind while a job
@@ -129,8 +130,8 @@ func (q *Queue) Claim(ctx context.Context, kind string, lease time.Duration) (*J
 			 ORDER BY run_at
 			 FOR UPDATE SKIP LOCKED
 			 LIMIT 1)
-		RETURNING id, kind, key, payload, attempts, max_attempts, run_at`,
-		kind, now, now.Add(lease)).Scan(&j.ID, &j.Kind, &key, &j.Payload, &j.Attempts, &j.MaxAttempts, &j.RunAt)
+		RETURNING id, kind, key, payload, attempts, max_attempts, run_at, created_at`,
+		kind, now, now.Add(lease)).Scan(&j.ID, &j.Kind, &key, &j.Payload, &j.Attempts, &j.MaxAttempts, &j.RunAt, &j.CreatedAt)
 	if errors.Is(err, pg.ErrNoRows) {
 		return nil, nil
 	}
@@ -215,6 +216,36 @@ func (q *Queue) Depth(ctx context.Context, kind string) (pending int, oldest tim
 		oldest = q.now().Sub(*oldestAt)
 	}
 	return pending, oldest, nil
+}
+
+// Backlog is the whole queue in one glance, for a process that is not the
+// worker: the api exposes it at scrape time so a dead or stuck worker is
+// visible from a listener that is still alive (§6.4 "biết mình đang hỏng").
+type Backlog struct {
+	Pending int           // runnable now, any kind
+	Oldest  time.Duration // age of the oldest runnable job
+	Running int           // leased right now
+	Dead    int           // gave up after max attempts — needs a human
+}
+
+// Backlog reads the queue-wide counts.
+func (q *Queue) Backlog(ctx context.Context) (Backlog, error) {
+	var b Backlog
+	var oldestAt *time.Time
+	now := q.now().UTC()
+	err := q.db.Q(ctx).QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE status = 'pending' AND run_at <= $1),
+		       min(run_at) FILTER (WHERE status = 'pending' AND run_at <= $1),
+		       count(*) FILTER (WHERE status = 'running'),
+		       count(*) FILTER (WHERE status = 'dead')
+		  FROM jobs WHERE status IN ('pending', 'running', 'dead')`, now).Scan(&b.Pending, &oldestAt, &b.Running, &b.Dead)
+	if err != nil {
+		return Backlog{}, err
+	}
+	if oldestAt != nil {
+		b.Oldest = now.Sub(*oldestAt)
+	}
+	return b, nil
 }
 
 // Status is a job's current state, for tests and the operator.

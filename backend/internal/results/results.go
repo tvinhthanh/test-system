@@ -186,6 +186,10 @@ type Service interface {
 	// cutoff as error RUN_TIMED_OUT (§7.4) and returns them. Idempotent: a
 	// closed run is no longer running.
 	AutoClose(ctx context.Context, startedBefore time.Time) ([]Run, error)
+	// OpenRuns counts runs still running that started before the time —
+	// what AutoClose would close; a non-zero value that persists means the
+	// sweep is not running (§6.4).
+	OpenRuns(ctx context.Context, startedBefore time.Time) (int, error)
 	// FindAttempt returns the id of one attempt by its protocol keys (§7.7
 	// artifact linking), or ErrNotFound while the event has not arrived.
 	FindAttempt(ctx context.Context, run RunID, clientTestID string, occurrenceIndex, attempt int) (string, error)

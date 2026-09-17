@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -174,7 +175,7 @@ func (h *handlers) declare(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusGone, "ARTIFACT_GONE", "artifact expired or deleted; declare it under a new name", nil)
 		case errors.Is(err, ErrStore):
 			h.uploads.Inc(string(c.project), "store_error")
-			h.Logger.Warn("object store", "request_id", httpx.RequestIDFrom(r.Context()), "err", err)
+			httpx.Cause(r.Context(), err)
 			httpx.WriteError(w, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", "object store unavailable; retry", nil)
 		default:
 			h.internal(w, r, "declare", err)
@@ -247,7 +248,7 @@ func (h *handlers) complete(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", err.Error(), nil)
 		case errors.Is(err, ErrStore):
 			h.uploads.Inc(string(c.project), "store_error")
-			h.Logger.Warn("object store", "request_id", httpx.RequestIDFrom(r.Context()), "err", err)
+			httpx.Cause(r.Context(), err)
 			httpx.WriteError(w, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", "object store unavailable; retry complete", nil)
 		default:
 			h.internal(w, r, "complete", err)
@@ -275,7 +276,7 @@ func (h *handlers) decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func (h *handlers) internal(w http.ResponseWriter, r *http.Request, what string, err error) {
-	h.Logger.Error("artifact "+what, "request_id", httpx.RequestIDFrom(r.Context()), "err", err)
+	httpx.Cause(r.Context(), fmt.Errorf("artifact %s: %w", what, err))
 	httpx.WriteError(w, http.StatusInternalServerError, "INTERNAL", "internal error; quote the X-Request-Id when reporting", nil)
 }
 

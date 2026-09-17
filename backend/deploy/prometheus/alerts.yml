@@ -1,0 +1,156 @@
+# SPEC §6.4 — the mandatory P1 signals as Prometheus alerting rules, written
+# against the metric names this codebase actually exports (see
+# internal/platform/metric and the Counter/Gauge/Histogram calls in each
+# module). Two scrape targets: the api's METRICS_ADDR (job="atp-api") and the
+# worker's (job="atp-worker"); both are loopback by default, put the scraper
+# on the same host or behind an authenticated tunnel (§11.5).
+#
+# test/observe proves each signal moves when the failure it watches happens.
+groups:
+  - name: atp-ingestion
+    rules:
+      # §6.4 Ingestion: error rate of POST /v1/runs and /events per project > 1 % in 15 min.
+      # Only 5xx is "our" error; a 4xx is the reporter's (bad token, oversized batch).
+      - alert: IngestErrorRate
+        expr: |
+          sum by (project) (rate(ingest_requests_total{endpoint=~"runs|events", status="5xx"}[15m]))
+            /
+          sum by (project) (rate(ingest_requests_total{endpoint=~"runs|events"}[15m]))
+            > 0.01
+        for: 15m
+        labels: {severity: page}
+        annotations:
+          summary: "Ingest 5xx rate above 1 % for project {{ $labels.project }}"
+
+      # §6.4 Ingestion: runs open past 6 h and auto-closed, > 2 per day per project.
+      - alert: RunsAutoClosed
+        expr: sum by (project) (increase(runs_autoclosed_total[1d])) > 2
+        labels: {severity: ticket}
+        annotations:
+          summary: "More than 2 runs auto-closed today in project {{ $labels.project }} — a reporter is not sending run.finished"
+
+      # §14.3: no run may stay running forever. If this stays non-zero the
+      # worker sweep is not running (the api reads it, not the worker).
+      - alert: RunsStuckOpen
+        expr: runs_open_over_limit > 0
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $value }} runs are past the auto-close limit and nothing closes them"
+
+      # §6.4 Ingestion: resolver latency p99 > 5 s. Tier 2 runs in the
+      # run.finished job; its enqueue-to-done latency is the measure.
+      - alert: ResolverLatencyP99
+        expr: histogram_quantile(0.99, sum by (le) (rate(queue_job_latency_seconds_bucket{kind="run.finished"}[15m]))) > 5
+        for: 15m
+        labels: {severity: page}
+        annotations:
+          summary: "run.finished p99 latency {{ $value | humanizeDuration }} — resolver over the §14.2 budget"
+
+  - name: atp-queue
+    rules:
+      # A worker that died takes its own /metrics with it: alert on absence,
+      # and on the api's independent view of the backlog.
+      - alert: WorkerDown
+        expr: up{job="atp-worker"} == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "No worker is scraped — tier-2 resolve, flaky and sweeps are not running"
+
+      - alert: WorkerStuck
+        expr: time() - queue_worker_last_poll_timestamp_seconds > 120
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "Worker {{ $labels.kind }} has not polled the queue for 2 minutes — hung handler or lost database"
+
+      - alert: QueueBacklog
+        expr: queue_backlog_oldest_seconds > 300
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Oldest runnable job is {{ $value | humanizeDuration }} old — the worker is down, stuck or behind"
+
+      - alert: DeadJobs
+        expr: queue_dead_jobs > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} jobs exhausted their attempts — run.finished results are unresolved until someone looks"
+
+      # The api reports -1 when it cannot read the database at scrape time.
+      - alert: ApiCannotReadDatabase
+        expr: queue_backlog_jobs < 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The api's health gauges cannot reach the database"
+
+  - name: atp-artifacts
+    rules:
+      # §6.4 Artifact: upload failure rate and checksum mismatch > 2 %.
+      - alert: ArtifactFailureRate
+        expr: |
+          sum by (project) (rate(artifact_uploads_total{result=~"rejected|store_error"}[30m]))
+            /
+          sum by (project) (rate(artifact_uploads_total{result!="too_large"}[30m]))
+            > 0.02
+        for: 30m
+        labels: {severity: page}
+        annotations:
+          summary: "Artifact failures above 2 % for project {{ $labels.project }} (rejected = checksum/size mismatch, store_error = object store)"
+
+      # §6.4 Artifact: artifacts unlinked for more than 1 h > 0. Set by the
+      # worker's sweep, so WorkerDown covers the case where nobody sets it.
+      - alert: ArtifactsUnlinked
+        expr: artifacts_unlinked_overdue > 0
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} uploaded artifacts have had no matching test event for over an hour"
+
+  - name: atp-identity
+    rules:
+      # §6.4 Identity: new identities per day per project > 3× the weekly baseline.
+      - alert: IdentityChurn
+        expr: |
+          sum by (project) (increase(identity_resolve_total{decision="new_identity"}[1d]))
+            >
+          3 * (sum by (project) (increase(identity_resolve_total{decision="new_identity"}[7d])) / 7)
+          and sum by (project) (increase(identity_resolve_total{decision="new_identity"}[1d])) > 20
+        labels: {severity: ticket}
+        annotations:
+          summary: "Project {{ $labels.project }} created 3× its usual new identities today — a rename storm or a broken fingerprint"
+
+      # §6.4 Identity: review queue > 50 pairs waiting.
+      - alert: ReviewQueueLong
+        expr: review_queue_pending > 50
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} identity pairs are waiting for a human"
+
+  - name: atp-infra
+    rules:
+      # §6.4 Infra: API 5xx and p99 latency "theo chuẩn thường".
+      - alert: ApiErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.01
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "API 5xx above 1 %"
+
+      - alert: ApiLatencyP99
+        expr: histogram_quantile(0.99, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "p99 over 1 s on {{ $labels.route }}"
+
+      - alert: ApiDown
+        expr: up{job="atp-api"} == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The api is not scraped"

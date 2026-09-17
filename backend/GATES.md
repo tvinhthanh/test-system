@@ -12,7 +12,7 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | **T0** core flow end-to-end | ✅ đạt | 16-09-2026 | §T0 dưới |
 | **T1** không mất dữ liệu, idempotency, retry | ✅ đạt — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm ra và sửa 1 deadlock | 16-09-2026 | §T1 |
 | **T2** load §14.2 | ⏳ dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời ✗ trên laptop (p95 ≈ 2 s; từ 8,4 s) — cần đo trên server | 17-09-2026 | §T2 |
-| **T3** failure recovery + observability | ✗ chưa chạy | — | metrics §6.4 đã có, chưa có kịch bản |
+| **T3** failure recovery + observability | ✅ đạt — alert rules §6.4 trên tên metric thật, gauge phía api, 4 kịch bản hỏng nhìn thấy được ở `/metrics`, log không lộ bí mật | 17-09-2026 | §T3 |
 | **T4** security + tenant isolation | ✅ tenant isolation đạt (mọi route); phần security còn mục mở | 16-09-2026 | §T4 |
 | **T5** soak 24–72 h | ✗ chưa chạy | — | — |
 
@@ -161,6 +161,60 @@ Windows, 12 CPU logic, **Postgres + api + worker + máy phát tải cùng một 
 chấp CPU của một máy chạy cả bốn thứ. `synchronous_commit=off` không đổi gì (không
 phải fsync); bỏ index `test_results_client` không đổi gì (đã hoàn tác). Cách đo
 đúng: server, Postgres riêng, máy phát tải riêng, lặp lại hai bài trên.
+
+## T3 — failure recovery + observability ✅ 17-09-2026
+
+"Đủ để biết mình đang hỏng" được hiểu là: mỗi kịch bản hỏng của §14.3 phải
+**hiện ra ở `/metrics`** dưới đúng tên mà alert rule đang nhìn, và log phải nói
+*tại sao* — không bao giờ nói *bí mật*. Ba thứ đi cùng nhau:
+
+1. **`deploy/prometheus/alerts.yml`** — mọi ngưỡng bắt buộc của §6.4 viết thành
+   Prometheus rule trên **đúng tên metric code đang export** (ingest error rate
+   > 1 %/15 phút theo project; auto-close > 2/ngày/project; resolver p99 > 5 s;
+   artifact fail > 2 %; unlinked > 1 h; identity churn > 3× baseline; review
+   queue > 50; API 5xx và p99), cộng những thứ §6.4 không gọi tên nhưng không có
+   thì mù: worker chết (`up`), worker treo (heartbeat), backlog già, job dead,
+   api không đọc được DB.
+2. **Số đo mới** (harness T3 phát hiện thiếu):
+   - `queue_job_latency_seconds{kind}` — độ trễ enqueue → done, chính là "độ trễ
+     resolver" của §6.4; trước chỉ có thời gian handler.
+   - `queue_worker_last_poll_timestamp_seconds{kind}` — nhịp tim worker; treo
+     khác chết.
+   - **Gauge phía api** đọc DB lúc scrape (`cmd/api/health_metrics.go`):
+     `queue_backlog_jobs`, `queue_backlog_oldest_seconds`, `queue_running_jobs`,
+     `queue_dead_jobs`, `runs_open_over_limit`, `review_queue_pending`. Lý do:
+     worker chết thì `/metrics` của nó chết theo — backlog phải nhìn được từ
+     process còn sống. Đọc lỗi → `-1`, để "DB không với tới" khác "queue rỗng".
+   - Gauge/counter không nhãn hiện `0` ngay từ lúc đăng ký: "vắng" không bao
+     giờ đồng nghĩa "bằng 0" (harness bắt được `artifacts_unlinked_overdue` vắng
+     mặt cho tới lần sweep đầu).
+3. **`test/observe/`** — 4 bài trên binary thật (≈ 9 s, 17-09 chạy 4 lần đều pass):
+
+| Kịch bản | Điều operator phải thấy | Đã thấy |
+|---|---|---|
+| Worker bị giết, 5 run finish, worker bật lại | api: `queue_backlog_jobs` 0 → 5 → 0, `queue_backlog_oldest_seconds` ≥ 1; worker mới: `queue_jobs_total{done}` = 5, `queue_job_latency_seconds_count` = 5 với sum ≥ 1 (job đã đợi), heartbeat < 10 s | ✅ |
+| Token sai (401), batch 501 event (413), rồi đứt mọi kết nối DB của api → 503 | `ingest_requests_total{endpoint="events",status="5xx"}` ≥ 1 và `http_requests_total{route,status="503"}` ≥ 1; 401 và 413 nằm ở `4xx`, **không** lọt vào tỉ lệ 5xx | ✅ — sau khi sửa lỗi dưới |
+| Run mở 7 giờ không finish; artifact upload xong nhưng event không bao giờ tới, 2 giờ trước | trước sweep: api `runs_open_over_limit` = 1; sau khi worker boot (sweep ngay): `runs_autoclosed_total{project}` = 1, run thành `error/RUN_TIMED_OUT`, `artifacts_unlinked_overdue` = 1, `review_queue_pending` = 0 | ✅ |
+| Traffic đủ loại (ingest tốt, token sai, login sai/đúng, 503 do đứt DB, job worker) rồi đọc **toàn bộ log** api + worker | không có token ingest, mật khẩu, `atp_sess_`, hay token bị từ chối trong log; mọi dòng ERROR/WARN mức request có `request_id` | ✅ |
+
+**Lỗi thật harness bắt được:**
+
+- **Ingest error rate mù với lỗi trước handler.** `ingest_requests_total` chỉ đếm
+  khi handler chạy; 503 từ auth (DB mất) và 429 từ rate limit không được đếm →
+  alert §6.4 "ingest > 1 %" sẽ **im lặng đúng lúc DB sập** — đúng cái §6.4 sợ
+  ("không biết mình đang trượt"). Sửa: observation thành middleware bọc ngoài
+  auth + rate limit; project = `-` khi chưa xác thực được.
+- **5xx không có dòng log nào giải thích.** Access log ghi INFO mọi status; 503
+  `AUTH_UNAVAILABLE` không log nguyên nhân (đúng §11.5 với client, nhưng
+  operator cũng mù). Sửa: `httpx.Cause(ctx, err)` — middleware/handler ghi
+  nguyên nhân vào request, access log in **một dòng ERROR** với `request_id`,
+  route, status, `cause` cho mọi 5xx; client vẫn chỉ nhận thông điệp chung.
+  Mọi chỗ trả 5xx (authz bearer/session/logout, ingest, artifact store, dashboard)
+  đi qua đường này — hết log lẻ tẻ mỗi module một kiểu.
+
+**Còn ngoài T3:** dashboard Grafana (chưa cần — alert rule là thứ đánh thức
+người); runbook cho từng alert; log shipping. Chỉ số "Chi phí" và "Sản phẩm"
+của §6.4 (storage/org, hypothesis LLM, `untriaged_rate`…) là Gate-1.5.
 
 ## T4 — tenant isolation ✅ 16-09-2026 · security còn mục mở
 

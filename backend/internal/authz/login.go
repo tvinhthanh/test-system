@@ -84,6 +84,7 @@ func SessionMiddleware(svc Service, opts WebOptions) func(http.Handler) http.Han
 					httpx.WriteError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "session expired or invalid", nil)
 					return
 				}
+				httpx.Cause(r.Context(), err)
 				httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "authentication temporarily unavailable", nil)
 				return
 			}
@@ -245,6 +246,7 @@ func (h *webHandlers) login(w http.ResponseWriter, r *http.Request) {
 			// One message for every cause (§11.2).
 			httpx.WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "email or password is incorrect", nil)
 		default:
+			httpx.Cause(r.Context(), err)
 			httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "authentication temporarily unavailable", nil)
 		}
 		return
@@ -262,6 +264,7 @@ func (h *webHandlers) logout(w http.ResponseWriter, r *http.Request) {
 	sess, ok := SessionFrom(r.Context())
 	if ok {
 		if err := h.svc.Logout(r.Context(), sess.ID); err != nil && !errors.Is(err, ErrNotFound) {
+			httpx.Cause(r.Context(), err)
 			httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "could not revoke session", nil)
 			return
 		}

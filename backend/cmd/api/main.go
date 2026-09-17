@@ -113,6 +113,8 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	idn := identity.New(db)
 	art := artifact.New(db, store, res)
 
+	healthGauges(reg, queue.New(db), res, idn, logger)
+
 	mux := httpx.NewRouter()
 	mux.Handle("GET /healthz", httpx.Health())
 	ingest.Routes(mux, ingest.Deps{

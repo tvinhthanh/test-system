@@ -56,8 +56,12 @@ func Routes(mux httpx.Mux, d Deps) {
 		p, _ := authz.PrincipalFrom(r.Context())
 		return p.TokenID
 	})
-	wrap := func(fn http.HandlerFunc) http.Handler { return auth(limit(fn)) }
-	mux.Handle("POST /v1/runs", wrap(h.createRun))
-	mux.Handle("POST /v1/runs/{localRunId}/events", wrap(h.appendEvents))
-	mux.Handle("POST /v1/runs/{localRunId}/finish", wrap(h.finishRun))
+	// The observation wraps auth and the rate limit, not just the handler:
+	// a 503 from a lost database or a 429 is an ingest outcome the §6.4
+	// error rate must see (test/observe caught it counting only handler
+	// answers). The project label is filled once auth has resolved it.
+	wrap := func(endpoint string, fn http.HandlerFunc) http.Handler { return h.observe(endpoint, auth(limit(fn))) }
+	mux.Handle("POST /v1/runs", wrap("runs", h.createRun))
+	mux.Handle("POST /v1/runs/{localRunId}/events", wrap("events", h.appendEvents))
+	mux.Handle("POST /v1/runs/{localRunId}/finish", wrap("finish", h.finishRun))
 }

@@ -213,9 +213,7 @@ func TestDBConnectionsDroppedUnderTraffic(t *testing.T) {
 	h := harness.New(t)
 	api, w := h.StartAPI(), h.StartWorker()
 
-	dropConnections := func() int {
-		return h.Count(`SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`)
-	}
+	dropConnections := h.DropConnections
 	// postWithRetry is the reporter's behaviour: retry 5xx/transport errors,
 	// never a 4xx.
 	postWithRetry := func(path string, body any) (harness.Resp, int) {

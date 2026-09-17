@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -96,6 +97,7 @@ type Harness struct {
 
 	tenancy   tenancy.Service
 	authz     authz.Service
+	appName   string
 	apiBin    string
 	workerBin string
 	apiMetric string
@@ -121,7 +123,10 @@ func New(t *testing.T) *Harness {
 	}
 	h := &Harness{
 		T: t, Ctx: ctx, DB: db,
-		DBURL:     base + sep + "search_path=" + schema,
+		// application_name tags the binaries' connections so a scenario can
+		// terminate exactly them — other packages share this database.
+		DBURL:     base + sep + "search_path=" + schema + "&application_name=atp-" + schema,
+		appName:   "atp-" + schema,
 		APIAddr:   freeAddr(t),
 		HTTP:      &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0}},
 		tenancy:   tenancy.New(db),
@@ -259,14 +264,55 @@ func (h *Harness) StartAPI() *Proc { return h.start("api", h.apiBin, h.apiMetric
 // StartWorker starts cmd/worker.
 func (h *Harness) StartWorker() *Proc { return h.start("worker", h.workerBin, h.wrkMetric) }
 
-// Metrics fetches the api's /metrics text.
-func (h *Harness) Metrics() string {
-	res, err := http.Get("http://" + h.apiMetric + "/metrics")
+// Metrics fetches the api's /metrics text; WorkerMetrics the worker's.
+func (h *Harness) Metrics() string       { return scrape(h.apiMetric) }
+func (h *Harness) WorkerMetrics() string { return scrape(h.wrkMetric) }
+
+func scrape(addr string) string {
+	res, err := http.Get("http://" + addr + "/metrics")
 	if err != nil {
 		return ""
 	}
 	defer res.Body.Close()
 	b, _ := io.ReadAll(res.Body)
+	return string(b)
+}
+
+// Metric reads one sample from an exposition text: the first line whose
+// name and label set contain every given label pair, in any order. Returns
+// ok=false when no such series exists. Histograms expose _count/_sum/_bucket.
+func Metric(text, name string, labels ...string) (float64, bool) {
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.HasPrefix(line, name) {
+			continue
+		}
+		rest := line[len(name):]
+		if rest == "" || (rest[0] != '{' && rest[0] != ' ') {
+			continue
+		}
+		match := true
+		for _, l := range labels {
+			if !strings.Contains(rest, l) {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		fields := strings.Fields(rest)
+		v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			continue
+		}
+		return v, true
+	}
+	return 0, false
+}
+
+// Log returns everything the process wrote so far.
+func (p *Proc) Log() string {
+	b, _ := os.ReadFile(p.path)
 	return string(b)
 }
 
@@ -384,6 +430,14 @@ func EventWith(seq int, file, title, status, outcome string) map[string]any {
 
 // LocalRun returns the n-th deterministic client run id.
 func LocalRun(n int) string { return fmt.Sprintf("0198c3e1-7b1a-7c3d-9e4f-%012x", n) }
+
+// DropConnections terminates every database connection of this harness's
+// api and worker — §14.3 "restart kết nối DB" — and returns how many. Other
+// tests' connections on the same database are left alone.
+func (h *Harness) DropConnections() int {
+	h.T.Helper()
+	return h.Count(`SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = $1 AND pid <> pg_backend_pid()`, h.appName)
+}
 
 // ---- invariants by SQL ----
 

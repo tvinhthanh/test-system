@@ -79,6 +79,9 @@ func checkLabels(name string, labels []string) {
 func (r *Registry) Counter(name, help string, labels ...string) *Counter {
 	checkLabels(name, labels)
 	c := &Counter{vec: newVec(name, help, "counter", labels, newFloatCell)}
+	if len(labels) == 0 {
+		c.vec.get(nil) // exposed as 0 from boot: "absent" must never mean "zero"
+	}
 	r.register(name, c)
 	return c
 }
@@ -87,6 +90,9 @@ func (r *Registry) Counter(name, help string, labels ...string) *Counter {
 func (r *Registry) Gauge(name, help string, labels ...string) *Gauge {
 	checkLabels(name, labels)
 	g := &Gauge{vec: newVec(name, help, "gauge", labels, newFloatCell)}
+	if len(labels) == 0 {
+		g.vec.get(nil) // an unlabelled gauge nobody has set yet is 0, not missing
+	}
 	r.register(name, g)
 	return g
 }

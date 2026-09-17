@@ -176,6 +176,9 @@ type Service interface {
 	SplitFrom(ctx context.Context, projectID, fingerprint string, at time.Time, actor string) (newID string, err error)
 
 	ListReview(ctx context.Context, projectID string, limit int) ([]ReviewItem, error)
+	// PendingReviews counts pairs waiting for a human across all projects —
+	// §6.4 alerts above 50.
+	PendingReviews(ctx context.Context) (int, error)
 	// DecideReview records a human verdict: ReviewMerged merges the new
 	// identity into the candidate; ReviewKept leaves them separate.
 	DecideReview(ctx context.Context, itemID string, decision ReviewStatus, actor string) error

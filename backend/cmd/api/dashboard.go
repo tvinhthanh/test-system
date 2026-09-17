@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -422,7 +423,7 @@ func (d *dashboard) queryErr(w http.ResponseWriter, r *http.Request, err error) 
 }
 
 func (d *dashboard) internal(w http.ResponseWriter, r *http.Request, err error) {
-	d.logger.Error("dashboard", "request_id", httpx.RequestIDFrom(r.Context()), "path", r.URL.Path, "err", err)
+	httpx.Cause(r.Context(), fmt.Errorf("dashboard: %w", err))
 	httpx.WriteError(w, http.StatusInternalServerError, "INTERNAL", "internal error; quote the X-Request-Id when reporting", nil)
 }
 

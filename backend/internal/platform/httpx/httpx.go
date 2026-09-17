@@ -16,6 +16,14 @@ type ctxKey int
 
 const requestIDKey ctxKey = iota
 
+// reqInfo travels with the request: its id, and the underlying error behind
+// a 5xx so the access line can say why without the handler needing a
+// logger of its own (middleware such as authz has none).
+type reqInfo struct {
+	id    string
+	cause error
+}
+
 // HeaderRequestID is echoed on every response so a client can quote it in a
 // support request and we can find the exact log lines (§6.4 correlation id).
 const HeaderRequestID = "X-Request-Id"
@@ -29,32 +37,61 @@ func RequestID(next http.Handler) http.Handler {
 			id = newID()
 		}
 		w.Header().Set(HeaderRequestID, id)
-		ctx := context.WithValue(r.Context(), requestIDKey, id)
+		ctx := context.WithValue(r.Context(), requestIDKey, &reqInfo{id: id})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // RequestIDFrom returns the correlation id set by RequestID, or "".
 func RequestIDFrom(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey).(string)
-	return id
+	if info, ok := ctx.Value(requestIDKey).(*reqInfo); ok {
+		return info.id
+	}
+	return ""
+}
+
+// Cause records the error behind a failure the request is about to answer
+// with a 5xx, for the access log (§6.4: an operator must be able to tell a
+// database outage from a bug from one line, by request id). The client
+// still gets only the generic message (§11.5).
+func Cause(ctx context.Context, err error) {
+	if info, ok := ctx.Value(requestIDKey).(*reqInfo); ok && err != nil {
+		info.cause = err
+	}
+}
+
+func causeFrom(ctx context.Context) error {
+	if info, ok := ctx.Value(requestIDKey).(*reqInfo); ok {
+		return info.cause
+	}
+	return nil
 }
 
 // Logging writes one structured line per request with method, path, status
-// and latency. It must run inside RequestID so the id is available.
+// and latency — at ERROR with the recorded Cause when the answer is a 5xx,
+// so "we are broken" is one grep away, at INFO otherwise. It must run
+// inside RequestID so the id is available.
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
-			logger.Info("http",
+			attrs := []any{
 				"request_id", RequestIDFrom(r.Context()),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rec.status,
 				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			}
+			if rec.status >= 500 {
+				if cause := causeFrom(r.Context()); cause != nil {
+					attrs = append(attrs, "cause", cause.Error())
+				}
+				logger.Error("http", attrs...)
+				return
+			}
+			logger.Info("http", attrs...)
 		})
 	}
 }
