@@ -128,7 +128,7 @@ func TestProcessGaugesArePresentAndSane(t *testing.T) {
 	r := New()
 	Process(r)
 	text := r.Expose()
-	for _, name := range []string{"go_goroutines", "go_memstats_heap_alloc_bytes", "go_memstats_heap_inuse_bytes", "go_memstats_sys_bytes", "go_gc_cycles_total", "process_resident_memory_bytes"} {
+	for _, name := range []string{"go_goroutines", "go_memstats_heap_alloc_bytes", "go_memstats_heap_inuse_bytes", "go_memstats_heap_live_bytes", "go_memstats_sys_bytes", "go_gc_cycles_total", "process_resident_memory_bytes"} {
 		if !strings.Contains(text, "\n"+name+" ") && !strings.HasPrefix(text, name+" ") {
 			t.Errorf("%s missing from exposition:\n%s", name, text)
 		}

@@ -14,6 +14,7 @@ import (
 //	go_memstats_heap_alloc_bytes     — live + not-yet-collected heap objects
 //	go_memstats_heap_inuse_bytes     — heap spans in use (what the GC actually holds on to)
 //	go_memstats_sys_bytes            — everything the Go runtime obtained from the OS
+//	go_memstats_heap_live_bytes      — live heap at the last GC: the leak signal, free of GC sawtooth
 //	go_gc_cycles_total               — completed GC cycles
 //	process_resident_memory_bytes    — RSS as the OS sees it (Linux, Windows; 0 elsewhere)
 //
@@ -25,6 +26,10 @@ func Process(r *Registry) {
 		"go_memstats_heap_alloc_bytes": "/memory/classes/heap/objects:bytes",
 		"go_memstats_heap_inuse_bytes": "/memory/classes/heap/objects:bytes+/memory/classes/heap/unused:bytes",
 		"go_memstats_sys_bytes":        "/memory/classes/total:bytes",
+		// Live heap as of the last GC — the number that must stay flat under
+		// steady load. heap_inuse and RSS sawtooth with GC pacing (target =
+		// 2× live) and mislead a leak hunt; this one does not.
+		"go_memstats_heap_live_bytes": "/gc/heap/live:bytes",
 	}
 	for metricName, sample := range names {
 		sample := sample

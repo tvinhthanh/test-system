@@ -145,8 +145,8 @@ func (c *counters) totals() (requests, errors int) {
 // columns is the CSV header and the order every sample is written in.
 var columns = []string{
 	"t", "elapsed_s",
-	"api_rss_mb", "api_rss_adj_mb", "store_bytes_mb", "api_heap_mb", "api_goroutines", "api_pool_acquired", "api_pool_idle", "api_5xx_total",
-	"worker_rss_mb", "worker_heap_mb", "worker_goroutines", "worker_pool_acquired", "worker_jobs_done", "worker_jobs_failed", "worker_heartbeat_age_s",
+	"api_rss_mb", "api_heap_live_mb", "api_heap_live_adj_mb", "store_bytes_mb", "api_heap_mb", "api_goroutines", "api_pool_acquired", "api_pool_idle", "api_5xx_total",
+	"worker_rss_mb", "worker_heap_live_mb", "worker_heap_mb", "worker_goroutines", "worker_pool_acquired", "worker_jobs_done", "worker_jobs_failed", "worker_heartbeat_age_s",
 	"db_connections", "backlog", "backlog_oldest_s", "running_jobs", "dead_jobs", "jobs_rows", "jobs_done_rows", "jobs_dead_tuples", "jobs_table_mb",
 	"runs", "runs_running", "runs_stuck", "results", "results_unresolved_late", "results_table_mb", "unlinked_artifacts", "unlinked_overdue", "review_pending", "runs_open_over_limit",
 	"win_events_n", "win_events_p50_ms", "win_events_p95_ms", "requests_total", "errors_total",
@@ -213,6 +213,7 @@ func (s *soak) collect(started time.Time, c *counters) sample {
 
 	out["api_rss_mb"] = metricOr(api, "process_resident_memory_bytes", 0) / mb
 	out["api_heap_mb"] = metricOr(api, "go_memstats_heap_inuse_bytes", 0) / mb
+	out["api_heap_live_mb"] = metricOr(api, "go_memstats_heap_live_bytes", 0) / mb
 	out["api_goroutines"] = metricOr(api, "go_goroutines", 0)
 	out["api_pool_acquired"] = metricOr(api, "db_pool_conns_acquired", 0)
 	out["api_pool_idle"] = metricOr(api, "db_pool_conns_idle", 0)
@@ -226,6 +227,7 @@ func (s *soak) collect(started time.Time, c *counters) sample {
 
 	out["worker_rss_mb"] = metricOr(wrk, "process_resident_memory_bytes", 0) / mb
 	out["worker_heap_mb"] = metricOr(wrk, "go_memstats_heap_inuse_bytes", 0) / mb
+	out["worker_heap_live_mb"] = metricOr(wrk, "go_memstats_heap_live_bytes", 0) / mb
 	out["worker_goroutines"] = metricOr(wrk, "go_goroutines", 0)
 	out["worker_pool_acquired"] = metricOr(wrk, "db_pool_conns_acquired", 0)
 	out["worker_jobs_done"] = sumMetric(wrk, "queue_jobs_total", func(l string) bool { return strings.Contains(l, `result="done"`) })
@@ -252,11 +254,12 @@ func (s *soak) collect(started time.Time, c *counters) sample {
 	out["results_table_mb"] = h.Float(`SELECT pg_total_relation_size('test_results')::float8`) / mb
 	out["unlinked_artifacts"] = float64(h.Count(`SELECT count(*) FROM artifacts WHERE test_result_attempt_id IS NULL AND status IN ('pending', 'uploaded', 'verified')`))
 	// OBJSTORE=memory keeps every verified artifact in the api's heap by
-	// design (dev store). The RSS trend is judged net of that payload so the
-	// soak measures the server, not the fake bucket; with OBJSTORE=s3 the
-	// adjustment is the same number minus zero.
+	// design (dev store). The leak judgment is the live heap at the last GC
+	// net of that payload: RSS and heap_inuse sawtooth with GC pacing
+	// (target = 2× live) and grow with the store twice over, which is not a
+	// leak. With OBJSTORE=s3 the adjustment is the same number minus zero.
 	out["store_bytes_mb"] = h.Float(`SELECT coalesce(sum(actual_bytes), 0)::float8 FROM artifacts WHERE status = 'verified'`) / mb
-	out["api_rss_adj_mb"] = out["api_rss_mb"] - out["store_bytes_mb"]
+	out["api_heap_live_adj_mb"] = out["api_heap_live_mb"] - out["store_bytes_mb"]
 
 	n, p50, p95 := c.drainWindow()
 	out["win_events_n"] = float64(n)
@@ -345,8 +348,8 @@ func TestSoakSteadyTraffic(t *testing.T) {
 	var times []time.Time
 	started := time.Now()
 	log := func(x sample) {
-		t.Logf("%5.0fs api %4.0f MB (net %4.0f)/%4.0f gor  wrk %4.0f MB/%4.0f gor  conns %2.0f  backlog %3.0f (oldest %3.0fs)  jobs %5.0f rows (%4.0f done, %3.1f MB)  runs %5.0f results %7.0f  events p50 %4.0f p95 %4.0f ms (n=%3.0f)  errors %.0f/%.0f  5xx %.0f",
-			x["elapsed_s"], x["api_rss_mb"], x["api_rss_adj_mb"], x["api_goroutines"], x["worker_rss_mb"], x["worker_goroutines"], x["db_connections"],
+		t.Logf("%5.0fs api rss %4.0f live %4.0f (net %4.0f) MB/%3.0f gor  wrk rss %3.0f live %3.0f MB/%3.0f gor  conns %2.0f  backlog %3.0f (oldest %3.0fs)  jobs %5.0f rows (%4.0f done, %3.1f MB)  runs %5.0f results %7.0f  events p50 %4.0f p95 %4.0f ms (n=%3.0f)  errors %.0f/%.0f  5xx %.0f",
+			x["elapsed_s"], x["api_rss_mb"], x["api_heap_live_mb"], x["api_heap_live_adj_mb"], x["api_goroutines"], x["worker_rss_mb"], x["worker_heap_live_mb"], x["worker_goroutines"], x["db_connections"],
 			x["backlog"], x["backlog_oldest_s"], x["jobs_rows"], x["jobs_done_rows"], x["jobs_table_mb"], x["runs"], x["results"],
 			x["win_events_p50_ms"], x["win_events_p95_ms"], x["win_events_n"], x["errors_total"], x["requests_total"], x["api_5xx_total"])
 	}
@@ -453,10 +456,19 @@ loop:
 		}
 		t.Logf("trend %-22s %8.1f → %8.1f %s  %s", key, a, b, unit, verdict)
 	}
-	trend("api_rss_adj_mb", 1.30, 16, "MB")
-	trend("worker_rss_mb", 1.30, 16, "MB")
-	trend("api_heap_mb", 1.30, 16, "MB")
-	trend("worker_heap_mb", 1.30, 16, "MB")
+	// Leak detectors: live heap after GC, net of the dev store's payload.
+	trend("api_heap_live_adj_mb", 1.30, 8, "MB")
+	trend("worker_heap_live_mb", 1.30, 8, "MB")
+	// RSS is reported, and bounded by GC pacing rather than trended: with
+	// GOGC=100 a healthy process sits under ~2× live plus runtime overhead.
+	for _, p := range []struct{ rss, live string }{{"api_rss_mb", "api_heap_live_mb"}, {"worker_rss_mb", "worker_heap_live_mb"}} {
+		rss, live := med(tail, p.rss), med(tail, p.live)
+		if limit := 3*live + 48; rss > limit {
+			t.Errorf("%s %.0f MB against live heap %.0f MB (limit %.0f): memory outside the Go heap is growing", p.rss, rss, live, limit)
+		} else {
+			t.Logf("pacing %-22s %8.0f MB rss vs %6.0f MB live  ok (limit %.0f)", p.rss, rss, live, limit)
+		}
+	}
 	trend("api_goroutines", 1.0, 20, "goroutines")
 	trend("worker_goroutines", 1.0, 20, "goroutines")
 	trend("db_connections", 1.0, 4, "connections")

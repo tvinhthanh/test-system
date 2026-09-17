@@ -397,8 +397,11 @@ worker, p50/p95 của `/events` trong cửa sổ, tổng request/lỗi. CSV đ�
 
 **Heap của api — đã profile, không phải rò:** `OBJSTORE=memory` giữ **mọi artifact
 verified trong heap của api** theo thiết kế (store dev) — 900 run × 1,9 artifact ×
-~4,1 KB ≈ 7 MB — nên harness chấm RSS **trừ đi payload của store** (`api_rss_adj_mb`,
-đọc `sum(actual_bytes)` từ bảng `artifacts`). Phần còn lại được kiểm bằng heap
+~4,1 KB ≈ 7 MB. Harness chấm rò bằng **heap sống sau GC** (`go_memstats_heap_live_bytes`
+= `/gc/heap/live:bytes`, thêm 17-09) **trừ đi payload của store**
+(`api_heap_live_adj_mb`, đọc `sum(actual_bytes)` từ bảng `artifacts`); RSS và
+`heap_inuse` răng cưa theo GC pacing (target = 2× live) và lớn gấp đôi payload —
+không phải rò — nên RSS chỉ bị chặn bởi `≤ 3× live + 48 MB`. Phần còn lại được kiểm bằng heap
 profile thật thay vì đoán: gắn `/debug/pprof/` lên listener metrics (loopback,
 `metric.Pprof`) của cả hai binary, chạy soak 8 phút lần hai, lấy `heap` ở 100 s và
 420 s, `go tool pprof -sample_index=inuse_space -base early late`: **+5,1 MB in-use,
@@ -410,7 +413,7 @@ mẫu `heap_inuse`. Kết luận: api không rò ngoài payload của store dev;
 `OBJSTORE=s3` đường này bằng 0.
 
 **T5 chỉ đạt khi:** chạy `SOAK_DURATION=24h` (tối thiểu) trên host không phải
-laptop, `OBJSTORE=s3` với bucket staging (để `api_rss_adj_mb` không còn phải
-trừ), tất cả trend `ok`, và số liệu dán vào đây. Lệnh ở trên; `SOAK_SAMPLE=1m`
-cho 1 440 mẫu; nếu `api_rss_adj_mb` vẫn lên, lấy profile qua `/debug/pprof/heap`
+laptop, `OBJSTORE=s3` với bucket staging (để `api_heap_live_adj_mb` không còn
+phải trừ), tất cả trend `ok`, và số liệu dán vào đây. Lệnh ở trên; `SOAK_SAMPLE=1m`
+cho 1 440 mẫu; nếu `api_heap_live_adj_mb` vẫn lên, lấy profile qua `/debug/pprof/heap`
 của `METRICS_ADDR` trước khi kết luận.
