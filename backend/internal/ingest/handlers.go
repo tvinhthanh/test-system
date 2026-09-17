@@ -25,6 +25,7 @@ type handlers struct {
 	Deps
 	requests *metric.Counter   // §6.4: error rate per endpoint per project
 	events   *metric.Counter   // accepted vs duplicate
+	byToken  *metric.Counter   // accepted per token (§11.4 volume alert)
 	latency  *metric.Histogram // per endpoint
 }
 
@@ -33,6 +34,7 @@ func newHandlers(d Deps) *handlers {
 		Deps:     d,
 		requests: d.Metrics.Counter("ingest_requests_total", "Ingest requests by endpoint, project and status class.", "endpoint", "project", "status"),
 		events:   d.Metrics.Counter("ingest_events_total", "Events received, by project and result.", "project", "result"),
+		byToken:  d.Metrics.Counter("ingest_events_by_token_total", "Accepted events by project and ingest token id — §11.4: a token whose volume jumps 10× its weekly baseline is a leaked or misconfigured pipeline.", "project", "token"),
 		latency:  d.Metrics.Histogram("ingest_request_seconds", "Ingest request latency by endpoint.", metric.DefaultLatencyBuckets, "endpoint"),
 	}
 }
@@ -250,6 +252,7 @@ func (h *handlers) appendEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	h.events.Add(float64(appended.Accepted), string(c.project), "accepted")
 	h.events.Add(float64(appended.Duplicates), string(c.project), "duplicate")
+	h.byToken.Add(float64(appended.Accepted), string(c.project), c.principal.TokenID)
 
 	h.write(w, http.StatusOK, batchResponse{Accepted: appended.Accepted, Duplicates: appended.Duplicates, IdentityMap: identityMap})
 }

@@ -297,8 +297,8 @@ func TestSoakSteadyTraffic(t *testing.T) {
 	s := &soak{h: h, t: t}
 	api := h.StartAPI()
 	worker := h.StartWorker()
-	t.Logf("soak: %s, sample every %s, %d reporters × %d tests every %s, JOB_RETENTION=%s, csv %s; api metrics+pprof http://%s/, worker http://%s/",
-		duration, every, reporters, suite, interval, retention, outPath, h.MetricsAddr(), h.WorkerMetricsAddr())
+	t.Logf("soak: %s, sample every %s, %d reporters × %d tests every %s, JOB_RETENTION=%s, csv %s; api http://%s/ (dashboard login watcher@gate.example, password: soak passphrase long enough), api metrics+pprof http://%s/, worker http://%s/",
+		duration, every, reporters, suite, interval, retention, outPath, h.APIAddr, h.MetricsAddr(), h.WorkerMetricsAddr())
 
 	// Half as many projects as reporters: two pipelines share a suite, the
 	// realistic shape, and tier-1 resolves inline once the suite is known.

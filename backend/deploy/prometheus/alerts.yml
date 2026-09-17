@@ -47,6 +47,31 @@ groups:
         annotations:
           summary: "run.finished p99 latency {{ $value | humanizeDuration }} — resolver over the §14.2 budget"
 
+  - name: atp-tokens
+    rules:
+      # §11.4: a token whose daily volume is 10× its weekly baseline is a leaked
+      # or misconfigured pipeline (the blast radius of a leaked token is junk
+      # reports into one project — this is how you notice). Floor of 10k
+      # events/day so a new pipeline's first real day does not page.
+      - alert: IngestVolumeSpike
+        expr: |
+          sum by (project, token) (increase(ingest_events_by_token_total[1d]))
+            >
+          10 * (sum by (project, token) (increase(ingest_events_by_token_total[7d] offset 1d)) / 7)
+          and sum by (project, token) (increase(ingest_events_by_token_total[1d])) > 10000
+        labels: {severity: ticket}
+        annotations:
+          summary: "Token {{ $labels.token }} in project {{ $labels.project }} sent 10× its usual daily volume — check the pipeline, revoke if unknown (admin token revoke -actor …)"
+
+      # §11.4: default expiry one year, remind 30 days ahead — before CI starts
+      # failing with 401 on a Monday morning. The api reads the count at scrape.
+      - alert: IngestTokensExpiringSoon
+        expr: api_tokens_expiring_30d > 0
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} ingest token(s) expire within 30 days — admin token list, reissue and rotate in CI"
+
   - name: atp-queue
     rules:
       # A worker that died takes its own /metrics with it: alert on absence,

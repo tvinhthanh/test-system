@@ -211,9 +211,17 @@ func TestTokensAgainstPostgres(t *testing.T) {
 	if _, err := svc.Authenticate(ctx, short.Plaintext); err != nil {
 		t.Errorf("fresh short token: %v", err)
 	}
+	// §11.4 reminder: the short-lived token is the only live one expiring
+	// within 30 days (the revoked one and the one-year defaults are not).
+	if n, err := svc.ExpiringTokens(ctx, 30*24*time.Hour); err != nil || n != 1 {
+		t.Errorf("expiring within 30 days: %d %v, want 1", n, err)
+	}
 	time.Sleep(250 * time.Millisecond)
 	if _, err := svc.Authenticate(ctx, short.Plaintext); !errors.Is(err, authz.ErrUnauthenticated) {
-		t.Errorf("expired token: %v", err)
+		t.Errorf("expired token still authenticates: %v", err)
+	}
+	if n, err := svc.ExpiringTokens(ctx, 30*24*time.Hour); err != nil || n != 0 {
+		t.Errorf("an expired token is not \"expiring\": %d %v", n, err)
 	}
 }
 

@@ -32,6 +32,7 @@ type env struct {
 	srv      *httptest.Server
 	reg      *metric.Registry
 	tokenA   string // project A ingest
+	tokenAID string // its id, the metric label
 	tokenB   string // project B ingest
 	tokenOrg string // org-scoped ingest
 	tokenRO  string // project A read-only
@@ -68,15 +69,18 @@ func setup(t *testing.T) *env {
 	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
 	pa, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
 	pb, _ := ten.CreateProject(ctx, ws.ID, "search", "")
+	var lastID string
 	issue := func(level authz.Level, id string, perm authz.Permission) string {
 		is, err := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: level, ID: id}, Permissions: []authz.Permission{perm}, Name: "t"})
 		if err != nil {
 			t.Fatal(err)
 		}
+		lastID = is.Token.ID
 		return is.Plaintext
 	}
 	e := &env{reg: reg, results: results.New(db), projectA: string(pa.ID), q: queue.New(db)}
 	e.tokenA = issue(authz.LevelProject, string(pa.ID), authz.PermProjectIngest)
+	e.tokenAID = lastID
 	e.tokenB = issue(authz.LevelProject, string(pb.ID), authz.PermProjectIngest)
 	e.tokenOrg = issue(authz.LevelOrganization, string(org.ID), authz.PermProjectIngest)
 	e.tokenRO = issue(authz.LevelProject, string(pa.ID), authz.PermProjectRead)
@@ -313,6 +317,8 @@ func TestIngestEndToEnd(t *testing.T) {
 	for _, want := range []string{
 		`ingest_requests_total{endpoint="runs",project="`, `status="2xx"} `,
 		`ingest_events_total{project="`, `result="duplicate"} `,
+		// §11.4 volume alert needs the accepted count per token id.
+		`ingest_events_by_token_total{project="` + e.projectA + `",token="` + e.tokenAID + `"} `,
 		`ingest_request_seconds_count{endpoint="events"}`,
 	} {
 		if !strings.Contains(m, want) {

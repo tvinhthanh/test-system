@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
@@ -23,7 +24,8 @@ import (
 //	queue_finished_jobs                                — done and not yet pruned; JOB_RETENTION bounds it
 //	runs_open_over_limit                               — runs still running past AutoCloseAfter (the sweep is not running)
 //	review_queue_pending                               — identity pairs waiting for a human (§6.4: alert > 50)
-func healthGauges(reg *metric.Registry, q *queue.Queue, res results.Service, idn identity.Service, logger *slog.Logger) {
+//	api_tokens_expiring_30d                            — live tokens expiring within 30 days (§11.4 reminder)
+func healthGauges(reg *metric.Registry, q *queue.Queue, res results.Service, idn identity.Service, az authz.Service, logger *slog.Logger) {
 	read := func(name string, fn func(ctx context.Context) (float64, error)) func() float64 {
 		return func() float64 {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -56,6 +58,10 @@ func healthGauges(reg *metric.Registry, q *queue.Queue, res results.Service, idn
 	}))
 	reg.GaugeFunc("review_queue_pending", "Identity pairs waiting for a human decision (§6.4: alert above 50).", read("review_queue_pending", func(ctx context.Context) (float64, error) {
 		n, err := idn.PendingReviews(ctx)
+		return float64(n), err
+	}))
+	reg.GaugeFunc("api_tokens_expiring_30d", "Live ingest tokens that expire within 30 days (§11.4: remind the owner before CI starts failing with 401).", read("api_tokens_expiring_30d", func(ctx context.Context) (float64, error) {
+		n, err := az.ExpiringTokens(ctx, 30*24*time.Hour)
 		return float64(n), err
 	}))
 }

@@ -470,3 +470,12 @@ func mapErr(err error) error {
 	}
 	return err
 }
+
+func (s *service) ExpiringTokens(ctx context.Context, within time.Duration) (int, error) {
+	now := s.now().UTC()
+	var n int
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		SELECT count(*) FROM api_tokens
+		 WHERE revoked_at IS NULL AND expires_at > $1 AND expires_at <= $2`, now, now.Add(within)).Scan(&n)
+	return n, err
+}

@@ -96,6 +96,9 @@ jobs:
           cp deploy/.env.example deploy/.env
           docker compose -f deploy/compose.yml --env-file deploy/.env config --quiet
 
+      - name: promtool check (alert rules parse and reference the config)
+        run: docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+
   reporter:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

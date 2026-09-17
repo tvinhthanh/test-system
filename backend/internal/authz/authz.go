@@ -216,6 +216,9 @@ type Service interface {
 	// (§11.7 audit of destructive actions); actor is required.
 	RevokeToken(ctx context.Context, id, actor string) error
 	ListTokens(ctx context.Context, scope ScopeRef) ([]Token, error)
+	// ExpiringTokens counts live (unrevoked, unexpired) tokens that expire
+	// within d — §11.4 "nhắc trước 30 ngày", read by the api's health gauges.
+	ExpiringTokens(ctx context.Context, within time.Duration) (int, error)
 
 	CreateUser(ctx context.Context, email string) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)

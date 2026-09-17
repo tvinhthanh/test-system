@@ -325,6 +325,16 @@ trên Postgres 17 thật (T1/T3/T4 + restore drill với pg_dump 17), govulnchec
 `docker build`, `compose config`, reporter/frontend test + `npm audit` — §11.6
 "chạy trước mọi release" thành máy chạy.
 
+**Vòng đời token §11.4 ✅ 17-09-2026:** prefix 8 ký tự + HMAC-SHA-256(pepper) để
+verify, argon2id chỉ cho password, `lastUsedAt` throttle 5 phút, revoke tức thời
+(có audit), expiry mặc định 1 năm — đã có từ trước. **Mới**: "nhắc trước 30 ngày"
+thành gauge `api_tokens_expiring_30d` (api đọc DB lúc scrape) + alert
+`IngestTokensExpiringSoon`; "alert khi volume một token tăng > 10× baseline tuần"
+thành counter `ingest_events_by_token_total{project,token}` + rule
+`IngestVolumeSpike` (so ngày hôm nay với trung bình 7 ngày trước, sàn 10k
+event/ngày). `promtool check config` xanh (22 rule), chạy trong CI. Còn ngoài code:
+đăng ký prefix `atp_ing_` với GitHub Secret Scanning khi có user ngoài.
+
 **Còn mở (§11.5, §11.7):** prod cần Postgres có TLS (`APP_ENV=prod` từ chối
 `sslmode=disable`; compose là staging); copy volume `backups` ra khỏi host;
 pentest thuê ngoài trước khách trả phí đầu tiên.
