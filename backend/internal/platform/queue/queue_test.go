@@ -205,3 +205,80 @@ func TestConcurrentWorkersShareWithoutDuplicates(t *testing.T) {
 		t.Errorf("metrics:\n%s", w.Metrics.Expose())
 	}
 }
+
+// TestPruneKeepsLiveAndDeadJobs: Prune drops only done jobs older than the
+// retention, in bounded batches; pending, running and dead rows stay, and
+// Backlog reads the same numbers before and after.
+func TestPruneKeepsLiveAndDeadJobs(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	q := queue.New(db)
+	ctx := context.Background()
+
+	// 30 done jobs: 20 finished 8 days ago, 10 finished an hour ago.
+	for i := 0; i < 30; i++ {
+		id, _, _ := q.Add(ctx, queue.Enqueue{Kind: "old"})
+		age := "8 days"
+		if i >= 20 {
+			age = "1 hour"
+		}
+		if _, err := db.Q(ctx).Exec(ctx, `UPDATE jobs SET status = 'done', finished_at = now() - $2::interval WHERE id = $1`, id, age); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One of each state that must survive.
+	_, _, _ = q.Add(ctx, queue.Enqueue{Kind: "live", Key: "pending"})
+	idRun, _, _ := q.Add(ctx, queue.Enqueue{Kind: "live", Key: "running"})
+	if _, err := q.Claim(ctx, "live", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	_ = idRun
+	idDead, _, _ := q.Add(ctx, queue.Enqueue{Kind: "live", Key: "dead"})
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE jobs SET status = 'dead', finished_at = now() - interval '30 days' WHERE id = $1`, idDead); err != nil {
+		t.Fatal(err)
+	}
+	before, err := q.Backlog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Pending != 1 || before.Running != 1 || before.Dead != 1 {
+		t.Fatalf("backlog before prune: %+v", before)
+	}
+
+	// Batches of 15: the first call cannot finish the job, the second does,
+	// the third finds nothing.
+	got := []int{}
+	for i := 0; i < 3; i++ {
+		n, err := q.Prune(ctx, queue.PruneAfter, 15)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, n)
+	}
+	if want := []int{15, 5, 0}; !equalInts(got, want) {
+		t.Errorf("prune batches %v, want %v", got, want)
+	}
+	var left int
+	_ = db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM jobs`).Scan(&left)
+	if left != 10+3 {
+		t.Errorf("%d rows left, want 13 (10 recent done + pending + running + dead)", left)
+	}
+	after, _ := q.Backlog(ctx)
+	if after.Pending != before.Pending || after.Running != before.Running || after.Dead != before.Dead {
+		t.Errorf("backlog changed by prune: %+v → %+v", before, after)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `SELECT 1 FROM jobs WHERE id = $1 AND status = 'dead'`, idDead).Scan(new(int)); err != nil {
+		t.Errorf("dead job pruned: %v", err)
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

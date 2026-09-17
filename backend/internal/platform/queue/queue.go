@@ -226,19 +226,24 @@ type Backlog struct {
 	Oldest  time.Duration // age of the oldest runnable job
 	Running int           // leased right now
 	Dead    int           // gave up after max attempts — needs a human
+	Done    int           // finished and not yet pruned (JOB_RETENTION) — grows without bound if the prune is not running
 }
 
-// Backlog reads the queue-wide counts.
+// Backlog reads the queue-wide counts. Three lookups, each on the partial
+// index of its status, rather than one pass over the table: the api calls
+// this at every scrape (cmd/api/health_metrics.go), and a single FILTER
+// query over jobs reads every finished job in history — a cost that grows
+// with the table for as long as the process runs (T5).
 func (q *Queue) Backlog(ctx context.Context) (Backlog, error) {
 	var b Backlog
 	var oldestAt *time.Time
 	now := q.now().UTC()
 	err := q.db.Q(ctx).QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE status = 'pending' AND run_at <= $1),
-		       min(run_at) FILTER (WHERE status = 'pending' AND run_at <= $1),
-		       count(*) FILTER (WHERE status = 'running'),
-		       count(*) FILTER (WHERE status = 'dead')
-		  FROM jobs WHERE status IN ('pending', 'running', 'dead')`, now).Scan(&b.Pending, &oldestAt, &b.Running, &b.Dead)
+		SELECT (SELECT count(*) FROM jobs WHERE status = 'pending' AND run_at <= $1),
+		       (SELECT min(run_at) FROM jobs WHERE status = 'pending' AND run_at <= $1),
+		       (SELECT count(*) FROM jobs WHERE status = 'running'),
+		       (SELECT count(*) FROM jobs WHERE status = 'dead'),
+		       (SELECT count(*) FROM jobs WHERE status = 'done')`, now).Scan(&b.Pending, &oldestAt, &b.Running, &b.Dead, &b.Done)
 	if err != nil {
 		return Backlog{}, err
 	}
@@ -246,6 +251,33 @@ func (q *Queue) Backlog(ctx context.Context) (Backlog, error) {
 		b.Oldest = now.Sub(*oldestAt)
 	}
 	return b, nil
+}
+
+// PruneAfter is the default retention of a finished job — long enough for
+// the operator to look at it (queue_job_latency, last_error of a retried
+// job); the worker reads the actual value from JOB_RETENTION.
+const PruneAfter = 7 * 24 * time.Hour
+
+// Prune deletes done jobs finished before now−olderThan, at most limit rows
+// per call, and returns how many went. Dead jobs are kept: they are the
+// ones a human still has to read. Without this the table grows by one row
+// per run forever — the queue "phình" that T5 (§14.1) is there to catch —
+// and every count over it slows with the history it drags along. The
+// worker calls it from its minute sweep; small batches keep the lock and
+// the WAL burst bounded on a table that is being claimed from at the same
+// time.
+func (q *Queue) Prune(ctx context.Context, olderThan time.Duration, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	tag, err := q.db.Q(ctx).Exec(ctx, `
+		DELETE FROM jobs WHERE id IN (
+			SELECT id FROM jobs WHERE status = 'done' AND finished_at < $1 ORDER BY finished_at LIMIT $2)`,
+		q.now().UTC().Add(-olderThan), limit)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // Status is a job's current state, for tests and the operator.

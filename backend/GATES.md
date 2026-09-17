@@ -13,8 +13,8 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | **T1** không mất dữ liệu, idempotency, retry | ✅ đạt — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm ra và sửa 1 deadlock | 16-09-2026 | §T1 |
 | **T2** load §14.2 | ⏳ dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời ✗ trên laptop (p95 ≈ 2 s; từ 8,4 s) — cần đo trên server | 17-09-2026 | §T2 |
 | **T3** failure recovery + observability | ✅ đạt — alert rules §6.4 trên tên metric thật, gauge phía api, 4 kịch bản hỏng nhìn thấy được ở `/metrics`, log không lộ bí mật | 17-09-2026 | §T3 |
-| **T4** security + tenant isolation | ✅ tenant isolation (mọi route) 16-09; security §11.6 có bằng chứng từng dòng 17-09 (govulncheck, npm audit, CORS/headers, rate limit dashboard, SSRF rule, route inventory); còn mở: restore backup, pentest | 17-09-2026 | §T4 |
-| **T5** soak 24–72 h | ✗ chưa chạy | — | — |
+| **T4** security + tenant isolation | ✅ tenant isolation (mọi route) 16-09; security §11.6 có bằng chứng từng dòng 17-09 (govulncheck, npm audit, CORS/headers, rate limit dashboard, SSRF rule, route inventory); **restore drill ✅** (`test/restore/`: dump → DB mới → 24/24 bảng checksum bằng nhau, api trả đúng byte, worker tiếp job pending, RTO ≈ 2 s ở cỡ test); audit revoke ✅ (`authz_audit`); còn mở: pentest | 17-09-2026 | §T4 |
+| **T5** soak 24–72 h | ⏳ harness `test/soak/` chạy 20 phút trên laptop 17-09: 900 run, 0 lỗi, mọi trend phẳng (worker, goroutine, pool, backlog, latency); tìm ra và sửa: `jobs` không bao giờ dọn, gauge backlog quét cả bảng, grant store dev không xóa; heap api đã profile: chỉ payload của store dev lớn lên (`io.ReadAll` ← `memory.Store.serve`), không có holder khác. **24–72 h cần host riêng + S3 staging** | 17-09-2026 | §T5 |
 
 ## T0 — reporter đẩy run thật, dashboard hiện đúng ✅ 16-09-2026
 
@@ -131,7 +131,7 @@ Windows, 12 CPU logic, **Postgres + api + worker + máy phát tải cùng một 
 | Resolver `clientTestId → stableTestId` p50 < 1 s, p99 < 5 s | 50 000/50 000 result của vòng đo resolve **inline lúc ingest** (tier 1, suite đã biết) — tức là xong trước cả finish. Đo khắt khe hơn: độ trễ job `run.finished` từ lúc enqueue đến done: **p50 1,1–1,5 s, p99 1,6–2,2 s** | p99 ✅; p50 sát ngưỡng (queue poll 1 s + 100 job dồn cùng lúc). Trước khi sửa flaky: p50 5,4 s / p99 9,8 s |
 | Dashboard: 100k–1M result trong project, query thường dùng p95 < 500 ms | `TestDashboardQueriesAt100kResults`, 16 route hợp đồng + 2 metrics, 30 lần mỗi route. **100k**: mọi route p95 ≤ 160 ms. **1M** (`LOAD_SCALE=10`, 1 000 run trải 6 tháng): runs list 65 ms, run results 3 ms, result detail 4 ms, identities 24 ms, identity runs 58 ms, `q=`/`status=` 52 ms, metrics/trend 433 ms, metrics/triage 439 ms | **✅** cả hai cỡ. Lưu ý: hai route metrics tính cửa sổ 30 ngày lúc request; nếu 1M result **dồn hết vào một tháng** thì ~1,1 s — đã có index `test_results_failure_observed` (`0010`) và query dạng join thay subselect; sau đó là rollup theo ngày, chưa cần ở P1 |
 | Queue: không mất job, retry backoff, duplicate-safe, worker crash recover | T1 | ✅ |
-| Artifact: upload fail < 2 %, checksum mismatch, không `unlinked` > 1 h | chưa đo dưới tải (store `memory`) | ✗ chưa chạy |
+| Artifact: upload fail < 2 %, checksum mismatch, không `unlinked` > 1 h | `test/soak` 17-09 (store `memory`): 1 710 artifact upload đủ ba bước, **0 lỗi**; 90 artifact bị lật bit trên đường đi → 90/90 `422 CHECKSUM_MISMATCH`, run vẫn hợp lệ; `artifacts_unlinked_overdue` = 0 suốt bài | ✅ trên store dev; S3/R2 thật cần đo lại ở staging (latency PUT ngoài) |
 
 **Đã sửa nhờ harness (mỗi mục đều là lỗi kiến trúc thật, không phải tinh chỉnh):**
 
@@ -261,6 +261,127 @@ CI/image (GOTOOLCHAIN=auto) build bằng bản đã vá, laptop pin `GOTOOLCHAIN
 không đổi. `npm audit` reporter + frontend (kể cả dev deps): 0. Lặp lại trước
 mỗi release; kết quả ghi vào đây.
 
-**Còn mở (§11.5, §11.7):** TLS/HSTS ở proxy khi deploy thật; backup + **restore
-thử** trước Gate-1; audit log hành động phá hủy (revoke/merge — `identity_audit`
-có, revoke token chưa ghi bảng); pentest thuê ngoài trước khách trả phí đầu tiên.
+**Restore drill §11.5 / §14.3 hàng cuối ✅ 17-09-2026 — "backup chưa restore thử
+= chưa có backup".** `test/restore/` (`RESTORE_TEST=1 TEST_DATABASE_URL=… go test
+-v ./test/restore/`, ≈ 10 s, cần `pg_dump`/`pg_restore` — `PG_BIN` hoặc PATH):
+
+1. Thế giới thật qua binary thật: 2 pipeline, 24 run × 100 test (10 % fail),
+   4 artifact (2 verified, 1 rejected vì checksum, 1 pending), một member đăng
+   nhập và triage một failure. **Worker bị giết trước 4 run cuối** → backup
+   chứa 4 job `pending`.
+2. Sự cố: giết api. Đọc **mọi bảng** của schema: số dòng + `md5(string_agg(row::text
+   ORDER BY …))`.
+3. `pg_dump --format=custom --no-owner --no-privileges` (đúng lệnh của
+   `deploy/backup/backup.sh`) → `pg_restore --list` phải liệt kê được
+   `TABLE DATA test_results`.
+4. `CREATE DATABASE … TEMPLATE template0` **cùng encoding/collation** với nguồn
+   (đọc từ `pg_database` — đổi collation là đổi thứ tự mọi index text, drill này
+   tồn tại để bắt đúng loại khác biệt đó), `CREATE EXTENSION pg_trgm` (0004 cài
+   vào `public`, dump theo schema không mang theo), `pg_restore --exit-on-error`
+   (đúng `deploy/backup/restore.sh`).
+5. Kiểm trên bản copy: **24/24 bảng bằng nhau** cả số dòng và checksum;
+   `pg.Migrate` trên copy áp **0** migration (ledger `schema_migrations` có trong
+   dump, không drift); api khởi động trên copy → **cookie cũ vẫn đăng nhập**, 9
+   trang dashboard (projects, runs, run, results, result, identities, flaky,
+   metrics/triage, metrics/trend) trả **đúng từng byte** như trước sự cố; worker
+   khởi động trên copy → 4 job pending chạy xong, 0 result thiếu `stable_test_id`;
+   ingest run mới qua token cũ → 201/200, xuất hiện đầu danh sách.
+6. **RTO đo được trên laptop: dump 0,3 s (315 KB) + tạo DB 0,9 s + restore 0,4 s
+   + boot api 0,1 s ≈ 2 s** (ngân sách §11.5: 4 h). Ở kích thước thật RTO là
+   thời gian `pg_restore` — đo lại khi có dump production đầu tiên, ghi vào đây.
+
+`deploy/backup/backup.sh`: dump hằng ngày, tự `--list` để không giữ file không
+restore được, từ chối dump thiếu `schema_migrations`, giữ `BACKUP_KEEP_DAYS`
+(14). `restore.sh`: **luôn vào DB mới**, không bao giờ ghi lên DB đang sống —
+quyết định bỏ dòng mới hơn backup là của người, sau khi nhìn cả hai. Việc còn
+lại là của vận hành, không phải của code: cron + copy dump ra khỏi host (object
+storage có versioning) — backup nằm cùng đĩa với DB không phải backup. Artifact
+bytes nằm ở object store (R2/S3 có durability riêng); dump chỉ chịu trách nhiệm
+hàng `artifacts`.
+
+**Audit hành động phá hủy §11.7 ✅ 17-09-2026:** `0012_authz_audit` — `token.revoke`
+và `role.revoke` ghi cùng transaction với thay đổi (không có revoke không có
+dòng, không có dòng của revoke đã rollback), có `actor` (bắt buộc — thiếu → 400,
+không đổi gì), scope để lọc theo tenant, `details` (tên token / role bị bỏ).
+Revoke lần hai không thêm dòng (không có gì đổi). `admin token revoke -actor`,
+`admin role revoke`, `admin audit list [-scope]`. Test: `internal/authz`
+(`TestTokensAgainstPostgres`, `TestMembershipsAgainstPostgres`). `identity_audit` (0004) vẫn là nơi của merge/undo/split.
+
+**Còn mở (§11.5, §11.7):** TLS/HSTS ở proxy khi deploy thật; cron backup +
+copy off-host khi có server; pentest thuê ngoài trước khách trả phí đầu tiên.
+
+## T5 — soak ⏳ 17-09-2026: harness chạy sạch 20 phút trên laptop; 24–72 h cần host riêng
+
+**Harness `test/soak/`** (chung `test/harness/`): binary thật, Postgres thật, traffic
+**đều** — không phải burst như T2 — lấy mẫu mỗi vài chục giây, cuối bài **assert xu
+hướng**: tăng là fail, không phải "ghi nhận". Chạy:
+
+```bash
+SOAK_TEST=1 SOAK_DURATION=24h SOAK_SAMPLE=1m SOAK_JOB_RETENTION=1h SOAK_OUT=soak.csv \
+TEST_DATABASE_URL=… go test -count=1 -v -timeout 80h ./test/soak/
+```
+
+Traffic mỗi run (6 pipeline trên 3 project, một run/8 s/pipeline — dưới trần
+60 req/phút/token của §7.4): create → 2 batch × 100 event (1/25 fail, 1/40 flaky:
+fail rồi pass ở attempt 1) → 2 artifact qua presigned PUT thật, **1/10 bị lật một
+bit trên đường đi** (server phải hash lại và trả 422 `CHECKSUM_MISMATCH`, run vẫn
+hợp lệ) → run thứ 7 gửi lại batch đầu (phải dedupe đủ) → finish. Một browser
+đăng nhập đi 9 route dashboard mỗi 2 s, triage một failure mỗi 30 s. Mỗi mẫu:
+RSS/heap/goroutine/pool của api và worker (`metric.Process`, `db.Metrics` — mới),
+số backend Postgres, backlog/oldest/dead/done của queue, số dòng và kích thước
+bảng `jobs`, run kẹt, result thiếu `stable_test_id`, artifact unlinked, heartbeat
+worker, p50/p95 của `/events` trong cửa sổ, tổng request/lỗi. CSV đầy đủ ở `SOAK_OUT`.
+
+**Kết quả 20 phút, 17-09 (laptop, Postgres + api + worker + generator cùng máy):**
+
+| Điều đo | Thấy gì |
+|---|---|
+| Traffic | **900 run, 90 900 result, 14 562 request, 0 lỗi, 0 5xx**; 90 mismatch cố ý → 90/90 `422 CHECKSUM_MISMATCH`; 132 replay → dedupe đúng số event; 40 triage |
+| Sau khi dừng | backlog về 0 trong < 1 s; 0 job dead, 0 job phải retry (`last_error`), 0 run `running`, 0 result thiếu id, 0 artifact unlinked quá hạn, heartbeat worker < 10 s |
+| Worker | RSS 19,6 → 19,9 MB, heap 4,3 → 4,5 MB, 14 goroutine — **phẳng** |
+| api | 22 goroutine phẳng, pool acquired 0, 12 backend Postgres phẳng; RSS 31 → 41 MB (median ⅓ đầu → ⅓ cuối), heap 11,6 → 19,0 MB — xem ghi chú dưới |
+| Queue | `jobs` dao động **90–120 dòng, 0,17 MB** suốt 900 run (`JOB_RETENTION=2m`): prune chạy; backlog median 0 |
+| Latency | `/events` (100 event) p50 ≈ 32 ms, p95 median 65 ms, p95 ⅓ đầu 79 ms → ⅓ cuối 59 ms — **không trôi** |
+| `test_results` | 47 MB cho 90 900 result (≈ 520 B/result kể cả index) |
+
+**Lỗi thật harness bắt được (sửa cùng ngày):**
+
+1. **`jobs` không bao giờ được dọn.** Mỗi run một job `done` nằm lại vĩnh viễn —
+   đúng cái "phình queue" §14.1 gọi tên. Sửa: `queue.Prune` (worker sweep mỗi
+   phút, tối đa 5 000 dòng/lần, giữ `dead` cho người đọc), `JOB_RETENTION` (mặc
+   định 168 h), migration `0011` thêm index partial cho `done`/`dead`.
+2. **Gauge backlog quét cả bảng ở mỗi lần scrape.** `Backlog` là một câu `count(*)
+   FILTER` trên toàn bảng `jobs` — với lịch sử vài triệu job, mỗi scrape 15 s là
+   một seq scan; ở 2 s deadline gauge trả −1 và alert `QueueBacklog` mù đúng lúc
+   cần. Viết lại thành 4 subselect, mỗi cái đi index partial của status mình;
+   thêm `queue_finished_jobs` (done chưa prune) để alert `JobsTableNotPruned`
+   có thứ để nhìn.
+3. **Store `memory` giữ grant presign mãi** — một grant mỗi lần declare, không
+   bao giờ xóa. Chỉ ở store dev, nhưng là tăng không giới hạn: prune grant hết
+   hạn khi map > 1 024.
+4. Không có RSS/heap/pool trong `/metrics` — không thể nói "không rò" nếu không
+   đo. `metric.Process` (RSS qua psapi trên Windows, `/proc` trên Linux;
+   heap/sys/GC qua `runtime/metrics`, không stop-the-world), `db.Metrics`
+   (pgxpool acquired/idle/max/wait). Alert `atp-soak` trong `alerts.yml`: RSS tăng
+   > 256 MiB/ngày, goroutine tăng > 50/h, pool > 80 % 10 phút, `queue_finished_jobs`
+   > 1M.
+
+**Heap của api — đã profile, không phải rò:** `OBJSTORE=memory` giữ **mọi artifact
+verified trong heap của api** theo thiết kế (store dev) — 900 run × 1,9 artifact ×
+~4,1 KB ≈ 7 MB — nên harness chấm RSS **trừ đi payload của store** (`api_rss_adj_mb`,
+đọc `sum(actual_bytes)` từ bảng `artifacts`). Phần còn lại được kiểm bằng heap
+profile thật thay vì đoán: gắn `/debug/pprof/` lên listener metrics (loopback,
+`metric.Pprof`) của cả hai binary, chạy soak 8 phút lần hai, lấy `heap` ở 100 s và
+420 s, `go tool pprof -sample_index=inuse_space -base early late`: **+5,1 MB in-use,
+trong đó 2,57 MB là `io.ReadAll` ← `memory.(*Store).serve`** — đúng bằng 315 run ×
+7,9 KB artifact đã lưu; mọi node khác là ±512 KB (một mẫu sampling của pgx/runtime:
+stmtcache LRU, `allocm`, `malg` — kích thước cố định). Không có holder nào khác
+lớn lên. RSS lên nhanh hơn heap là GC pacing (target = 2× live) cộng răng cưa của
+mẫu `heap_inuse`. Kết luận: api không rò ngoài payload của store dev; với
+`OBJSTORE=s3` đường này bằng 0.
+
+**T5 chỉ đạt khi:** chạy `SOAK_DURATION=24h` (tối thiểu) trên host không phải
+laptop, `OBJSTORE=s3` với bucket staging (để `api_rss_adj_mb` không còn phải
+trừ), tất cả trend `ok`, và số liệu dán vào đây. Lệnh ở trên; `SOAK_SAMPLE=1m`
+cho 1 440 mẫu; nếu `api_rss_adj_mb` vẫn lên, lấy profile qua `/debug/pprof/heap`
+của `METRICS_ADDR` trước khi kết luận.

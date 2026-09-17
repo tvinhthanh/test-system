@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadDefaultsAndValidation(t *testing.T) {
@@ -13,7 +14,7 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaults must validate: %v", err)
 	}
-	if c.Env != "dev" || c.HTTPAddr != ":8080" || !strings.HasPrefix(c.MetricsAddr, "127.0.0.1:") {
+	if c.Env != "dev" || c.HTTPAddr != ":8080" || !strings.HasPrefix(c.MetricsAddr, "127.0.0.1:") || c.JobRetention != 168*time.Hour {
 		t.Errorf("unexpected defaults: %+v", c)
 	}
 
@@ -32,6 +33,8 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		{"memory store outside dev", map[string]string{"APP_ENV": "staging", "DATABASE_URL": "postgres://u:p@h/db", "TOKEN_PEPPER": "0123456789abcdef0123456789abcdef"}, "OBJSTORE=memory"},
 		{"s3 without settings", map[string]string{"OBJSTORE": "s3"}, "OBJSTORE_ENDPOINT"},
 		{"unknown store", map[string]string{"OBJSTORE": "gcs"}, "OBJSTORE="},
+		{"job retention not a duration", map[string]string{"JOB_RETENTION": "7d"}, "JOB_RETENTION"},
+		{"job retention too short", map[string]string{"JOB_RETENTION": "30s"}, "JOB_RETENTION"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

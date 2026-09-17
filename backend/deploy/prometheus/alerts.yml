@@ -154,3 +154,43 @@ groups:
         labels: {severity: page}
         annotations:
           summary: "The api is not scraped"
+
+  # §14.1 T5 — the slow failures a soak is for: memory that only goes up, a
+  # connection pool that never comes back down, a queue table that keeps
+  # every job it ever finished. test/soak asserts the same trends offline;
+  # these fire when production drifts the same way.
+  - name: atp-soak
+    rules:
+      - alert: ProcessMemoryGrowing
+        # RSS net of what the Go runtime holds for the heap: a leak outside
+        # the heap (goroutines, cgo, fds) and heap growth both land here.
+        expr: deriv(process_resident_memory_bytes[6h]) * 86400 > 256 * 1024 * 1024
+        for: 6h
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.job }} RSS grows more than 256 MiB/day — look at go_goroutines and db_pool_conns_acquired before the heap"
+
+      - alert: GoroutinesGrowing
+        expr: deriv(go_goroutines[6h]) * 3600 > 50
+        for: 6h
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.job }} gains more than 50 goroutines/hour — a handler or worker is not returning"
+
+      - alert: DBPoolNearlyExhausted
+        expr: db_pool_conns_acquired / db_pool_max_conns > 0.8
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.job }} holds over 80 % of its connection pool for 10 min — connections are leaking or the database is slow"
+
+      - alert: JobsTableNotPruned
+        # The worker prunes done jobs after JOB_RETENTION (7 d) every minute
+        # and counts them in queue_jobs_pruned_total; the api counts what is
+        # left. A million finished jobs is 100 runs/min for a week — if the
+        # gauge gets there the prune is dead or the retention is wrong.
+        expr: queue_finished_jobs > 1000000
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value }} finished jobs waiting to be pruned — check the worker sweep and JOB_RETENTION"

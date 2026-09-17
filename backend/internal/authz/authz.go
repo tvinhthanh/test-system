@@ -158,6 +158,20 @@ type TokenSpec struct {
 	ExpiresAt   time.Time
 }
 
+// AuditEntry is one row of authz_audit — a destructive change (token or
+// role revoked), who did it and on what (§11.7). Append-only; written in
+// the same transaction as the change.
+type AuditEntry struct {
+	ID          int64
+	Action      string // token.revoke | role.revoke
+	SubjectKind string // api_token | membership
+	SubjectID   string
+	Scope       ScopeRef // the subject's scope, for filtering by tenant
+	Actor       string
+	Details     map[string]any
+	At          time.Time
+}
+
 // Issued pairs the stored token with its plaintext — shown once, then gone.
 type Issued struct {
 	Token     Token
@@ -198,7 +212,9 @@ type Service interface {
 	Authenticate(ctx context.Context, bearer string) (Principal, error)
 
 	IssueToken(ctx context.Context, spec TokenSpec) (Issued, error)
-	RevokeToken(ctx context.Context, id string) error
+	// RevokeToken makes the token unusable at once and records who did it
+	// (§11.7 audit of destructive actions); actor is required.
+	RevokeToken(ctx context.Context, id, actor string) error
 	ListTokens(ctx context.Context, scope ScopeRef) ([]Token, error)
 
 	CreateUser(ctx context.Context, email string) (User, error)
@@ -223,8 +239,12 @@ type Service interface {
 	Logout(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
 	GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error)
-	RevokeRole(ctx context.Context, userID string, scope ScopeRef) error
+	// RevokeRole removes a membership and records who did it (§11.7).
+	RevokeRole(ctx context.Context, userID string, scope ScopeRef, actor string) error
 	ListMemberships(ctx context.Context, userID string) ([]Membership, error)
+	// ListAudit reads the newest destructive actions (§11.7), newest first,
+	// filtered to one scope id when given.
+	ListAudit(ctx context.Context, scopeID string, limit int) ([]AuditEntry, error)
 }
 
 // TokenPrefix is what every ingest token starts with. It is registered with

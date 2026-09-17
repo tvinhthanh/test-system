@@ -20,6 +20,7 @@ import (
 //
 //	queue_backlog_jobs / queue_backlog_oldest_seconds  — jobs runnable now, any kind, and the oldest one's age
 //	queue_running_jobs / queue_dead_jobs               — leased right now / gave up after max attempts
+//	queue_finished_jobs                                — done and not yet pruned; JOB_RETENTION bounds it
 //	runs_open_over_limit                               — runs still running past AutoCloseAfter (the sweep is not running)
 //	review_queue_pending                               — identity pairs waiting for a human (§6.4: alert > 50)
 func healthGauges(reg *metric.Registry, q *queue.Queue, res results.Service, idn identity.Service, logger *slog.Logger) {
@@ -48,6 +49,7 @@ func healthGauges(reg *metric.Registry, q *queue.Queue, res results.Service, idn
 	reg.GaugeFunc("queue_backlog_oldest_seconds", "Age of the oldest runnable job, any kind, as seen by the api.", read("queue_backlog_oldest_seconds", backlog(func(b queue.Backlog) float64 { return b.Oldest.Seconds() })))
 	reg.GaugeFunc("queue_running_jobs", "Jobs leased right now.", read("queue_running_jobs", backlog(func(b queue.Backlog) float64 { return float64(b.Running) })))
 	reg.GaugeFunc("queue_dead_jobs", "Jobs that exhausted their attempts and need a human.", read("queue_dead_jobs", backlog(func(b queue.Backlog) float64 { return float64(b.Dead) })))
+	reg.GaugeFunc("queue_finished_jobs", "Done jobs not yet pruned — grows without bound when the worker prune is not running (T5).", read("queue_finished_jobs", backlog(func(b queue.Backlog) float64 { return float64(b.Done) })))
 	reg.GaugeFunc("runs_open_over_limit", "Runs still running past the auto-close limit — non-zero for long means the worker sweep is not running (§7.4, §14.3).", read("runs_open_over_limit", func(ctx context.Context) (float64, error) {
 		n, err := res.OpenRuns(ctx, time.Now().Add(-ingest.AutoCloseAfter))
 		return float64(n), err

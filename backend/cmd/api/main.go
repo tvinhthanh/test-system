@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -56,7 +55,8 @@ func main() {
 	}
 
 	reg := metric.New()
-	reg.GaugeFunc("go_goroutines", "Number of goroutines.", func() float64 { return float64(runtime.NumGoroutine()) })
+	metric.Process(reg)
+	db.Metrics(reg)
 
 	store, err := objstore.Open(cfg)
 	if err != nil {
@@ -73,6 +73,7 @@ func main() {
 	// /metrics on its own listener, loopback by default (config.MetricsAddr).
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", reg.Handler())
+	metric.Pprof(metricsMux) // heap/goroutine profiles on the loopback listener, for T5 leak hunting
 	metricsSrv := &http.Server{Addr: cfg.MetricsAddr, Handler: metricsMux, ReadHeaderTimeout: 5 * time.Second}
 
 	serve := func(name string, srv *http.Server) {

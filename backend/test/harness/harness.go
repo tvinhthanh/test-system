@@ -11,6 +11,8 @@ package harness
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,6 +96,9 @@ type Harness struct {
 	Project tenancy.ProjectID
 	Token   string
 	HTTP    *http.Client
+	// ExtraEnv is appended to every process the harness starts — a suite
+	// that needs a knob (JOB_RETENTION for the soak) sets it before StartAPI.
+	ExtraEnv []string
 
 	tenancy   tenancy.Service
 	authz     authz.Service
@@ -211,7 +216,7 @@ type Proc struct {
 }
 
 func (h *Harness) env() []string {
-	return append(os.Environ(),
+	env := append(os.Environ(),
 		"APP_ENV=dev",
 		"DATABASE_URL="+h.DBURL,
 		"TOKEN_PEPPER="+Pepper,
@@ -219,6 +224,7 @@ func (h *Harness) env() []string {
 		"COOKIE_SECURE=false",
 		"HTTP_ADDR="+h.APIAddr,
 	)
+	return append(env, h.ExtraEnv...)
 }
 
 func (h *Harness) start(name, bin, metricsAddr string) *Proc {
@@ -501,3 +507,53 @@ func (h *Harness) JobsByStatus() map[string]int {
 	}
 	return out
 }
+
+// Artifact declares, uploads and completes one artifact of kind log on the
+// run's first test (§7.7 three-step flow through the presigned PUT). With
+// corrupt, the uploaded bytes differ from the declared sha256 by one bit —
+// the server must hash what landed and answer 422 CHECKSUM_MISMATCH. The
+// three answers come back for the caller to judge; a step that could not
+// run (declare refused, no URL) leaves the later ones zero.
+func (h *Harness) Artifact(token, local, name string, data []byte, corrupt bool) (declare, put, complete Resp) {
+	sum := sha256.Sum256(data)
+	hexSum := hex.EncodeToString(sum[:])
+	declare = h.PostAs(token, "/v1/artifacts", map[string]any{
+		"localRunId": local, "clientTestId": "ct_tests_area01.spec.ts_case 0001", "occurrenceIndex": 0, "attempt": 0,
+		"name": name, "kind": "log", "contentType": "text/plain", "sizeBytes": len(data), "sha256": hexSum,
+	})
+	if declare.Err != nil || declare.Code != 201 {
+		return
+	}
+	up, _ := declare.Body["upload"].(map[string]any)
+	url, _ := up["url"].(string)
+	if url == "" {
+		return
+	}
+	body := data
+	if corrupt {
+		body = append([]byte(nil), data...)
+		body[len(body)/2] ^= 0x01
+	}
+	req, _ := http.NewRequest("PUT", url, bytes.NewReader(body))
+	if hdrs, ok := up["headers"].(map[string]any); ok {
+		for k, v := range hdrs {
+			req.Header.Set(k, fmt.Sprint(v))
+		}
+	}
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "text/plain")
+	}
+	put = h.Do(req)
+	if put.Err != nil || put.Code != 200 {
+		return
+	}
+	id, _ := declare.Body["artifactId"].(string)
+	complete = h.PostAs(token, "/v1/artifacts/"+id+"/complete", map[string]any{"sha256": hexSum})
+	return
+}
+
+// MetricsAddr and WorkerMetricsAddr are the loopback listeners of the api
+// and worker — /metrics and /debug/pprof/ — for a suite that wants to point
+// go tool pprof at a process while it runs.
+func (h *Harness) MetricsAddr() string       { return h.apiMetric }
+func (h *Harness) WorkerMetricsAddr() string { return h.wrkMetric }

@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -233,26 +234,91 @@ func (s *service) IssueToken(ctx context.Context, spec TokenSpec) (Issued, error
 	return Issued{Token: t, Plaintext: TokenPrefix + secret}, nil
 }
 
-func (s *service) RevokeToken(ctx context.Context, id string) error {
+func (s *service) RevokeToken(ctx context.Context, id, actor string) error {
 	if !isUUID(id) {
 		return ErrNotFound
 	}
-	tag, err := s.db.Q(ctx).Exec(ctx, `UPDATE api_tokens SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, id, s.now())
+	if strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: actor is required to revoke a token", ErrInvalid)
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		q := s.db.Q(ctx)
+		var level, scopeID, name string
+		err := q.QueryRow(ctx, `
+			UPDATE api_tokens SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL
+			RETURNING scope_level, scope_id, name`, id, s.now()).Scan(&level, &scopeID, &name)
+		if errors.Is(err, pg.ErrNoRows) {
+			// Zero rows: either unknown or already revoked. Revoking twice is
+			// fine and leaves no second audit row — nothing changed.
+			var exists bool
+			if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM api_tokens WHERE id = $1)`, id).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return ErrNotFound
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return s.audit(ctx, "token.revoke", "api_token", id, level, scopeID, actor, map[string]any{"name": name})
+	})
+}
+
+// audit appends the record of a destructive change in the caller's
+// transaction: the change and its record commit together or not at all.
+func (s *service) audit(ctx context.Context, action, subjectKind, subjectID, level, scopeID, actor string, details map[string]any) error {
+	b, err := json.Marshal(details)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 1 {
-		return nil
+	_, err = s.db.Q(ctx).Exec(ctx, `
+		INSERT INTO authz_audit (action, subject_kind, subject_id, scope_level, scope_id, actor, details, at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		action, subjectKind, subjectID, level, scopeID, strings.TrimSpace(actor), b, s.now().UTC())
+	return err
+}
+
+// ListAudit returns the newest destructive actions, optionally only those
+// on one scope (a project, workspace or organization id); limit ≤ 0 → 100.
+func (s *service) ListAudit(ctx context.Context, scopeID string, limit int) ([]AuditEntry, error) {
+	if limit <= 0 {
+		limit = 100
 	}
-	// Zero rows: either unknown or already revoked. Revoking twice is fine.
-	var exists bool
-	if err := s.db.Q(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM api_tokens WHERE id = $1)`, id).Scan(&exists); err != nil {
-		return err
+	var scope *string
+	if scopeID != "" {
+		if !isUUID(scopeID) {
+			return nil, fmt.Errorf("%w: audit scope", ErrInvalid)
+		}
+		scope = &scopeID
 	}
-	if !exists {
-		return ErrNotFound
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT id, action, subject_kind, subject_id, coalesce(scope_level, ''), scope_id, actor, details, at
+		  FROM authz_audit WHERE $1::uuid IS NULL OR scope_id = $1
+		 ORDER BY id DESC LIMIT $2`, scope, limit)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var level string
+		var sid *string
+		var details []byte
+		if err := rows.Scan(&e.ID, &e.Action, &e.SubjectKind, &e.SubjectID, &level, &sid, &e.Actor, &details, &e.At); err != nil {
+			return nil, err
+		}
+		e.Scope.Level = Level(level)
+		if sid != nil {
+			e.Scope.ID = *sid
+		}
+		_ = json.Unmarshal(details, &e.Details)
+		e.At = e.At.UTC()
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 func (s *service) ListTokens(ctx context.Context, scope ScopeRef) ([]Token, error) {
@@ -342,23 +408,29 @@ func (s *service) GrantRole(ctx context.Context, userID string, scope ScopeRef, 
 	return m, mapErr(err)
 }
 
-func (s *service) RevokeRole(ctx context.Context, userID string, scope ScopeRef) error {
+func (s *service) RevokeRole(ctx context.Context, userID string, scope ScopeRef, actor string) error {
 	if !membershipLevels[scope.Level] || !isUUID(scope.ID) {
 		return fmt.Errorf("%w: membership scope", ErrInvalid)
 	}
 	if !isUUID(userID) {
 		return ErrNotFound
 	}
-	tag, err := s.db.Q(ctx).Exec(ctx,
-		`DELETE FROM memberships WHERE user_id = $1 AND scope_level = $2 AND scope_id = $3`,
-		userID, string(scope.Level), scope.ID)
-	if err != nil {
-		return err
+	if strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: actor is required to revoke a role", ErrInvalid)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		var id, role string
+		err := s.db.Q(ctx).QueryRow(ctx,
+			`DELETE FROM memberships WHERE user_id = $1 AND scope_level = $2 AND scope_id = $3 RETURNING id, role`,
+			userID, string(scope.Level), scope.ID).Scan(&id, &role)
+		if errors.Is(err, pg.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return s.audit(ctx, "role.revoke", "membership", id, string(scope.Level), scope.ID, actor, map[string]any{"user_id": userID, "role": role})
+	})
 }
 
 func (s *service) ListMemberships(ctx context.Context, userID string) ([]Membership, error) {

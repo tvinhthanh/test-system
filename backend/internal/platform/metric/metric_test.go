@@ -1,7 +1,9 @@
 package metric
 
 import (
+	"fmt"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -117,5 +119,37 @@ func TestConcurrentUpdates(t *testing.T) {
 	}
 	if got := h.Count("a"); got != goroutines*per {
 		t.Errorf("histogram count = %d, want %d", got, goroutines*per)
+	}
+}
+
+// TestProcessGaugesArePresentAndSane: the soak (T5) reads these by name;
+// RSS and heap must be real numbers on this OS, not the 0 of "unsupported".
+func TestProcessGaugesArePresentAndSane(t *testing.T) {
+	r := New()
+	Process(r)
+	text := r.Expose()
+	for _, name := range []string{"go_goroutines", "go_memstats_heap_alloc_bytes", "go_memstats_heap_inuse_bytes", "go_memstats_sys_bytes", "go_gc_cycles_total", "process_resident_memory_bytes"} {
+		if !strings.Contains(text, "\n"+name+" ") && !strings.HasPrefix(text, name+" ") {
+			t.Errorf("%s missing from exposition:\n%s", name, text)
+		}
+	}
+	val := func(name string) float64 {
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, name+" ") {
+				var v float64
+				fmt.Sscanf(strings.TrimPrefix(line, name+" "), "%g", &v)
+				return v
+			}
+		}
+		return -1
+	}
+	if v := val("go_goroutines"); v < 1 {
+		t.Errorf("go_goroutines = %v", v)
+	}
+	if heap, sys := val("go_memstats_heap_inuse_bytes"), val("go_memstats_sys_bytes"); heap <= 0 || sys < heap {
+		t.Errorf("heap_inuse %v, sys %v", heap, sys)
+	}
+	if rss := val("process_resident_memory_bytes"); rss < 1<<20 {
+		t.Errorf("process_resident_memory_bytes = %v: expected a real RSS on %s", rss, runtime.GOOS)
 	}
 }

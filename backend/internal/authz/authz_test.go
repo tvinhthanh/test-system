@@ -110,7 +110,7 @@ func TestRejectsBeforeRoundTrip(t *testing.T) {
 	if err := svc.Authorize(ctx, authz.Principal{Kind: authz.PrincipalUser, UserID: p}, authz.Resource{}, authz.ActionView); !errors.Is(err, authz.ErrInvalid) {
 		t.Errorf("resource without org: %v", err)
 	}
-	if err := svc.RevokeToken(ctx, "nope"); !errors.Is(err, authz.ErrNotFound) {
+	if err := svc.RevokeToken(ctx, "nope", "tester"); !errors.Is(err, authz.ErrNotFound) {
 		t.Errorf("malformed token id: %v", err)
 	}
 }
@@ -176,17 +176,29 @@ func TestTokensAgainstPostgres(t *testing.T) {
 	}
 
 	// Revoke is immediate and idempotent.
-	if err := svc.RevokeToken(ctx, issued.Token.ID); err != nil {
+	if err := svc.RevokeToken(ctx, issued.Token.ID, "ops@gate.example"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Authenticate(ctx, issued.Plaintext); !errors.Is(err, authz.ErrUnauthenticated) {
 		t.Errorf("revoked token still authenticates: %v", err)
 	}
-	if err := svc.RevokeToken(ctx, issued.Token.ID); err != nil {
+	if err := svc.RevokeToken(ctx, issued.Token.ID, "ops@gate.example"); err != nil {
 		t.Errorf("second revoke: %v", err)
 	}
-	if err := svc.RevokeToken(ctx, "00000000-0000-4000-8000-000000000000"); !errors.Is(err, authz.ErrNotFound) {
+	if err := svc.RevokeToken(ctx, "00000000-0000-4000-8000-000000000000", "tester"); !errors.Is(err, authz.ErrNotFound) {
 		t.Errorf("revoke unknown: %v", err)
+	}
+	// §11.7: exactly one audit row for the one revoke that changed something,
+	// carrying the actor and the token's scope; no actor → refused, nothing changes.
+	if err := svc.RevokeToken(ctx, issued.Token.ID, "  "); !errors.Is(err, authz.ErrInvalid) {
+		t.Errorf("revoke without actor: %v", err)
+	}
+	audit, err := svc.ListAudit(ctx, project, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 1 || audit[0].Action != "token.revoke" || audit[0].SubjectID != issued.Token.ID || audit[0].Actor != "ops@gate.example" || audit[0].Scope.ID != project || audit[0].Details["name"] != "github-actions" {
+		t.Errorf("audit after revoke: %+v", audit)
 	}
 
 	// Expired token.
@@ -298,14 +310,17 @@ func TestMembershipsAgainstPostgres(t *testing.T) {
 	}
 
 	// Revoke.
-	if err := svc.RevokeRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}); err != nil {
+	if err := svc.RevokeRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}, "ops@gate.example"); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Authorize(ctx, as(bob), res, authz.ActionTokenManage); !errors.Is(err, authz.ErrForbidden) {
 		t.Errorf("after revoking workspace admin: %v", err)
 	}
-	if err := svc.RevokeRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}); !errors.Is(err, authz.ErrNotFound) {
+	if err := svc.RevokeRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}, "ops@gate.example"); !errors.Is(err, authz.ErrNotFound) {
 		t.Errorf("revoke twice: %v", err)
+	}
+	if audit, err := svc.ListAudit(ctx, ws, 10); err != nil || len(audit) != 1 || audit[0].Action != "role.revoke" || audit[0].Details["user_id"] != bob.ID || audit[0].Details["role"] != "admin" || audit[0].Actor != "ops@gate.example" {
+		t.Errorf("audit after role revoke: %+v %v", audit, err)
 	}
 	if _, err := svc.GrantRole(ctx, "00000000-0000-4000-8000-000000000000", authz.ScopeRef{authz.LevelProject, proj}, authz.RoleViewer); !errors.Is(err, authz.ErrNotFound) {
 		t.Errorf("grant to unknown user: %v", err)

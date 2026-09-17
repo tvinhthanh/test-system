@@ -78,6 +78,17 @@ func token() string {
 func (s *Store) grantURL(g grant) string {
 	tok := token()
 	s.mu.Lock()
+	// Expired grants go when the map has grown past a screenful: a real
+	// bucket forgets a presigned URL at its expiry, and so must the fake,
+	// or a long dev session (test/soak) grows by one grant per upload forever.
+	if len(s.grants) > 1024 {
+		now := s.Now()
+		for k, old := range s.grants {
+			if now.After(old.expires) {
+				delete(s.grants, k)
+			}
+		}
+	}
 	s.grants[tok] = g
 	s.mu.Unlock()
 	return s.srv.URL + "/upload?token=" + tok

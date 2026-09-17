@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -58,11 +57,14 @@ func main() {
 	}
 
 	reg := metric.New()
-	reg.GaugeFunc("go_goroutines", "Number of goroutines.", func() float64 { return float64(runtime.NumGoroutine()) })
+	metric.Process(reg)
+	db.Metrics(reg)
 
 	ten, az, res := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper)), results.New(db)
+	q := queue.New(db)
+	pruned := reg.Counter("queue_jobs_pruned_total", "Finished jobs deleted after JOB_RETENTION.")
 	jobs := ingest.NewJobs(ingest.Deps{
-		DB: db, Queue: queue.New(db), Tenancy: ten, Authz: az,
+		DB: db, Queue: q, Tenancy: ten, Authz: az,
 		Results: res, Identity: identity.New(db), Metrics: reg, Logger: logger,
 	})
 	store, err := objstore.Open(cfg)
@@ -79,6 +81,7 @@ func main() {
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", reg.Handler())
+	metric.Pprof(metricsMux) // heap/goroutine profiles on the loopback listener, for T5 leak hunting
 	metricsMux.Handle("GET /healthz", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
@@ -114,6 +117,14 @@ func main() {
 			}
 			if err := artJobs.Sweep(ctx); err != nil {
 				logger.Error("artifact sweep", "err", err)
+			}
+			// Finished jobs older than JOB_RETENTION go, a bounded batch per sweep
+			// (§14.1 T5: the queue table must not grow with history).
+			if n, err := q.Prune(ctx, cfg.JobRetention, 5000); err != nil {
+				logger.Error("job prune", "err", err)
+			} else if n > 0 {
+				pruned.Add(float64(n))
+				logger.Info("jobs pruned", "n", n)
 			}
 		}
 		sweep()

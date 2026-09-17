@@ -13,7 +13,9 @@
 //	admin user verify  -id <user>
 //	admin role grant   -user <id> -level project -scope <id> -role admin
 //	admin token issue  -project <id> -name "github-actions" [-expires 2027-01-01]
-//	admin token revoke -id <id>
+//	admin token revoke -id <id> -actor you@x            (recorded in authz_audit, §11.7)
+//	admin role  revoke -user <id> -level project -scope <id> -actor you@x
+//	admin audit list   [-scope <id>] [-limit 100]        (token/role revokes; identity ops are in identity_audit)
 //	admin token list   -project <id>
 //	admin identity show       -id <identity>
 //	admin identity merge      -project <id> -dst <identity> -src <identity> -actor you@x
@@ -141,10 +143,19 @@ func main() {
 			out, err = az.IssueToken(ctx, spec)
 		}
 	case "token revoke":
-		id := fs.String("id", "", "token id")
+		id, actor := fs.String("id", "", "token id"), fs.String("actor", "", "who (email) — recorded in authz_audit, §11.7")
 		parse(fs)
-		err = az.RevokeToken(ctx, *id)
-		out = map[string]string{"revoked": *id}
+		err = az.RevokeToken(ctx, *id, *actor)
+		out = map[string]string{"revoked": *id, "actor": *actor}
+	case "role revoke":
+		user, level, scope, actor := fs.String("user", "", "user id"), fs.String("level", "project", "organization|workspace|project"), fs.String("scope", "", "scope id"), fs.String("actor", "", "who (email) — recorded in authz_audit, §11.7")
+		parse(fs)
+		err = az.RevokeRole(ctx, *user, authz.ScopeRef{Level: authz.Level(*level), ID: *scope}, *actor)
+		out = map[string]string{"revoked": *user, "level": *level, "scope": *scope, "actor": *actor}
+	case "audit list":
+		scope, limit := fs.String("scope", "", "organization|workspace|project id (default: everything)"), fs.Int("limit", 100, "max rows, newest first")
+		parse(fs)
+		out, err = az.ListAudit(ctx, *scope, *limit)
 	case "token list":
 		project := fs.String("project", "", "project id")
 		parse(fs)
@@ -259,6 +270,6 @@ func fail(code int, err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|role grant|token issue|token revoke|token list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend> [flags]")
 	os.Exit(2)
 }

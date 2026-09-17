@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is everything the binaries read from the environment.
@@ -48,6 +49,10 @@ type Config struct {
 	// (burst 2×); a browser tab needs a few per second, a scraper of every
 	// run in a project does not (§11.6 API4). 0 disables — tests only.
 	DashboardRatePerMinute int
+	// JobRetention is how long finished queue jobs stay before the worker
+	// prunes them (§14.1 T5: the jobs table must not grow with history).
+	// Default 168h; the soak harness shortens it to watch the prune loop.
+	JobRetention time.Duration
 }
 
 // devPepper is only ever accepted when APP_ENV=dev.
@@ -77,6 +82,11 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("DASHBOARD_RATE_PER_MINUTE: want a non-negative integer")
 	} else {
 		c.DashboardRatePerMinute = v
+	}
+	if d, err := time.ParseDuration(getenv("JOB_RETENTION", "168h")); err != nil || d < time.Minute {
+		return c, fmt.Errorf("JOB_RETENTION: want a duration of at least 1m, e.g. 168h")
+	} else {
+		c.JobRetention = d
 	}
 	return c, c.validate()
 }
