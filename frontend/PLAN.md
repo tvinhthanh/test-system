@@ -220,10 +220,15 @@ need cache invalidation; current data is route-owned and session scoped.
 - [x] Responsive web check at 360px, 768px and 1440px.
 - [x] Verify no raw HTML report rendering and no silent fixture fallback.
 - [x] Verify route chunks, lazy loading, request count, and no fetch loop.
-- [ ] Profile render/update cost with representative large customer datasets
-      (the api side is measured: `../backend/test/load` holds every dashboard
-      route under 500 ms p95 at 1M results; the UI caps lists at 20/50 rows, so
-      what is left to measure is browser render time on a slow laptop).
+- [x] Profile render/update cost with a representative large dataset
+      (2026-09-17, against the T5 soak's api while its watched project held
+      ~75 000 results / ~375 runs, Vite dev build through the proxy, laptop):
+      runs page 331 ms, results page 327 ms, identities + flaky + one history
+      1.2 s for three navigations, sign-in → projects 636 ms — indistinguishable
+      from the same steps against a 3-run project, because every list is
+      server-paged at 20/50 rows and the api holds p95 < 500 ms at 1M results
+      (`../backend/test/load`). Numbers are `live-check.mjs` step wall times
+      and include its fixed waits; rerun it against a bigger project to refresh.
 
 ## Existing Draft To Retire Or Port
 
@@ -308,6 +313,7 @@ All commands below ran from `frontend/` on 2026-09-14.
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |
 | `ATP_UI=… ATP_EMAIL=… ATP_PASSWORD=… node scripts/live-check.mjs <installed-playwright-path>` (2026-09-17, real Go api on :8080 seeded by `reporter/playwright` `npm run example` ×2, Vite dev proxy) | PASS; 10 steps, 30 `/v1` calls all 2xx except the deliberate 401, console clean |
+| same script, `ATP_API` pointed at the T5 soak's api (~75k results in the project) | PASS; step wall times: runs 331 ms, results 327 ms, identities+flaky+history 1.2 s — flat versus the 3-run project |
 | `go test ./...` from `backend/` | PASS; domain, authz, ingest, artifact, queue, architecture tests |
 | Real Go session/query integration | PASS (2026-09-16 first pass; 2026-09-17 via `scripts/live-check.mjs`) |
 
