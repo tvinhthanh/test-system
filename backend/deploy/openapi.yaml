@@ -1,0 +1,835 @@
+# The public HTTP surface of the platform — SPEC §11.6 API9: "OpenAPI là
+# nguồn sự thật; diff mỗi release". Two clients, two credentials:
+#
+#   reporter  → Bearer atp_ing_… (project:ingest, write-only)  /v1/runs, /v1/artifacts
+#   browser   → session cookie + X-CSRF-Token                  /v1/session, /v1/projects/…
+#
+# Every path×method here is exactly what cmd/api mounts: cmd/api/security_test.go
+# fails when this file and the router disagree (same mechanism as routes.txt).
+# Response shapes are asserted by cmd/api/api_test.go on a real database and
+# by frontend/tests against the same DTOs; frontend/API_CONTRACT.md is the
+# prose version of the dashboard half.
+openapi: 3.1.0
+info:
+  title: ATP Report Center API
+  version: "1.1"
+  description: |
+    Protocol version 1.x (§6.5). Reporters send `X-Protocol-Version: 1.1`; a
+    server serves N and N−1 and answers `426 UPGRADE_REQUIRED` below that.
+    Every error body is `{"error":{"code","message","details"}}`; every
+    response carries `X-Request-Id`. Payloads from reporters are untrusted:
+    titles, error messages and stacks are stored and rendered as text only.
+servers:
+  - url: https://{host}
+    variables:
+      host: { default: localhost }
+
+tags:
+  - name: ingest
+    description: Reporter → server. Bearer token scoped to one project. 60 requests/minute/token, burst 120 (`429` + `Retry-After`).
+  - name: artifacts
+    description: Reporter → server → object store. Three steps — declare, PUT to the presigned URL, complete.
+  - name: session
+    description: Browser sign-in. Cookie `atp_sess_…` (HttpOnly, Secure, SameSite=Lax) + CSRF double-submit cookie echoed in `X-CSRF-Token`.
+  - name: dashboard
+    description: Browser reads and triage writes, always inside one project the session may view. 600 requests/minute/user.
+  - name: ops
+    description: Liveness.
+
+security: []
+
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      tags: [ops]
+      summary: Liveness (no database round trip)
+      responses:
+        "200":
+          description: The process is serving.
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { const: ok } } }
+
+  # ---- ingest (§7.2–7.4) ---------------------------------------------------
+  /v1/runs:
+    post:
+      operationId: createRun
+      tags: [ingest]
+      summary: Open a run (idempotent on localRunId within the token's project)
+      security: [{ ingestToken: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProtocolVersion" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRun" }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RunOpened" } } }
+        "200":
+          description: The same localRunId was already opened; same body.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RunOpened" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "426": { $ref: "#/components/responses/UpgradeRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/runs/{localRunId}/events:
+    post:
+      operationId: appendEvents
+      tags: [ingest]
+      summary: Append a batch of test events (≤ 500 events, ≤ 5 MB)
+      description: |
+        Idempotent per `(localRunId, sequence)`: a replayed batch is counted in
+        `duplicates`, never stored twice (§7.1). Known tests resolve inline and
+        come back in `identityMap`; the rest resolve at finish.
+      security: [{ ingestToken: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/LocalRunId" }
+        - { $ref: "#/components/parameters/ProtocolVersion" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventBatch" }
+      responses:
+        "200":
+          description: Accepted.
+          content: { application/json: { schema: { $ref: "#/components/schemas/BatchAccepted" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`RUN_FINISHED` — the run no longer accepts events."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: "`BATCH_TOO_LARGE` — more than 500 events or 5 MB."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/runs/{localRunId}/finish:
+    post:
+      operationId: finishRun
+      tags: [ingest]
+      summary: Close the run (idempotent; queues tier-2 identity resolve)
+      security: [{ ingestToken: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/LocalRunId" }
+        - { $ref: "#/components/parameters/ProtocolVersion" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                finishedAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Finished (the same body on a repeated call).
+          content: { application/json: { schema: { $ref: "#/components/schemas/RunFinished" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  # ---- artifacts (§7.7, §10.4) ------------------------------------------------
+  /v1/artifacts:
+    post:
+      operationId: declareArtifact
+      tags: [artifacts]
+      summary: Declare an artifact and receive how to upload it
+      description: |
+        Repeating a declare returns the same artifact with fresh URLs (and, for
+        multipart, only the parts still missing). Caps are per kind (§10.4);
+        exceeding one is `413` for this artifact only — the run stays valid.
+      security: [{ ingestToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeclareArtifact" }
+      responses:
+        "201":
+          description: Declared; upload with `upload` (single PUT) or `multipart`.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ArtifactDeclared" } } }
+        "200":
+          description: Already declared (resume), or already verified (no upload block).
+          content: { application/json: { schema: { $ref: "#/components/schemas/ArtifactDeclared" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: "`ARTIFACT_GONE` — expired or deleted; declare under a new name."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: "`ARTIFACT_TOO_LARGE` with `details.kind`, `details.limit`, `details.sizeBytes`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "503": { $ref: "#/components/responses/StoreUnavailable" }
+  /v1/artifacts/{artifactId}/complete:
+    post:
+      operationId: completeArtifact
+      tags: [artifacts]
+      summary: Verify the upload (size, content type, SHA-256) and link it to its attempt
+      security: [{ ingestToken: [] }]
+      parameters: [{ $ref: "#/components/parameters/ArtifactId" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteArtifact" }
+      responses:
+        "200":
+          description: Verified (or already verified).
+          content: { application/json: { schema: { $ref: "#/components/schemas/ArtifactCompleted" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`UPLOAD_INCOMPLETE` — multipart parts missing."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "410":
+          description: "`ARTIFACT_GONE`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422":
+          description: "`SIZE_MISMATCH` | `CHECKSUM_MISMATCH` | `CONTENT_TYPE_MISMATCH` with `details.expected`/`details.actual`; the object is deleted, declare again."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "503": { $ref: "#/components/responses/StoreUnavailable" }
+
+  # ---- session (§11.2) ---------------------------------------------------------
+  /v1/session:
+    get:
+      operationId: getSession
+      tags: [session]
+      summary: Bootstrap — who am I, and the CSRF token
+      description: "Always `200`; anonymous is `user: null`. Sets the CSRF cookie. A stale session cookie is cleared, not a 401."
+      responses:
+        "200":
+          description: Session state.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+    post:
+      operationId: login
+      tags: [session]
+      summary: Sign in with email and password
+      description: "Generic `401` for unknown email, wrong password and unverified email alike; rate limited per IP and per account. Rotates the CSRF token."
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Signed in; the session cookie is set.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/logout:
+    post:
+      operationId: logout
+      tags: [session]
+      summary: Revoke the session
+      security: [{ sessionCookie: [], csrf: [] }]
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+
+  # ---- dashboard (frontend/API_CONTRACT.md) ------------------------------------
+  /v1/projects:
+    get:
+      operationId: listProjects
+      tags: [dashboard]
+      summary: Projects the session may read
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of projects.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Project" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/projects/{projectId}/runs:
+    get:
+      operationId: listRuns
+      tags: [dashboard]
+      summary: Runs of a project, newest first
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: "Matches branch, commit and localRunId." }
+        - { name: status, in: query, schema: { type: string, enum: [queued, running, passed, failed, error, cancelled] } }
+        - { name: environment, in: query, schema: { type: string }, description: Environment key. }
+        - { name: sort, in: query, schema: { type: string, enum: ["-startedAt"] } }
+      responses:
+        "200":
+          description: A page of runs; the cursor is bound to project, filter and sort.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Run" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/runs/{runId}:
+    get:
+      operationId: getRun
+      tags: [dashboard]
+      summary: One run
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/RunId" }
+      responses:
+        "200":
+          description: The run.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Run" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/runs/{runId}/results:
+    get:
+      operationId: listResults
+      tags: [dashboard]
+      summary: Results of a run, failures first
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/RunId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of results.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/TestResult" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/results/{resultId}:
+    get:
+      operationId: getResult
+      tags: [dashboard]
+      summary: Failure detail — attempts, their artifacts, triage events
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ResultId" }
+      responses:
+        "200":
+          description: The detail.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ResultDetail" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/results/{resultId}/triage-events:
+    post:
+      operationId: recordTriageEvent
+      tags: [dashboard]
+      summary: Record a triage event (§8.3)
+      description: |
+        Actor and time are the session's and the server's; anything the body
+        claims about them is ignored (§11.6 API3). `FAILURE_SEEN` is deduped per
+        user/result/24 h (`200` instead of `201`). Viewers get `403`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ResultId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED] }
+                payload: { type: object }
+      responses:
+        "201":
+          description: Recorded.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TriageEvent" } } }
+        "200":
+          description: Deduplicated (`FAILURE_SEEN` already recorded in the window).
+          content: { application/json: { schema: { $ref: "#/components/schemas/TriageEvent" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/artifacts/{artifactId}/content:
+    get:
+      operationId: getArtifactContent
+      tags: [dashboard]
+      summary: Bytes of a verified artifact (§11.5 serving policy)
+      description: |
+        `Content-Disposition: inline` only for `image/png|webp|jpeg`,
+        `video/webm|mp4` and `text/plain`; `attachment` for everything else.
+        Always `X-Content-Type-Options: nosniff`, `Cache-Control: private,
+        no-store`, sandboxing CSP. Unverified, expired or foreign ids are `404`.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ArtifactId" }
+      responses:
+        "200":
+          description: The bytes, with the artifact's declared content type.
+          content:
+            "*/*": { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/StoreUnavailable" }
+  /v1/projects/{projectId}/identities:
+    get:
+      operationId: listIdentities
+      tags: [dashboard]
+      summary: Test identities (§9), optionally only flaky ones
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: view, in: query, schema: { type: string, enum: [flaky] }, description: Server-side filter on the flaky verdict. }
+      responses:
+        "200":
+          description: A page of identities.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Identity" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/identities/{identityId}:
+    get:
+      operationId: getIdentity
+      tags: [dashboard]
+      summary: One identity
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/IdentityId" }
+      responses:
+        "200":
+          description: The identity.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Identity" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/identities/{identityId}/runs:
+    get:
+      operationId: listIdentityRuns
+      tags: [dashboard]
+      summary: Runs in which this identity was seen, newest first
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/IdentityId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of runs.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Run" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/metrics/triage:
+    get:
+      operationId: getTriageMetrics
+      tags: [dashboard]
+      summary: Triage coverage and TTRC over a window (§6.4 product signals; EM screen is P1.5)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses:
+        "200":
+          description: The window's numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  failures: { type: integer }
+                  triaged: { type: integer }
+                  seen: { type: integer }
+                  untriagedRate: { type: number }
+                  triageCoverage: { type: number }
+                  ttrcMedianSeconds: { type: [number, "null"] }
+                  timeToFirstViewSeconds: { type: [number, "null"] }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/metrics/trend:
+    get:
+      operationId: getCategoryTrend
+      tags: [dashboard]
+      summary: Failure category counts per week (§8.7)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: days, in: query, schema: { type: integer, default: 90 } }
+      responses:
+        "200":
+          description: Weekly buckets.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        Week: { type: string, format: date-time }
+                        Category: { type: string }
+                        Count: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    ingestToken:
+      type: http
+      scheme: bearer
+      description: "`atp_ing_` + 256-bit secret, scoped to one project with `project:ingest` only (§8.8, §11.4). Shown once at issue."
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: atp_sess
+      description: Set by `POST /v1/session`; HttpOnly, Secure, SameSite=Lax.
+    csrf:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Value of the readable `atp_csrf` cookie, required on every state-changing browser request together with an allow-listed `Origin`.
+
+  parameters:
+    ProtocolVersion:
+      name: X-Protocol-Version
+      in: header
+      required: false
+      schema: { type: string, pattern: '^\d+\.\d+$', default: "1.1" }
+    LocalRunId:
+      name: localRunId
+      in: path
+      required: true
+      description: The reporter's UUID for the run, unique per project.
+      schema: { type: string, format: uuid }
+    ArtifactId: { name: artifactId, in: path, required: true, schema: { type: string, format: uuid } }
+    ProjectId: { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+    RunId: { name: runId, in: path, required: true, schema: { type: string, format: uuid }, description: "The server's run id, not localRunId." }
+    ResultId: { name: resultId, in: path, required: true, schema: { type: string, format: uuid } }
+    IdentityId: { name: identityId, in: path, required: true, schema: { type: string, format: uuid } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 }, description: Page size; the server caps at 100 (§7.10). }
+    Cursor: { name: cursor, in: query, schema: { type: string }, description: "Opaque; bound to project, filter and sort. `400 INVALID_CURSOR` when reused elsewhere." }
+
+  responses:
+    InvalidPayload:
+      description: "`INVALID_PAYLOAD` with `details.field` (and `details.index` for a batch)."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    InvalidCursor:
+      description: "`INVALID_CURSOR` | `INVALID_SORT` — restart from the first page."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unauthenticated:
+      description: "`UNAUTHENTICATED` — missing, malformed, unknown, expired or revoked credential; one message for all (§11.2)."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: "`FORBIDDEN` — authenticated, inside the tenant, but the role does not allow it (§11.3.2)."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    CSRF:
+      description: "`CSRF` — token missing/mismatched or Origin not allow-listed."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: "`*_NOT_FOUND` — absent, or belonging to another tenant; the two are indistinguishable by design (§11.3.3)."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    RateLimited:
+      description: "`RATE_LIMITED` with `Retry-After` seconds (§7.4)."
+      headers: { Retry-After: { schema: { type: integer } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    UpgradeRequired:
+      description: "`UPGRADE_REQUIRED` — protocol older than N−1 (§6.5); `details.supported` lists majors."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    StoreUnavailable:
+      description: "`STORE_UNAVAILABLE` — object store timed out; retry."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+    Page:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array }
+        nextCursor: { type: [string, "null"] }
+
+    # ingest
+    CreateRun:
+      type: object
+      required: [localRunId, environmentKey, startedAt]
+      properties:
+        localRunId: { type: string, format: uuid }
+        environmentKey: { type: string, description: Created on first use inside the project. }
+        trigger:
+          type: object
+          properties:
+            type: { type: string }
+            provider: { type: string }
+            ref: { type: string }
+            commitSha: { type: string }
+            ciRunUrl: { type: string, description: "Stored and rendered as a link, never fetched (§7.10)." }
+        framework: { type: object, properties: { name: { type: string }, version: { type: string } } }
+        reporter: { type: object, properties: { name: { type: string }, version: { type: string }, protocolVersion: { type: string } } }
+        startedAt: { type: string, format: date-time }
+    RunOpened:
+      type: object
+      required: [runId, limits]
+      properties:
+        runId: { type: string, format: uuid }
+        limits:
+          type: object
+          properties:
+            maxEventsPerBatch: { type: integer, const: 500 }
+            maxBatchBytes: { type: integer, const: 5242880 }
+            artifactBytes: { type: object, additionalProperties: { type: integer }, description: Cap per kind (§10.4). }
+        identityMap: { type: object, additionalProperties: { type: string } }
+    Event:
+      type: object
+      required: [sequence, type, clientTestId, identity, status, outcome]
+      properties:
+        sequence: { type: integer, minimum: 1, description: Unique within the run; the idempotency key with localRunId. }
+        type: { type: string, const: test.finished }
+        clientTestId: { type: string, maxLength: 256 }
+        occurrenceIndex: { type: integer, minimum: 0 }
+        attempt: { type: integer, minimum: 0 }
+        identity:
+          type: object
+          required: [framework, filePath, titlePath]
+          properties:
+            framework: { type: string }
+            filePath: { type: string }
+            titlePath: { type: array, items: { type: string } }
+            paramSignature: { type: string }
+        status: { type: string, enum: [passed, failed, skipped, timed_out, interrupted] }
+        outcome: { type: string, enum: [expected, unexpected, flaky, skipped], description: "The framework's verdict, carried as-is (N36/N41)." }
+        durationMs: { type: integer }
+        error:
+          type: object
+          properties:
+            message: { type: string }
+            stack: { type: string }
+            snippet: { type: string }
+        workerId: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    EventBatch:
+      type: object
+      required: [events]
+      properties:
+        events: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/Event" } }
+    BatchAccepted:
+      type: object
+      required: [accepted, duplicates]
+      properties:
+        accepted: { type: integer }
+        duplicates: { type: integer }
+        identityMap: { type: object, additionalProperties: { type: string }, description: "clientTestId → stableTestId for tests resolved inline." }
+    RunFinished:
+      type: object
+      required: [runId, status]
+      properties:
+        runId: { type: string, format: uuid }
+        status: { type: string, enum: [passed, failed] }
+        flakyCount: { type: integer }
+        finishedAt: { type: string, format: date-time }
+
+    # artifacts
+    ArtifactKind: { type: string, enum: [screenshot, video, trace, har, log, attachment] }
+    DeclareArtifact:
+      type: object
+      required: [localRunId, clientTestId, attempt, name, kind, contentType, sizeBytes, sha256]
+      properties:
+        localRunId: { type: string, format: uuid }
+        clientTestId: { type: string }
+        occurrenceIndex: { type: integer, minimum: 0 }
+        attempt: { type: integer, minimum: 0, description: Required on every artifact (§7.7). }
+        name: { type: string, maxLength: 200 }
+        kind: { $ref: "#/components/schemas/ArtifactKind" }
+        contentType: { type: string, description: Must be allowed for the kind; HTML/SVG never are. }
+        sizeBytes: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+    ArtifactDeclared:
+      type: object
+      required: [artifactId, status, expiresAt, limits, linked]
+      properties:
+        artifactId: { type: string, format: uuid }
+        status: { type: string, enum: [pending, uploaded, verified] }
+        expiresAt: { type: string, format: date-time, description: "Retention, fixed at declare (§8.4, §10.4)." }
+        limits: { type: object, additionalProperties: { type: integer } }
+        linked: { type: boolean }
+        upload:
+          type: object
+          description: Single PUT (< 8 MB). Send `headers` verbatim — they are signed.
+          properties:
+            method: { type: string, const: PUT }
+            url: { type: string, format: uri }
+            headers: { type: object, additionalProperties: { type: string } }
+            expiresAt: { type: string, format: date-time }
+        multipart:
+          type: object
+          description: Chunked path (≥ 8 MB). `parts` lists only what is still missing.
+          properties:
+            uploadId: { type: string }
+            partSize: { type: integer }
+            maxParallel: { type: integer }
+            parts: { type: array, items: { type: object, properties: { number: { type: integer }, url: { type: string, format: uri } } } }
+            received: { type: array, items: { type: integer } }
+            expiresAt: { type: string, format: date-time }
+    CompleteArtifact:
+      type: object
+      properties:
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: Must equal the declared one. }
+        parts: { type: array, items: { type: object, required: [partNumber, etag], properties: { partNumber: { type: integer }, etag: { type: string } } } }
+    ArtifactCompleted:
+      type: object
+      required: [artifactId, status, sizeBytes, linked, expiresAt]
+      properties:
+        artifactId: { type: string, format: uuid }
+        status: { type: string, const: verified }
+        sizeBytes: { type: integer }
+        linked: { type: boolean, description: False until the attempt's event has arrived; the worker links within a minute. }
+        expiresAt: { type: string, format: date-time }
+
+    # session
+    Session:
+      type: object
+      required: [user, csrfToken]
+      properties:
+        user:
+          type: [object, "null"]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            email: { type: string, format: email }
+        csrfToken: { type: string }
+
+    # dashboard
+    Project:
+      type: object
+      required: [id, name, workspaceName]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        workspaceName: { type: string }
+    Run:
+      type: object
+      required: [id, branch, commitSha, status, environmentName, startedAt, durationMs, totalCount, passedCount, failedCount, flakyCount]
+      properties:
+        id: { type: string, format: uuid }
+        branch: { type: string }
+        commitSha: { type: string }
+        status: { type: string, enum: [queued, running, passed, failed, error, cancelled] }
+        environmentName: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        durationMs: { type: [integer, "null"], description: Null while running. }
+        totalCount: { type: integer }
+        passedCount: { type: integer, description: Excludes flaky passes. }
+        failedCount: { type: integer, description: failed + timed_out + interrupted. }
+        flakyCount: { type: integer, description: "`passed` with flakyCount > 0 is a warning, never clean green." }
+    TestResult:
+      type: object
+      required: [id, displayName, filePath, finalStatus, attemptCount, durationMs, stableTestId]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string, description: Untrusted text from the reporter. }
+        filePath: { type: string }
+        finalStatus: { type: string }
+        attemptCount: { type: integer }
+        durationMs: { type: integer }
+        stableTestId: { type: [string, "null"], format: uuid, description: Null until the resolver has run. }
+        failureObservedAt: { type: [string, "null"], format: date-time }
+    ArtifactRef:
+      type: object
+      required: [id, name, kind, contentType, sizeBytes, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/ArtifactKind" }
+        contentType: { type: string }
+        sizeBytes: { type: integer }
+        expiresAt: { type: string, format: date-time }
+    Attempt:
+      type: object
+      required: [attempt, status, durationMs, error, artifacts]
+      properties:
+        attempt: { type: integer }
+        status: { type: string }
+        durationMs: { type: integer }
+        error:
+          type: [object, "null"]
+          properties:
+            message: { type: [string, "null"], description: Untrusted; render as text only (§7.10). }
+            stack: { type: [string, "null"] }
+        artifacts: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/ArtifactRef" }, description: Verified uploads linked to this attempt. }
+    TriageEvent:
+      type: object
+      required: [id, type, actorName, occurredAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        actorName: { type: string }
+        occurredAt: { type: string, format: date-time }
+    ResultDetail:
+      type: object
+      required: [result, runId, attempts, events]
+      properties:
+        result: { $ref: "#/components/schemas/TestResult" }
+        runId: { type: string, format: uuid }
+        attempts: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/Attempt" } }
+        events: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TriageEvent" } }
+    Identity:
+      type: object
+      required: [id, canonicalTitle, canonicalFilePath, verdict, flakyScore, totalRuns, recentStatuses]
+      properties:
+        id: { type: string, format: uuid }
+        canonicalTitle: { type: string }
+        canonicalFilePath: { type: string }
+        verdict: { type: string, description: "Worst signal across environments; `insufficient_data` below two runs (§8.6)." }
+        flakyScore: { type: [number, "null"] }
+        totalRuns: { type: integer }
+        recentStatuses: { type: array, maxItems: 30, items: { type: string }, description: Newest first. }

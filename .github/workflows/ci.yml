@@ -99,6 +99,9 @@ jobs:
       - name: promtool check (alert rules parse and reference the config)
         run: docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
 
+      - name: openapi lint (§11.6 API9 — deploy/openapi.yaml is the public surface; parity with the router is a Go test)
+        run: npx --yes @redocly/cli@1.34.3 lint deploy/openapi.yaml
+
   reporter:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
