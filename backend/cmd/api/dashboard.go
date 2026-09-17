@@ -45,20 +45,36 @@ type dashboard struct {
 	query   query.Service
 	triage  triage.Service
 	logger  *slog.Logger
+
+	ratePerMinute int // per signed-in user; 0 = no limit
 }
 
+// routes mounts the dashboard behind a per-user rate limit (§11.6 API4):
+// the key is the session user, so one runaway tab cannot starve the api,
+// and an anonymous caller (no session) is keyed by nothing and passes on to
+// the 401 the handlers answer.
 func (d *dashboard) routes(mux httpx.Mux) {
-	mux.HandleFunc("GET /v1/projects", d.projects)
-	mux.HandleFunc("GET /v1/projects/{projectId}/runs", d.runs)
-	mux.HandleFunc("GET /v1/projects/{projectId}/runs/{runId}", d.run)
-	mux.HandleFunc("GET /v1/projects/{projectId}/runs/{runId}/results", d.results)
-	mux.HandleFunc("GET /v1/projects/{projectId}/results/{resultId}", d.resultDetail)
-	mux.HandleFunc("POST /v1/projects/{projectId}/results/{resultId}/triage-events", d.triageEvent)
-	mux.HandleFunc("GET /v1/projects/{projectId}/identities", d.identities)
-	mux.HandleFunc("GET /v1/projects/{projectId}/identities/{identityId}", d.identity)
-	mux.HandleFunc("GET /v1/projects/{projectId}/identities/{identityId}/runs", d.identityRuns)
-	mux.HandleFunc("GET /v1/projects/{projectId}/metrics/triage", d.triageMetrics)
-	mux.HandleFunc("GET /v1/projects/{projectId}/metrics/trend", d.trend)
+	limit := func(next http.Handler) http.Handler { return next }
+	if d.ratePerMinute > 0 {
+		limit = httpx.RateLimit(d.ratePerMinute, 2*d.ratePerMinute, func(r *http.Request) string {
+			if p, ok := authz.PrincipalFrom(r.Context()); ok && p.Kind == authz.PrincipalUser {
+				return "user:" + p.UserID
+			}
+			return ""
+		})
+	}
+	handle := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, limit(fn)) }
+	handle("GET /v1/projects", d.projects)
+	handle("GET /v1/projects/{projectId}/runs", d.runs)
+	handle("GET /v1/projects/{projectId}/runs/{runId}", d.run)
+	handle("GET /v1/projects/{projectId}/runs/{runId}/results", d.results)
+	handle("GET /v1/projects/{projectId}/results/{resultId}", d.resultDetail)
+	handle("POST /v1/projects/{projectId}/results/{resultId}/triage-events", d.triageEvent)
+	handle("GET /v1/projects/{projectId}/identities", d.identities)
+	handle("GET /v1/projects/{projectId}/identities/{identityId}", d.identity)
+	handle("GET /v1/projects/{projectId}/identities/{identityId}/runs", d.identityRuns)
+	handle("GET /v1/projects/{projectId}/metrics/triage", d.triageMetrics)
+	handle("GET /v1/projects/{projectId}/metrics/trend", d.trend)
 }
 
 type page struct {

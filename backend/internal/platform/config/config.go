@@ -8,6 +8,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -43,6 +44,10 @@ type Config struct {
 	DashboardOrigins []string
 	// CookieSecure sets Secure on session cookies. Only dev may turn it off.
 	CookieSecure bool
+	// DashboardRatePerMinute caps dashboard requests per signed-in user
+	// (burst 2×); a browser tab needs a few per second, a scraper of every
+	// run in a project does not (§11.6 API4). 0 disables — tests only.
+	DashboardRatePerMinute int
 }
 
 // devPepper is only ever accepted when APP_ENV=dev.
@@ -67,6 +72,11 @@ func Load() (Config, error) {
 		ObjStoreSecretKey: os.Getenv("OBJSTORE_SECRET_KEY"),
 		DashboardOrigins:  splitList(getenv("DASHBOARD_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080")),
 		CookieSecure:      getenv("COOKIE_SECURE", "true") != "false",
+	}
+	if v, err := strconv.Atoi(getenv("DASHBOARD_RATE_PER_MINUTE", "600")); err != nil || v < 0 {
+		return c, fmt.Errorf("DASHBOARD_RATE_PER_MINUTE: want a non-negative integer")
+	} else {
+		c.DashboardRatePerMinute = v
 	}
 	return c, c.validate()
 }

@@ -279,8 +279,10 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}}); r.code != 200 {
 		t.Errorf("FAILURE_SEEN dedupe: %d %s", r.code, r.raw)
 	}
-	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "payload": map[string]any{}}); r.code != 201 {
-		t.Errorf("MARKED_FLAKY: %d %s", r.code, r.raw)
+	// §11.6 API3: the actor and the time are the session's and the server's;
+	// whatever the body claims about them is ignored, not applied.
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "payload": map[string]any{}, "actorId": bob.ID, "actorName": "bob@example.com", "actorType": "SYSTEM", "occurredAt": "2000-01-01T00:00:00Z", "projectId": string(search.ID)}); r.code != 201 || r.body["actorName"] != "alice@example.com" || strings.HasPrefix(r.body["occurredAt"].(string), "2000") {
+		t.Errorf("spoofed actor/time was applied: %d %s", r.code, r.raw)
 	}
 	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "payload": map[string]any{}}); r.code != 400 {
 		t.Errorf("type outside the UI set: %d %s", r.code, r.raw)

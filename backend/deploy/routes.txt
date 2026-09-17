@@ -1,0 +1,24 @@
+# The api's route inventory (§11.6 API9: only /v1/, every route accounted
+# for). cmd/api/security_test.go compares this file with what cmd/api
+# actually mounts; a route added or removed without a change here fails
+# the build. One "METHOD /pattern" per line, order irrelevant.
+GET /healthz
+GET /v1/session
+POST /v1/session
+POST /v1/session/logout
+POST /v1/runs
+POST /v1/runs/{localRunId}/events
+POST /v1/runs/{localRunId}/finish
+POST /v1/artifacts
+POST /v1/artifacts/{artifactId}/complete
+GET /v1/projects
+GET /v1/projects/{projectId}/runs
+GET /v1/projects/{projectId}/runs/{runId}
+GET /v1/projects/{projectId}/runs/{runId}/results
+GET /v1/projects/{projectId}/results/{resultId}
+POST /v1/projects/{projectId}/results/{resultId}/triage-events
+GET /v1/projects/{projectId}/identities
+GET /v1/projects/{projectId}/identities/{identityId}
+GET /v1/projects/{projectId}/identities/{identityId}/runs
+GET /v1/projects/{projectId}/metrics/triage
+GET /v1/projects/{projectId}/metrics/trend

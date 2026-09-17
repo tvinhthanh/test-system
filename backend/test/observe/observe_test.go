@@ -78,8 +78,9 @@ func TestBacklogIsVisibleFromTheAPIWhenTheWorkerIsDead(t *testing.T) {
 	// fresh heartbeat.
 	w = h.StartWorker()
 	h.WaitFor("backlog to drain", 30*time.Second, func() bool {
-		v, ok := harness.Metric(h.Metrics(), "queue_backlog_jobs")
-		return ok && v == 0
+		pending, ok1 := harness.Metric(h.Metrics(), "queue_backlog_jobs")
+		running, ok2 := harness.Metric(h.Metrics(), "queue_running_jobs")
+		return ok1 && ok2 && pending == 0 && running == 0
 	})
 	wt := h.WorkerMetrics()
 	if v := metric(t, wt, "queue_jobs_total", `kind="run.finished"`, `result="done"`); v != runs {

@@ -29,6 +29,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `OBJSTORE` | `memory` | `s3` cho staging/prod (`OBJSTORE_ENDPOINT`, `OBJSTORE_REGION` mặc định `auto` cho R2, `OBJSTORE_BUCKET`, `OBJSTORE_ACCESS_KEY`, `OBJSTORE_SECRET_KEY`). `memory` chỉ dev: mỗi process một bucket riêng, mất khi tắt |
 | `DASHBOARD_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080` (5173 = Vite dev của `frontend/`) | allowlist Origin/Referer cho request đổi trạng thái bằng cookie (§11.2); không bao giờ `*` |
 | `COOKIE_SECURE` | `true` | `false` chỉ dev (§11.5 TLS mọi nơi) |
+| `DASHBOARD_RATE_PER_MINUTE` | `600` | trần request dashboard mỗi user đã đăng nhập, burst 2× (§11.6 API4); `0` tắt — chỉ cho test |
 | `TEST_DATABASE_URL` | *(trống)* | chỉ cho test; mỗi test tạo schema riêng `t_xxxx`, chạy migration, xóa khi xong (`pg/pgtest`) |
 
 ## Điều kiện QĐ-11 — đọc trước khi viết code
@@ -67,7 +68,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `cmd/migrate` | ✅ | áp migration rồi thoát; mã 0 xong, 1 migration lỗi, 2 config/kết nối |
 | `cmd/admin` | ✅ | script vận hành P1-min: `org/ws/project create`, `user create [-password -verified]`, `user set-password/verify`, `role grant`, `token issue/revoke/list`, `identity show/merge/undo-merge/split`, `review list [-csv]/decide`, `flaky list`, `triage record/list`, `dash runs/run/history/triage/trend`. Cách duy nhất có ingest token — không có UI để demo (QĐ-11 #5) |
 
-`GATES.md` — bằng chứng gate kỹ thuật T0–T5 (§14): cái gì đã chạy thật, ngày, lệnh tái lập. T0 ✅, T1 ✅ (`test/failure/`: binary thật bị kill/đứt DB, invariant kiểm bằng SQL), T4 tenant isolation ✅ (16-09); T2 đo bằng `test/load/` (`LOAD_TEST=1`, thêm `LOAD_SCALE=10` cho 1M result) — dashboard đạt, ingest 100 đồng thời chưa đạt trên laptop; T3 ✅ (`test/observe/` + `deploy/prometheus/alerts.yml`: mỗi kịch bản hỏng phải hiện ở `/metrics`, log không lộ bí mật); T5 chưa. `test/harness/` là phần dùng chung: build binary thật, Postgres thật, kill/đo.
+`GATES.md` — bằng chứng gate kỹ thuật T0–T5 (§14): cái gì đã chạy thật, ngày, lệnh tái lập. T0 ✅, T1 ✅ (`test/failure/`: binary thật bị kill/đứt DB, invariant kiểm bằng SQL), T4 tenant isolation ✅ (16-09); T2 đo bằng `test/load/` (`LOAD_TEST=1`, thêm `LOAD_SCALE=10` cho 1M result) — dashboard đạt, ingest 100 đồng thời chưa đạt trên laptop; T3 ✅ (`test/observe/` + `deploy/prometheus/alerts.yml`: mỗi kịch bản hỏng phải hiện ở `/metrics`, log không lộ bí mật); T5 chưa. Security §11.6: bảng bằng chứng trong `GATES.md` §T4; `deploy/routes.txt` là inventory route (test so với mux thật); `govulncheck` + `npm audit` chạy 17-09. `test/harness/` là phần dùng chung: build binary thật, Postgres thật, kill/đo.
 | `cmd/worker` | ✅ | cùng code, process thứ hai (§6.9.8 bước 2): pool `run.finished` ×4 (tier 2 → flaky, cùng tx, ghép ở `cmd/` theo §6.9.3 luật 3) + sweep mỗi phút (auto-close run, link artifact, retention, abort multipart bỏ dở); `/metrics` + `/healthz` riêng |
 | `test/arch` | ✅ | 6 test (thêm `TestQueryNeverWrites`): tên package cấm, luật tầng, fan-out ≤ 3, chu trình, graph không rỗng. Bỏ qua `_test.go` (external test package không phải self-import). **Đã chứng minh bắt được vi phạm giả** — kiểm lại 13-09 sau khi thêm `tenancy` |
 

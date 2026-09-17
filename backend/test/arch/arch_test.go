@@ -301,3 +301,49 @@ func TestQueryNeverWrites(t *testing.T) {
 		t.Fatal("no string literals scanned in internal/query — the walker found nothing")
 	}
 }
+
+// TestNoOutboundHTTPFromDomainModules is §11.6 API7 (SSRF) as a rule: the
+// server never fetches a URL a client handed it (§7.10 — ciRunUrl and the
+// like are rendered, not followed). The only outbound HTTP in internal/ is
+// the object store talking to its configured endpoint; a domain module
+// that grows an http.Client is a review conversation, not a silent import.
+func TestNoOutboundHTTPFromDomainModules(t *testing.T) {
+	internalDir := filepath.Join("..", "..", "internal")
+	outbound := []string{"http.Get(", "http.Post(", "http.PostForm(", "http.Head(", "http.NewRequest(", "http.NewRequestWithContext(", "http.Client{", "http.DefaultClient"}
+	scanned := 0
+	err := filepath.WalkDir(internalDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel := filepath.ToSlash(strings.TrimPrefix(path, internalDir+string(filepath.Separator)))
+		if strings.HasPrefix(rel, "platform/objstore/") {
+			return nil // the one legitimate outbound caller: the configured bucket endpoint
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		scanned++
+		for _, needle := range outbound {
+			if strings.Contains(string(src), needle) {
+				t.Errorf("internal/%s uses %q — no outbound HTTP outside platform/objstore (§11.6 API7, §7.10)", rel, strings.TrimSuffix(needle, "("))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scanned == 0 {
+		t.Fatal("scanned no files under internal/")
+	}
+}

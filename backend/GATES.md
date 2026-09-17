@@ -13,7 +13,7 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | **T1** không mất dữ liệu, idempotency, retry | ✅ đạt — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm ra và sửa 1 deadlock | 16-09-2026 | §T1 |
 | **T2** load §14.2 | ⏳ dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời ✗ trên laptop (p95 ≈ 2 s; từ 8,4 s) — cần đo trên server | 17-09-2026 | §T2 |
 | **T3** failure recovery + observability | ✅ đạt — alert rules §6.4 trên tên metric thật, gauge phía api, 4 kịch bản hỏng nhìn thấy được ở `/metrics`, log không lộ bí mật | 17-09-2026 | §T3 |
-| **T4** security + tenant isolation | ✅ tenant isolation đạt (mọi route); phần security còn mục mở | 16-09-2026 | §T4 |
+| **T4** security + tenant isolation | ✅ tenant isolation (mọi route) 16-09; security §11.6 có bằng chứng từng dòng 17-09 (govulncheck, npm audit, CORS/headers, rate limit dashboard, SSRF rule, route inventory); còn mở: restore backup, pentest | 17-09-2026 | §T4 |
 | **T5** soak 24–72 h | ✗ chưa chạy | — | — |
 
 ## T0 — reporter đẩy run thật, dashboard hiện đúng ✅ 16-09-2026
@@ -239,7 +239,28 @@ thật — `GET …/runs/{runId}/results` với run của org khác trả `200 {
 Ngoài ra `(project, localRunId)` là duy nhất *theo project*: org B dùng lại
 `localRunId` của org A tạo run riêng, org A vẫn thấy đúng 1 run.
 
-**Security còn mở (trước partner đầu tiên):** TLS/`COOKIE_SECURE=true` khi
-deploy thật; `TOKEN_PEPPER` riêng cho staging/prod (config đã từ chối giá trị
-dev); chưa có audit log truy cập; chưa có rate limit cho dashboard GET (chỉ có
-cho login và ingest); chưa có review dependency (`govulncheck`, `npm audit`).
+**Security — checklist §11.6 với bằng chứng (17-09-2026):**
+
+| # §11.6 | Bằng chứng phải có | Có gì |
+|---|---|---|
+| API1 BOLA | cross-tenant 100 % | `TestEveryRouteRefusesCrossTenant` — mọi route, 3 principal lạ ✅ |
+| API2 AuthN | brute-force bị chặn | `internal/authz` login tests: argon2id, rate limit theo IP + account, session revoke ✅. MFA owner: chưa (P1-min không có UI quản trị) |
+| API3 Property-level | gửi field không được phép → bị bỏ qua | `TestDashboardContractEndToEnd`: `triage-events` với `actorId`/`actorType`/`occurredAt`/`projectId` giả → actor là session, thời gian là server ✅. Không có endpoint sửa user/role trong P1-min (admin CLI) |
+| API4 Resource | vượt trần → `413`/`429` | batch 501 event → 413, artifact quá cap → 413, ingest 60/phút/token → 429 (test cũ); **mới**: dashboard 600/phút/user (`DASHBOARD_RATE_PER_MINUTE`), `TestDashboardRateLimitPerUser` ✅ |
+| API5 Function-level | viewer gọi endpoint maintainer → 403 | bob viewer → `triage-events` 403 ✅ |
+| API6 Business flow | đăng ký/mời/quên mật khẩu có rate limit | P1-min **không có** các flow này (user do admin CLI tạo) — N/A, ghi để không quên khi thêm |
+| API7 SSRF | grep: không outbound fetch từ input | **mới**: `TestNoOutboundHTTPFromDomainModules` — `internal/` không dùng `http.Client`/`Get`/`NewRequest` ngoài `platform/objstore` ✅ |
+| API8 Misconfig | checklist config | config từ chối `sslmode=disable`, pepper dev, `COOKIE_SECURE=false` ngoài dev ✅; **mới**: `httpx.BrowserPolicy` — `nosniff`, `no-store`, `Referrer-Policy`, `X-Frame-Options`, HSTS khi cookie Secure, CORS chỉ cho `DASHBOARD_ORIGINS` (không bao giờ `*`, preflight từ origin lạ → 403), `TestBrowserPolicyHeadersAndCORS` ✅ |
+| API9 Inventory | chỉ `/v1/`, diff mỗi release, token `lastUsedAt` | **mới**: `deploy/routes.txt` = inventory, `TestRouteInventoryMatchesFile` fail nếu route mount khác file ✅; `api_tokens.last_used_at` cập nhật ≤ 5 phút/lần ✅. OpenAPI: chưa — route file là bản thay thế P1 |
+| API10 Unsafe consumption | LLM trả rác → bị loại | P1.5 (chưa có LLM) — N/A |
+
+**Dependency review 17-09:** `govulncheck ./...` — 1 lỗ hổng trong module
+(`golang.org/x/text` 0.31 → đã lên 0.39) và **18 advisory stdlib** fix ở Go
+1.25.6–1.25.13; laptop chạy 1.25.5 nên `go.mod` thêm `toolchain go1.25.13` —
+CI/image (GOTOOLCHAIN=auto) build bằng bản đã vá, laptop pin `GOTOOLCHAIN=local`
+không đổi. `npm audit` reporter + frontend (kể cả dev deps): 0. Lặp lại trước
+mỗi release; kết quả ghi vào đây.
+
+**Còn mở (§11.5, §11.7):** TLS/HSTS ở proxy khi deploy thật; backup + **restore
+thử** trước Gate-1; audit log hành động phá hủy (revoke/merge — `identity_audit`
+có, revoke token chưa ghi bảng); pentest thuê ngoài trước khách trả phí đầu tiên.
