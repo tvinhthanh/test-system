@@ -257,7 +257,9 @@ files and updating this plan.
   member 403 → admin merge → undo → split → decide with the audit count.
 - Verified in Chrome against the real api (keep → empty queue; merge → notice
   → undo; split → new identity page); `live-check.mjs` walks the queue and the
-  fingerprints (44 `/v1` calls, clean).
+  fingerprints (44 `/v1` calls, clean). `tests/identity-ops.test.ts` pins the
+  DTO decoders (review item, alias, identity status), the CSRF header on
+  decisions, 403/409 surfacing as `ApiError`, and the merge/undo/split paths.
 
 ### 2026-09-18 (engineering overview — the §2.5 EM screen, first P1.5 slice)
 
@@ -365,7 +367,7 @@ All commands below ran from `frontend/` on 2026-09-14.
 | Check | Result |
 | --- | --- |
 | `npm run build` (includes typecheck + bundle gate) | PASS; initial JS 41.2 KiB gzip, nine lazy modules, no fixture markers |
-| `npm run test:unit` | PASS; 20 tests in 7 files (2026-09-18) |
+| `npm run test:unit` | PASS; 28 tests in 9 files (2026-09-18) |
 | `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |
