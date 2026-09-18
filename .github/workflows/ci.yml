@@ -14,7 +14,7 @@ name: ci
 
 on:
   push:
-    branches: [main, p1-min]
+    branches: [main]
   pull_request:
 
 permissions:
