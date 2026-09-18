@@ -19,6 +19,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg/pgtest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
@@ -42,6 +43,7 @@ type env struct {
 	jobs     *ingest.Jobs
 	worker   *queue.Worker
 	flaky    flaky.Service
+	db       *pg.DB
 }
 
 // drain runs every queued job — what cmd/worker does continuously.
@@ -78,7 +80,7 @@ func setup(t *testing.T) *env {
 		lastID = is.Token.ID
 		return is.Plaintext
 	}
-	e := &env{reg: reg, results: results.New(db), projectA: string(pa.ID), q: queue.New(db)}
+	e := &env{reg: reg, results: results.New(db), projectA: string(pa.ID), q: queue.New(db), db: db}
 	e.tokenA = issue(authz.LevelProject, string(pa.ID), authz.PermProjectIngest)
 	e.tokenAID = lastID
 	e.tokenB = issue(authz.LevelProject, string(pb.ID), authz.PermProjectIngest)
@@ -456,5 +458,60 @@ func TestSweepAutoClosesStaleRuns(t *testing.T) {
 	}
 	if !strings.Contains(e.reg.Expose(), `runs_autoclosed_total{project="`+e.projectA+`"} 1`) {
 		t.Error("runs_autoclosed_total not counted")
+	}
+}
+
+// TestEventSequenceBoundary pins the public contract of Event.sequence
+// (deploy/openapi.yaml: integer, minimum 1): the request boundary owns
+// "malformed", the unique index owns "duplicate". Gaps are fine — the
+// counter is the reporter's, not a database sequence.
+func TestEventSequenceBoundary(t *testing.T) {
+	e := setup(t)
+	local := "0198c3e1-7b1a-7c3d-9e4f-00000000beef"
+	if r := e.post(t, e.tokenA, "/v1/runs", runBody(local)); r.code != 201 {
+		t.Fatalf("create run: %d %s", r.code, r.raw)
+	}
+	detailField := func(r resp) string {
+		err, _ := r.body["error"].(map[string]any)
+		details, _ := err["details"].(map[string]any)
+		f, _ := details["field"].(string)
+		return f
+	}
+	send := func(events ...map[string]any) resp {
+		return e.post(t, e.tokenA, "/v1/runs/"+local+"/events", map[string]any{"events": events})
+	}
+	withSeq := func(seq any) map[string]any {
+		ev := ev(1, "ct_seq", 0, "passed", "expected")
+		if seq == nil {
+			delete(ev, "sequence")
+		} else {
+			ev["sequence"] = seq
+		}
+		return ev
+	}
+
+	for _, tc := range []struct {
+		name string
+		seq  any
+	}{{"missing", nil}, {"negative", -1}, {"zero", 0}} {
+		r := send(withSeq(tc.seq))
+		if r.code != 400 || r.errCode() != "INVALID_PAYLOAD" || detailField(r) != "events[0].sequence" {
+			t.Errorf("sequence %s: %d %s %q, want 400 INVALID_PAYLOAD on events[0].sequence", tc.name, r.code, r.errCode(), detailField(r))
+		}
+	}
+	// 1 is the first valid value; 42 is a valid gap.
+	if r := send(withSeq(1), func() map[string]any { x := withSeq(42); x["clientTestId"] = "ct_gap"; return x }()); r.code != 200 || r.body["accepted"] != float64(2) || r.body["duplicates"] != float64(0) {
+		t.Fatalf("sequence 1 and 42: %d %s", r.code, r.raw)
+	}
+	// The same positive value again is a duplicate — counted, not stored.
+	if r := send(withSeq(1)); r.code != 200 || r.body["accepted"] != float64(0) || r.body["duplicates"] != float64(1) {
+		t.Errorf("repeated sequence 1: %d %s, want accepted 0 duplicates 1", r.code, r.raw)
+	}
+	var stored int
+	if err := e.db.Q(context.Background()).QueryRow(context.Background(), `SELECT count(*) FROM run_events e JOIN runs r ON r.id = e.run_id WHERE r.local_run_id = $1`, local).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 2 {
+		t.Errorf("%d events stored, want 2 (sequence 1 once, 42 once)", stored)
 	}
 }

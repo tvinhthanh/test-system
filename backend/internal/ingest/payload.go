@@ -152,8 +152,11 @@ func (e *eventRequest) toAttempt() (results.AttemptEvent, error) {
 	if e.Type != "test.finished" {
 		return results.AttemptEvent{}, &unsupportedEvent{e.Type}
 	}
-	if e.Sequence == nil || *e.Sequence < 0 {
-		return results.AttemptEvent{}, bad("sequence", "required, non-negative integer")
+	// 1-based, unique per run, gaps allowed; (localRunId, sequence) is the
+	// idempotency key (§7.1). The public contract (deploy/openapi.yaml) says
+	// minimum 1 and the reporter starts at 1; zero is a missing counter.
+	if e.Sequence == nil || *e.Sequence <= 0 {
+		return results.AttemptEvent{}, bad("sequence", "required, positive integer (1-based)")
 	}
 	if e.ClientTestID == "" || len(e.ClientTestID) > 256 {
 		return results.AttemptEvent{}, bad("clientTestId", "required, at most 256 chars")

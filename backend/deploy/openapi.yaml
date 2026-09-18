@@ -16,8 +16,11 @@ info:
   description: |
     Protocol version 1.x (§6.5). Reporters send `X-Protocol-Version: 1.1`; a
     server serves N and N−1 and answers `426 UPGRADE_REQUIRED` below that.
-    Every error body is `{"error":{"code","message","details"}}`; every
-    response carries `X-Request-Id`. Payloads from reporters are untrusted:
+    Every error the api itself produces is `{"error":{"code","message","details"}}`
+    (a proxy in front may answer differently); every response carries
+    `X-Request-Id`. Unexpected failures are `500 INTERNAL` with no detail —
+    quote the request id. Any authenticated route may answer `503
+    AUTH_UNAVAILABLE` while the database is unreachable. Payloads from reporters are untrusted:
     titles, error messages and stacks are stored and rendered as text only.
 servers:
   - url: https://{host}
@@ -30,7 +33,7 @@ tags:
   - name: artifacts
     description: Reporter → server → object store. Three steps — declare, PUT to the presigned URL, complete.
   - name: session
-    description: Browser sign-in. Cookie `atp_sess_…` (HttpOnly, Secure, SameSite=Lax) + CSRF double-submit cookie echoed in `X-CSRF-Token`.
+    description: "Browser sign-in. Session cookie `atp_session` (HttpOnly, Secure, SameSite=Lax; its opaque value starts with `atp_sess_`) plus the CSRF double-submit cookie `atp_csrf`, echoed in `X-CSRF-Token` on every state-changing request."
   - name: dashboard
     description: Browser reads and triage writes, always inside one project the session may view. 600 requests/minute/user.
   - name: ops
@@ -227,9 +230,15 @@ paths:
         "200":
           description: Signed in; the session cookie is set.
           content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
-        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "400":
+          description: "`INVALID_PAYLOAD` (malformed JSON) or `ALREADY_LOGGED_IN` (log out first)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401":
+          description: "`INVALID_CREDENTIALS` — one message for unknown email, wrong password and unverified email (§11.2)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "403": { $ref: "#/components/responses/CSRF" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/AuthUnavailable" }
   /v1/session/logout:
     post:
       operationId: logout
@@ -240,6 +249,7 @@ paths:
         "204": { description: Revoked. }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/CSRF" }
+        "503": { $ref: "#/components/responses/AuthUnavailable" }
 
   # ---- dashboard (frontend/API_CONTRACT.md) ------------------------------------
   /v1/projects:
@@ -520,13 +530,13 @@ components:
     sessionCookie:
       type: apiKey
       in: cookie
-      name: atp_sess
-      description: Set by `POST /v1/session`; HttpOnly, Secure, SameSite=Lax.
+      name: atp_session
+      description: "Set by `POST /v1/session`; HttpOnly, Secure, SameSite=Lax. The value is opaque and starts with `atp_sess_` — that prefix is not the cookie name."
     csrf:
       type: apiKey
       in: header
       name: X-CSRF-Token
-      description: Value of the readable `atp_csrf` cookie, required on every state-changing browser request together with an allow-listed `Origin`.
+      description: "Value of the readable `atp_csrf` cookie, required on every state-changing browser request together with an allow-listed `Origin`."
 
   parameters:
     ProtocolVersion:
@@ -550,22 +560,22 @@ components:
 
   responses:
     InvalidPayload:
-      description: "`INVALID_PAYLOAD` with `details.field` (and `details.index` for a batch)."
+      description: "`INVALID_PAYLOAD` with `details.field` (and `details.index` for a batch); on ingest also `UNSUPPORTED_EVENT_TYPE` (`details.index`, `details.type`) and `INVALID_PROTOCOL_VERSION`."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     InvalidCursor:
-      description: "`INVALID_CURSOR` | `INVALID_SORT` — restart from the first page."
+      description: "`INVALID_CURSOR` | `INVALID_SORT` | `INVALID_QUERY` — a cursor issued for another list, an unsupported sort, or a bad filter; restart from the first page."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Unauthenticated:
       description: "`UNAUTHENTICATED` — missing, malformed, unknown, expired or revoked credential; one message for all (§11.2)."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Forbidden:
-      description: "`FORBIDDEN` — authenticated, inside the tenant, but the role does not allow it (§11.3.2)."
+      description: "`FORBIDDEN` — authenticated, inside the tenant, but the role (or the token's permissions) does not allow it (§11.3.2); on ingest also `TOKEN_SCOPE` for a token not scoped to exactly one project."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     CSRF:
       description: "`CSRF` — token missing/mismatched or Origin not allow-listed."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
-      description: "`*_NOT_FOUND` — absent, or belonging to another tenant; the two are indistinguishable by design (§11.3.3)."
+      description: "`NOT_FOUND`, `PROJECT_NOT_FOUND`, `RUN_NOT_FOUND`, `RESULT_NOT_FOUND` or `ARTIFACT_NOT_FOUND` — absent, or belonging to another tenant; the two are indistinguishable by design (§11.3.3)."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     RateLimited:
       description: "`RATE_LIMITED` with `Retry-After` seconds (§7.4)."
@@ -576,6 +586,9 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     StoreUnavailable:
       description: "`STORE_UNAVAILABLE` — object store timed out; retry."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    AuthUnavailable:
+      description: "`AUTH_UNAVAILABLE` — the database behind authentication did not answer; retry. Any authenticated route can answer this."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
