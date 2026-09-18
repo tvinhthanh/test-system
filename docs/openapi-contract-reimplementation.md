@@ -1,6 +1,6 @@
 # OpenAPI Contract Reimplementation Brief
 
-Status: Implemented 2026-09-18 on `p1-min` (Option B) — see `backend/GATES.md` §T4 API9 for the evidence; `gopkg.in/yaml.v3` (already in the module graph) became the test-only parser
+Status: Implemented 2026-09-18, on `main` since the same day (Option B) — see `backend/GATES.md` §T4 API9 for the evidence; `gopkg.in/yaml.v3` (already in the module graph) became the test-only parser
 
 Owner: Claude implementation agent
 

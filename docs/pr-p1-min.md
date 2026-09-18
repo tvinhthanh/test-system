@@ -1,5 +1,7 @@
 ## P1-min (QĐ-11): backend, reporter, dashboard, deploy shape, gate evidence
 
+> Landed on `main` 2026-09-18 as a fast-forward of 32 commits onto `10984f0`; branches `p1-min` and `p15-em-review` were deleted. No PR was opened — this file stays as the merge record.
+
 24 commits, 11-09 → 18-09. Everything the §4.4 P1-min column asks for, plus the technical-gate evidence §14 requires before anyone real logs in. Nothing here needs a product decision; what is still open needs infrastructure (listed at the end).
 
 ### What is in the branch
@@ -31,9 +33,9 @@
 - Deliberate deviation: QĐ-9 chose Flutter; the owner chose Vue on 14-09 (`frontend/PLAN.md`). The Flutter draft under `frontend/lib` is inert.
 - `frontend/dist/trace/` is Playwright's vendored trace viewer (pinned `playwright-core` devDependency), not our bundle.
 
-### Follow-up branch `p15-em-review` (opens against `p1-min`)
+### Included beyond P1-min (was branch `p15-em-review`)
 
-The owner asked on 18-09 to go beyond the §4.4 cut: the §2.5 engineering overview (P1.5) and the §9.4 review queue / merge-split UI. Two commits, separate PR so this one stays P1-min.
+The owner asked on 18-09 to go beyond the §4.4 cut: the §2.5 engineering overview (P1.5), the §9.4 review queue / merge-split UI, and unit tests for the identity-operations repository layer. Three commits; they merged into `main` together with P1-min instead of as a separate PR.
 
 ### Still open before Gate-1 (infrastructure, not code)
 
