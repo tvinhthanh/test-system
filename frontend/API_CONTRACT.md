@@ -1,9 +1,10 @@
-# Dashboard API Contract Proposal
+# Dashboard API Contract
 
-Status: proposed frontend contract, not an assertion that these endpoints exist.
-The Go server currently mounts ingest routes, which use ingest bearer tokens;
-the dashboard uses a separate cookie session. Do not send ingest tokens from
-the dashboard or treat service structs as HTTP DTOs.
+Status: implemented by `backend/cmd/api` and live-verified (2026-09-16 → -18);
+the machine-readable form is `backend/deploy/openapi.yaml` (tested against the
+router) and this file is its prose. Ingest routes use bearer tokens; the
+dashboard uses a separate cookie session. Do not send ingest tokens from the
+dashboard or treat service structs as HTTP DTOs.
 
 ## Common Behavior
 

@@ -79,7 +79,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `cmd/worker` | ✅ | cùng code, process thứ hai (§6.9.8 bước 2): pool `run.finished` ×4 (tier 2 → flaky, cùng tx, ghép ở `cmd/` theo §6.9.3 luật 3) + sweep mỗi phút (auto-close run, link artifact, retention, abort multipart bỏ dở); `/metrics` + `/healthz` riêng |
 | `test/arch` | ✅ | 6 test (thêm `TestQueryNeverWrites`): tên package cấm, luật tầng, fan-out ≤ 3, chu trình, graph không rỗng. Bỏ qua `_test.go` (external test package không phải self-import). **Đã chứng minh bắt được vi phạm giả** — kiểm lại 13-09 sau khi thêm `tenancy` |
 
-**Cột P1-min của §6.9.11 đã đủ module** (trừ `billing`, cố ý trống), login + HTTP dashboard đã có, **reporter Playwright** ở [`reporter/playwright/`](../reporter/playwright/) đã đẩy một run thật end-to-end (16-09). Còn lại để có T0: Flutter client trên API dưới đây. Rồi T1–T5 theo §14.3. Login email+password (§11.2) là use case riêng, mở rộng bảng `users` khi làm. Tenant isolation (T4) phải xong **trước** partner đầu tiên, không xếp sau.
+**Cột P1-min của §6.9.11 đã đủ module** (trừ `billing`, cố ý trống): login §11.2, HTTP dashboard, **reporter Playwright** ở [`reporter/playwright/`](../reporter/playwright/), **dashboard Vue** ở [`frontend/`](../frontend/) (QĐ-9 chọn Flutter; chủ dự án chọn Vue 14-09, xem `frontend/PLAN.md`) đi hết hợp đồng trên api thật (`frontend/scripts/live-check.mjs`), artifact (screenshot/video inline, trace viewer tự host). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅ / ingest chờ server, T5 harness chạy 2 giờ sạch — chờ 24–72 h trên host với S3 (`GATES.md`). Còn lại trước Gate-1 cần hạ tầng, không cần code: soak dài trên host, đo ingest trên server, Postgres TLS cho `APP_ENV=prod`, pentest.
 
 ## Quy ước đã chốt trong code
 

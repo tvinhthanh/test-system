@@ -10,7 +10,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 |---|---|
 | Spec | **v3.16** — 11 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
 | Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
-| Code sản phẩm | **Đang xây P1-min ở `backend/`** theo QĐ-11 (11-09) — song song Phase 0, có điều kiện. `cmd/api` chạy, `/healthz`, test kiến trúc §6.9.3 |
+| Code sản phẩm | **P1-min đã đủ** theo QĐ-11 (11-09 → 18-09): `backend/` (Go, mọi module §6.9.11 trừ billing), `reporter/playwright/`, `frontend/` (Vue), `backend/deploy/` (image + compose staging + CI). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅, T5 harness 2 h sạch — xem [`backend/GATES.md`](backend/GATES.md); còn cần hạ tầng cho soak 24 h, ingest trên server, pentest |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
 
 ## Đọc từ đâu
@@ -57,8 +57,11 @@ npm install && npm run build
 ```text
 SPEC.md              nguồn sự thật — quyết định, kiến trúc, schema, thuật toán, gate
 phase0/              bộ công cụ thi hành: outreach, phỏng vấn, baseline TTRC, biên bản Gate-0
-backend/             Go monolith P1-min theo §6.9 — QĐ-11; test kiến trúc cưỡng chế §6.9.3
+backend/             Go monolith P1-min theo §6.9 — QĐ-11; test kiến trúc cưỡng chế §6.9.3; GATES.md = bằng chứng T0–T5
+backend/deploy/      image distroless, compose staging (Caddy TLS, Prometheus, backup), openapi.yaml, alert rules
 reporter/playwright/ npm reporter §7.5 — batch, retry, spool, artifact, fingerprint §9.2 khớp Go
+frontend/            dashboard Vue 3 (P1-min UI đủ; QĐ-9 chọn Flutter, chủ dự án chọn Vue 14-09 — PLAN.md)
+.github/workflows/   CI: go test trên Postgres 17 + restore drill, govulncheck, image, lint OpenAPI/alert, npm test/audit, e2e compose
 prototype/identity/  Go — thuật toán test identity §9, có loader Playwright thật
 docs/external/       bản đối ngoại + pipeline sinh .docx + verify.sh gác checklist §4.7
 docs/go/             hướng dẫn học Go qua codebase này

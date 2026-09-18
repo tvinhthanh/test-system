@@ -23,8 +23,13 @@ QD-9's framework choice; do not revert to Flutter on resume.
 
 ## Current Status
 
-- Phase: P1-min read/triage UI complete and verified against the real Go
-  backend (no mocks) on 2026-09-16 and again on 2026-09-17.
+- Phase: **P1-min UI complete** — sign-in, projects, runs, run detail,
+  failure detail with attempts / artifacts (screenshots and video inline,
+  trace viewer on our origin) / triage, identity history, flaky view —
+  verified against the real Go backend (no mocks) on 2026-09-16, -17 and -18.
+  Everything §4.4 defers (EM screen → P1.5; Review Queue / Merge-Split UI,
+  OAuth, MFA, 6-role RBAC → P2) stays deferred until the product gate says
+  otherwise.
 - Target: Vue.js web client only.
 - Backend status: every route in `API_CONTRACT.md` is mounted and inventoried
   in `../backend/deploy/routes.txt` (a test fails if the mux and the file
@@ -34,22 +39,13 @@ QD-9's framework choice; do not revert to Flutter on resume.
   proxies `/v1`).
 - Preview data: allowed only through an explicit fixture transport. Live API
   failures must never silently fall back to fixtures.
-- Last reviewed: 2026-09-17.
-- Latest verification: frontend typecheck, 17 unit tests, production build and
-  bundle gate pass; backend `go test ./...` also passes. These are compile and
-  contract checks only; they do not prove a live dashboard API exists.
-- Latest visual pass: reduced template-like sidebar treatment, tightened
-  workspace/navigation hierarchy, added restrained active rail, and removed a
-  stray nav markup character found during screenshot review.
-- Fixed a medium-width identity list regression: fixed grid columns could
-  consume the whole row and collapse the title column to `0px` at the
-  `platform/tests` viewport. The new 641-900px layout keeps title, verdict,
-  score, and chevron visible while hiding only the secondary history bars.
-- Fixed navigation state leakage where any project route marked both `Test
-  runs` and `Test intelligence` active. Browser regression coverage now
-  asserts exactly one active project navigation item on each route.
-- Refined inactive navigation hover so it cannot visually mimic the active
-  state; only the current route receives a filled background.
+- Last reviewed: 2026-09-18.
+- Latest verification: typecheck, 20 unit tests, production build + bundle gate
+  (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
+  against the real api (also run by the CI `e2e` job on the compose stack);
+  backend `go test ./...` green on Postgres.
+- Earlier visual/regression fixes (2026-09-14: sidebar treatment, 641–900px
+  identity list, single active nav item, hover state) are in the change log.
 
 ## P1-Min Product Scope
 
