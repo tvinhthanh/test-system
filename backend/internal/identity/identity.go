@@ -176,6 +176,9 @@ type Service interface {
 	SplitFrom(ctx context.Context, projectID, fingerprint string, at time.Time, actor string) (newID string, err error)
 
 	ListReview(ctx context.Context, projectID string, limit int) ([]ReviewItem, error)
+	// ReviewItem is one queue item, scoped to the project (§11.3.3): an item of
+	// another project is ErrNotFound, whatever its id.
+	ReviewItem(ctx context.Context, projectID, itemID string) (ReviewItem, error)
 	// PendingReviews counts pairs waiting for a human across all projects —
 	// §6.4 alerts above 50.
 	PendingReviews(ctx context.Context) (int, error)

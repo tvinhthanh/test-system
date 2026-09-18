@@ -16,6 +16,7 @@ import (
 
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
@@ -48,6 +49,7 @@ type dashboard struct {
 	authz    authz.Service
 	query    query.Service
 	triage   triage.Service
+	idents   identity.Service
 	artifact artifact.Service
 	store    objstore.Store
 	logger   *slog.Logger
@@ -82,6 +84,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	handle("GET /v1/projects/{projectId}/identities/{identityId}/runs", d.identityRuns)
 	handle("GET /v1/projects/{projectId}/metrics/triage", d.triageMetrics)
 	handle("GET /v1/projects/{projectId}/metrics/trend", d.trend)
+	d.identityOpsRoutes(handle)
 }
 
 type page struct {

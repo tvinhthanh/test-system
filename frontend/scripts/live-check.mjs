@@ -281,6 +281,31 @@ await step(
 );
 
 await step(
+  "review queue and identity fingerprints (§9.4 tools over HTTP)",
+  async () => {
+    await page.goto(base + "/p/" + project + "/review");
+    await Promise.race([
+      page.locator(".review-item").first().waitFor({ timeout: 10000 }),
+      page.locator(".empty-state h2").waitFor({ timeout: 10000 }),
+    ]);
+    await page.goto(base + "/p/" + project + "/tests");
+    await page
+      .locator("a[href*='/history']")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
+    const href = await page
+      .locator("a[href*='/history']")
+      .first()
+      .getAttribute("href");
+    await page.goto(base + href);
+    await page
+      .locator(".alias-table tbody tr, .tools")
+      .first()
+      .waitFor({ timeout: 10000 });
+  },
+);
+
+await step(
   "engineering overview: four tiles, the weekly category chart and its table",
   async () => {
     await page.goto(base + "/p/" + project + "/overview");

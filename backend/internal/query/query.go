@@ -120,6 +120,10 @@ type Identity struct {
 	FlakyScore        *float64 `json:"flakyScore"`
 	TotalRuns         int      `json:"totalRuns"`
 	RecentStatuses    []string `json:"recentStatuses"` // newest first, ≤ 30
+	// Status is active | merged | retired (§9.4 operations); MergedIntoID is
+	// set while merged so the UI can offer undo and link to the survivor.
+	Status       string  `json:"status"`
+	MergedIntoID *string `json:"mergedIntoId"`
 }
 
 // TriageMetrics is §8.3 / §6.4 product row over a window.

@@ -49,6 +49,11 @@ export function makeRouter(
               import("../../features/reports/IdentitiesPage.vue"),
           },
           {
+            path: "p/:project/review",
+            component: () =>
+              import("../../features/reports/ReviewQueuePage.vue"),
+          },
+          {
             path: "p/:project/tests/:identity/history",
             component: () =>
               import("../../features/reports/IdentityHistoryPage.vue"),

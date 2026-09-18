@@ -315,6 +315,7 @@ func (s *service) ResultDetail(ctx context.Context, projectID, resultID string) 
 const identitySelect = `
 	SELECT i.id, i.canonical_leaf_title, i.canonical_file_path,
 	       coalesce(f.verdict, 'insufficient_data'), f.flaky_score, coalesce(f.total_runs, 0),
+	       i.status, i.merged_into_id,
 	       coalesce((SELECT array_agg(t.final_status ORDER BY t.created_at DESC)
 	                   FROM (SELECT final_status, created_at FROM test_results WHERE stable_test_id = i.id ORDER BY created_at DESC LIMIT 30) t), '{}'),
 	       coalesce(-f.flaky_score, 1) AS neg
@@ -326,7 +327,7 @@ const identitySelect = `
 func scanIdentity(row interface{ Scan(dest ...any) error }) (Identity, float64, error) {
 	var it Identity
 	var neg float64
-	if err := row.Scan(&it.ID, &it.CanonicalTitle, &it.CanonicalFilePath, &it.Verdict, &it.FlakyScore, &it.TotalRuns, &it.RecentStatuses, &neg); err != nil {
+	if err := row.Scan(&it.ID, &it.CanonicalTitle, &it.CanonicalFilePath, &it.Verdict, &it.FlakyScore, &it.TotalRuns, &it.Status, &it.MergedIntoID, &it.RecentStatuses, &neg); err != nil {
 		return Identity{}, 0, err
 	}
 	if it.RecentStatuses == nil {

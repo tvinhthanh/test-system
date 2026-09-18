@@ -32,6 +32,8 @@ const { data, error, loading, project, flaky, cursor, refresh, next, first } =
       :to="`/p/${encodeURIComponent(project)}/flaky`"
       :class="{ selected: flaky }"
       >Flaky view</RouterLink
+    ><RouterLink :to="`/p/${encodeURIComponent(project)}/review`"
+      ><GitMerge :size="16" />Review queue</RouterLink
     >
   </div>
   <AsyncState :loading="loading" :error="error" @retry="refresh"

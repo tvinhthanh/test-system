@@ -28,8 +28,8 @@ QD-9's framework choice; do not revert to Flutter on resume.
   trace viewer on our origin) / triage, identity history, flaky view —
   verified against the real Go backend (no mocks) on 2026-09-16, -17 and -18.
   Beyond P1-min, on the owner's call (2026-09-18, "all of this"): the §2.5
-  engineering overview (P1.5) is in; Review Queue / Merge-Split UI (P2) is
-  next; OAuth, MFA and 6-role RBAC stay deferred.
+  engineering overview (P1.5) and the Review Queue / Merge-Split UI (§9.4)
+  are in; OAuth, MFA and 6-role RBAC stay deferred.
 - Target: Vue.js web client only.
 - Backend status: every route in `API_CONTRACT.md` is mounted and inventoried
   in `../backend/deploy/routes.txt` (a test fails if the mux and the file
@@ -64,8 +64,6 @@ Build these screens in this order:
 
 Explicitly out of the current slice:
 
-- Review Queue UI; P1-min uses CSV/script operations.
-- Merge/Split UI; P1-min uses CSV/script operations.
 - Desktop and mobile application targets; the current client is Web only.
 - Embedding the trace viewer *inside* the failure page (iframe policy). It
   opens in a new tab on our origin instead (2026-09-18).
@@ -241,6 +239,25 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-18 (review queue and identity tools — §9.4 over HTTP)
+
+- New route `p/:project/review` (third tab under Test intelligence): the
+  pending pairs the resolver would not decide alone, both sides linked, score,
+  gap, breakdown, run; "Same test — merge" / "Different tests — keep" with the
+  server's answer shown per row.
+- Identity history page: fingerprints table (in force / historical), a
+  "merged into …" notice with Undo, a "retired" notice after a split, and the
+  admin tools — merge into another test (radio list of active identities with
+  a filter) and split from a point in time (fingerprint in force +
+  `datetime-local`, navigates to the new identity).
+- Backend: six dashboard routes (`identity_ops.go`), project-scoped
+  `ReviewItem` lookup, `Identity.status`/`mergedIntoId`; tenant walk covers the
+  new routes with a seeded review item and valid bodies; contract test drives
+  member 403 → admin merge → undo → split → decide with the audit count.
+- Verified in Chrome against the real api (keep → empty queue; merge → notice
+  → undo; split → new identity page); `live-check.mjs` walks the queue and the
+  fingerprints (44 `/v1` calls, clean).
 
 ### 2026-09-18 (engineering overview — the §2.5 EM screen, first P1.5 slice)
 

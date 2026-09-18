@@ -343,3 +343,38 @@ func (s *service) DecideReview(ctx context.Context, itemID string, decision Revi
 		return s.audit(ctx, projectID, "review", identityID, candidateID, actor, details)
 	})
 }
+
+func (s *service) ReviewItem(ctx context.Context, projectID, itemID string) (ReviewItem, error) {
+	if !isUUID(projectID) || !isUUID(itemID) {
+		return ReviewItem{}, ErrNotFound
+	}
+	var it ReviewItem
+	var runner, run *string
+	var runnerScore *float64
+	var breakdown []byte
+	var decidedAt *time.Time
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		SELECT id, project_id, identity_id, candidate_id, fingerprint, score, runner_up_id, runner_up_score, gap, breakdown,
+		       run_id, status, coalesce(decided_by, ''), decided_at, created_at
+		  FROM review_queue_items WHERE project_id = $1 AND id = $2`, projectID, itemID,
+	).Scan(&it.ID, &it.ProjectID, &it.IdentityID, &it.CandidateID, &it.Fingerprint, &it.Score, &runner, &runnerScore, &it.Gap, &breakdown,
+		&run, &it.Status, &it.DecidedBy, &decidedAt, &it.CreatedAt)
+	if err != nil {
+		return ReviewItem{}, mapErr(err)
+	}
+	if runner != nil {
+		it.RunnerUpID = *runner
+	}
+	if runnerScore != nil {
+		it.RunnerUpScore = *runnerScore
+	}
+	if run != nil {
+		it.RunID = *run
+	}
+	if decidedAt != nil {
+		it.DecidedAt = decidedAt.UTC()
+	}
+	it.CreatedAt = it.CreatedAt.UTC()
+	_ = json.Unmarshal(breakdown, &it.Breakdown)
+	return it, nil
+}

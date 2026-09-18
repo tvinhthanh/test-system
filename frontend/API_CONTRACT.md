@@ -126,6 +126,30 @@ formats, never re-derives them from the counts.
 `category` is the closed §8.7 enum (`unknown` = not triaged yet). The client
 refuses categories outside the enum. `days` defaults to 30 / 90.
 
+## Identity Operations (§9.4 manual tools, P2 cut lifted 2026-09-18)
+
+Reading needs triage rights; every change needs `identity.merge` (admin in the
+three-role matrix) and is written to `identity_audit` with the session user as
+actor. The UI shows the server's `403`/`409` per action, never pre-judges the
+role.
+
+- `GET /v1/projects/{projectId}/review?limit=100` → `{items:[ReviewItem]}` —
+  pending pairs, oldest first: `{id, createdAt, identity:{id, canonicalTitle,
+  canonicalFilePath, status}, candidate:{…}, fingerprint, score, runnerUpId,
+  runnerUpScore, gap, breakdown, runId}`.
+- `POST /v1/projects/{projectId}/review/{itemId}` `{decision: "merged"|"kept"}`
+  → `{id, status, decidedBy, decidedAt}`; `409 CONFLICT` once decided.
+- `GET /v1/projects/{projectId}/identities/{identityId}/aliases` →
+  `{items:[{id, fingerprint, source, matchScore, createdBy, validFrom,
+  validTo}]}` (`validTo: null` = in force).
+- `POST …/identities/{identityId}/merge` `{into}` → `{mergedInto}`;
+  `POST …/identities/{identityId}/undo-merge` `{}` → `{restored}`;
+  `POST …/identities/{identityId}/split` `{fingerprint, at}` → `201
+  {newIdentityId}` (the fingerprint must be an alias of that identity).
+- `Identity` DTO gained `status` (`active|merged|retired`) and `mergedIntoId`
+  (nullable): merged and retired identities stay readable by id but leave the
+  active list; the history page shows a notice and offers Undo for merged ones.
+
 ## Handoff And Verification
 
 Backend owner must confirm session bootstrap semantics, list limits, query

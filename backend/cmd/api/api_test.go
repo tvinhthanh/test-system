@@ -424,6 +424,111 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Errorf("viewer triaging: %d %s", r.code, r.raw)
 	}
 
+	// ---- Identity operations (§9.4 over HTTP): role, aliases, merge, undo, split, review ----
+	cartID := ids.items()[1].(map[string]any)["id"].(string)
+	// A member may read the queue but not change identities (403 from the
+	// role, not 404 from the tenant).
+	if r := web.get(base + "/review"); r.code != 200 || len(r.items()) != 0 {
+		t.Errorf("member reads the (empty) review queue: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/identities/"+cartID+"/merge", map[string]any{"into": payID}); r.code != 403 || r.errCode() != "FORBIDDEN" {
+		t.Errorf("member merging: %d %s", r.code, r.raw)
+	}
+	// carol is an admin of checkout.
+	carol, _ := az.CreateUser(ctx, "carol@example.com")
+	_ = az.SetPassword(ctx, carol.ID, "carol passphrase long enough", "")
+	_ = az.VerifyEmail(ctx, carol.ID)
+	_, _ = az.GrantRole(ctx, carol.ID, authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, authz.RoleAdmin)
+	carolc := newClient(t, srv)
+	carolc.bootstrap()
+	if r := carolc.post("/v1/session", map[string]string{"email": "carol@example.com", "password": "carol passphrase long enough"}); r.code != 200 {
+		t.Fatalf("carol login: %d %s", r.code, r.raw)
+	}
+	carolc.csrf, _ = carolc.get("/v1/session").body["csrfToken"].(string)
+	// Aliases: one fingerprint in force per identity.
+	al := carolc.get(base + "/identities/" + cartID + "/aliases")
+	if al.code != 200 || len(al.items()) != 1 || al.items()[0].(map[string]any)["validTo"] != nil {
+		t.Fatalf("aliases: %d %s", al.code, al.raw)
+	}
+	cartFingerprint := al.items()[0].(map[string]any)["fingerprint"].(string)
+	// Merge cart into pay: cart disappears from the active list, pay owns two aliases.
+	if r := carolc.post(base+"/identities/"+cartID+"/merge", map[string]any{"into": payID}); r.code != 200 || r.body["mergedInto"] != payID {
+		t.Fatalf("merge: %d %s", r.code, r.raw)
+	}
+	if r := carolc.get(base + "/identities?limit=20"); len(r.items()) != 1 {
+		t.Errorf("identities after merge: %s", r.raw)
+	}
+	if r := carolc.get(base + "/identities/" + payID + "/aliases"); len(r.items()) != 2 {
+		t.Errorf("pay aliases after merge: %s", r.raw)
+	}
+	if r := carolc.post(base+"/identities/"+cartID+"/merge", map[string]any{"into": payID}); r.code != 409 || r.errCode() != "CONFLICT" {
+		t.Errorf("merging a merged identity again: %d %s", r.code, r.raw)
+	}
+	// Undo puts it back exactly (N43: this is not a split).
+	if r := carolc.post(base+"/identities/"+cartID+"/undo-merge", map[string]any{}); r.code != 200 {
+		t.Fatalf("undo-merge: %d %s", r.code, r.raw)
+	}
+	if r := carolc.get(base + "/identities?limit=20"); len(r.items()) != 2 {
+		t.Errorf("identities after undo: %s", r.raw)
+	}
+	if r := carolc.get(base + "/identities/" + cartID + "/aliases"); len(r.items()) != 1 {
+		t.Errorf("cart aliases after undo: %s", r.raw)
+	}
+	// Split: the fingerprint must belong to the identity in the path.
+	if r := carolc.post(base+"/identities/"+payID+"/split", map[string]any{"fingerprint": cartFingerprint, "at": time.Now().UTC().Format(time.RFC3339Nano)}); r.code != 400 {
+		t.Errorf("split with a foreign fingerprint: %d %s", r.code, r.raw)
+	}
+	sp := carolc.post(base+"/identities/"+cartID+"/split", map[string]any{"fingerprint": cartFingerprint, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+	if sp.code != 201 || sp.body["newIdentityId"] == nil {
+		t.Fatalf("split: %d %s", sp.code, sp.raw)
+	}
+	// The old identity keeps its history but no longer owns a fingerprint in
+	// force, so it retires from the active list; the new one takes its place.
+	newID := sp.body["newIdentityId"].(string)
+	after := carolc.get(base + "/identities?limit=20")
+	if len(after.items()) != 2 || after.items()[1].(map[string]any)["id"] != newID {
+		t.Errorf("identities after split (pay + the new identity): %s", after.raw)
+	}
+	if r := carolc.get(base + "/identities/" + cartID); r.code != 200 {
+		t.Errorf("retired identity still readable by id: %d %s", r.code, r.raw)
+	}
+	// Review queue: a seeded pending pair, decided "kept" once; a second
+	// decision is a conflict; bob (another tenant) cannot see or decide it.
+	var itemID string
+	if err := db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO review_queue_items (project_id, identity_id, candidate_id, fingerprint, score, gap, breakdown, run_id)
+		VALUES ($1, $2, $3, 'fp1:test', 0.83, 0.05, '{"title": 0.9}', $4) RETURNING id`, string(checkout.ID), cartID, payID, runIDs[0]).Scan(&itemID); err != nil {
+		t.Fatal(err)
+	}
+	rq := carolc.get(base + "/review")
+	if rq.code != 200 || len(rq.items()) != 1 {
+		t.Fatalf("review queue: %d %s", rq.code, rq.raw)
+	}
+	item := rq.items()[0].(map[string]any)
+	if item["id"] != itemID || item["identity"].(map[string]any)["canonicalFilePath"] != "tests/checkout.spec.ts" || item["candidate"].(map[string]any)["id"] != payID || item["score"] != 0.83 {
+		t.Errorf("review item DTO: %v", item)
+	}
+	if r := web.post(base+"/review/"+itemID, map[string]any{"decision": "kept"}); r.code != 403 {
+		t.Errorf("member deciding: %d %s", r.code, r.raw)
+	}
+	if r := carolc.post(base+"/review/"+itemID, map[string]any{"decision": "maybe"}); r.code != 400 {
+		t.Errorf("bad decision: %d %s", r.code, r.raw)
+	}
+	if r := carolc.post(base+"/review/"+itemID, map[string]any{"decision": "kept"}); r.code != 200 || r.body["status"] != "kept" || r.body["decidedBy"] != "carol@example.com" {
+		t.Errorf("decide kept: %d %s", r.code, r.raw)
+	}
+	if r := carolc.post(base+"/review/"+itemID, map[string]any{"decision": "kept"}); r.code != 409 {
+		t.Errorf("deciding twice: %d %s", r.code, r.raw)
+	}
+	if r := carolc.get(base + "/review"); len(r.items()) != 0 {
+		t.Errorf("queue after decision: %s", r.raw)
+	}
+	var audits int
+	_ = db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM identity_audit WHERE project_id = $1`, string(checkout.ID)).Scan(&audits)
+	if audits != 4 { // merge, undo_merge, split, review
+		t.Errorf("identity_audit rows: %d, want 4", audits)
+	}
+
 	// ---- Logout ----
 	if r := web.post("/v1/session/logout", map[string]any{}); r.code != 204 {
 		t.Errorf("logout: %d %s", r.code, r.raw)

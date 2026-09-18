@@ -58,7 +58,9 @@ async function logout() {
           :to="`/p/${encodeURIComponent(project)}/tests`"
           :class="{
             active:
-              route.path.includes('/tests') || route.path.includes('/flaky'),
+              route.path.includes('/tests') ||
+              route.path.includes('/flaky') ||
+              route.path.endsWith('/review'),
           }"
         >
           <Activity :size="18" />Test intelligence

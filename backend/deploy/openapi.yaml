@@ -515,11 +515,174 @@ paths:
                     items:
                       type: object
                       properties:
-                        week: { type: string, format: date-time, description: Start of the week, UTC. }
+                        week: { type: string, format: date-time, description: "Start of the week (Monday 00:00), UTC." }
                         category: { type: string, enum: [app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown], description: "§8.7; `unknown` = not triaged yet." }
                         count: { type: integer }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- identity operations (§9.4 manual tools) -------------------------------
+  /v1/projects/{projectId}/review:
+    get:
+      operationId: listReviewQueue
+      tags: [dashboard]
+      summary: Pending review pairs (§9.3 step 4 — a rename the resolver would not decide alone), oldest first
+      description: Needs triage rights. At most 100; a queue past 50 is already an alert (§6.4), not a paging problem.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: The pending pairs.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/ReviewItem" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/review/{itemId}:
+    post:
+      operationId: decideReview
+      tags: [dashboard]
+      summary: Record the human verdict on a pair
+      description: |
+        `merged` folds the identity created at resolve time into the candidate
+        (same as merge, audited as `review`); `kept` leaves them separate. Needs
+        `identity.merge` (admin). The actor recorded is the session user.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [merged, kept] }
+      responses:
+        "200":
+          description: Decided.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [merged, kept] }
+                  decidedBy: { type: string }
+                  decidedAt: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`CONFLICT` — already decided."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/identities/{identityId}/aliases:
+    get:
+      operationId: listIdentityAliases
+      tags: [dashboard]
+      summary: "The identity's fingerprints — in force (validTo null) and historical"
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/IdentityId" }
+      responses:
+        "200":
+          description: Aliases, oldest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Alias" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/identities/{identityId}/merge:
+    post:
+      operationId: mergeIdentity
+      tags: [dashboard]
+      summary: Fold this identity into another (a rename the resolver missed)
+      description: Every alias moves and history unifies; the audit row remembers exactly what moved so undo-merge can put it back. Admin only.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/IdentityId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [into]
+              properties:
+                into: { type: string, format: uuid, description: The surviving identity. }
+      responses:
+        "200":
+          description: Merged.
+          content: { application/json: { schema: { type: object, properties: { mergedInto: { type: string, format: uuid } } } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`CONFLICT` — source or target is not active (already merged or retired)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/identities/{identityId}/undo-merge:
+    post:
+      operationId: undoMergeIdentity
+      tags: [dashboard]
+      summary: Put a merged identity back exactly as it was (N43 — this is not a split)
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/IdentityId" }
+      responses:
+        "200":
+          description: Restored.
+          content: { application/json: { schema: { type: object, properties: { restored: { type: string, format: uuid } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`CONFLICT` — the identity is not merged, or its merge audit is missing."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/identities/{identityId}/split:
+    post:
+      operationId: splitIdentity
+      tags: [dashboard]
+      summary: "Split at a time: the alias closes at `at`, a new identity owns the fingerprint from then on"
+      description: History before `at` stays with the old identity (which retires once it has no fingerprint left in force). The fingerprint must be an alias of the identity in the path. Admin only.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/IdentityId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fingerprint, at]
+              properties:
+                fingerprint: { type: string }
+                at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Split; the new identity owns the fingerprint from `at`.
+          content: { application/json: { schema: { type: object, properties: { newIdentityId: { type: string, format: uuid } } } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 
 components:
   securitySchemes:
@@ -835,9 +998,47 @@ components:
         runId: { type: string, format: uuid }
         attempts: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/Attempt" } }
         events: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TriageEvent" } }
+    IdentityRef:
+      type: object
+      required: [id, canonicalTitle, canonicalFilePath, status]
+      properties:
+        id: { type: string, format: uuid }
+        canonicalTitle: { type: string, description: "Title path joined with ' › '; empty when the identity is gone." }
+        canonicalFilePath: { type: string }
+        status: { type: string, enum: [active, merged, retired, ""] }
+    ReviewItem:
+      type: object
+      required: [id, createdAt, identity, candidate, fingerprint, score, gap, runId]
+      properties:
+        id: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        identity:
+          allOf: [{ $ref: "#/components/schemas/IdentityRef" }]
+          description: Created at resolve time.
+        candidate:
+          allOf: [{ $ref: "#/components/schemas/IdentityRef" }]
+          description: The suggested rename source.
+        fingerprint: { type: string }
+        score: { type: number, description: "Best match score, 0–1 (§9.3)." }
+        runnerUpId: { type: string, description: Empty when there was no second candidate. }
+        runnerUpScore: { type: number }
+        gap: { type: number, description: "score − runnerUpScore; a small gap is why a human is asked." }
+        breakdown: { type: object, additionalProperties: { type: number } }
+        runId: { type: string, format: uuid }
+    Alias:
+      type: object
+      required: [id, fingerprint, source, matchScore, validFrom, validTo]
+      properties:
+        id: { type: string, format: uuid }
+        fingerprint: { type: string }
+        source: { type: string, description: "How the alias came to be (initial, auto_match, manual merge, split, …)." }
+        matchScore: { type: number }
+        createdBy: { type: string }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: [string, "null"], format: date-time, description: Null while in force. }
     Identity:
       type: object
-      required: [id, canonicalTitle, canonicalFilePath, verdict, flakyScore, totalRuns, recentStatuses]
+      required: [id, canonicalTitle, canonicalFilePath, verdict, flakyScore, totalRuns, recentStatuses, status, mergedIntoId]
       properties:
         id: { type: string, format: uuid }
         canonicalTitle: { type: string }
@@ -846,3 +1047,5 @@ components:
         flakyScore: { type: [number, "null"] }
         totalRuns: { type: integer }
         recentStatuses: { type: array, maxItems: 30, items: { type: string }, description: Newest first. }
+        status: { type: string, enum: [active, merged, retired], description: "§9.4 operations change it; merged and retired identities keep their history and stay readable by id but leave the active list." }
+        mergedIntoId: { type: [string, "null"], format: uuid, description: The survivor while merged; the UI offers undo and links to it. }

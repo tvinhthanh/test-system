@@ -238,6 +238,8 @@ export function createFixtureTransport(): Transport {
               ? "failed"
               : "passed",
         ),
+        status: "active",
+        mergedIntoId: null,
       });
       if (identityId && path.endsWith("/runs"))
         return response({

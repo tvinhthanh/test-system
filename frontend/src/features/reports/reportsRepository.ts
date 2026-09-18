@@ -81,6 +81,38 @@ export interface Identity {
   flakyScore: number | null;
   totalRuns: number;
   recentStatuses: string[];
+  status: "active" | "merged" | "retired";
+  mergedIntoId: string | null;
+}
+// §9.4 manual identity tools. A pair the resolver would not decide alone,
+// waiting for a human; the two sides as the UI shows them.
+export interface IdentityRef {
+  id: string;
+  canonicalTitle: string;
+  canonicalFilePath: string;
+  status: string;
+}
+export interface ReviewItem {
+  id: string;
+  createdAt: string;
+  identity: IdentityRef;
+  candidate: IdentityRef;
+  fingerprint: string;
+  score: number;
+  runnerUpId: string;
+  runnerUpScore: number;
+  gap: number;
+  breakdown: Record<string, number>;
+  runId: string;
+}
+export interface Alias {
+  id: string;
+  fingerprint: string;
+  source: string;
+  matchScore: number;
+  createdBy: string;
+  validFrom: string;
+  validTo: string | null;
 }
 export interface RunsQuery {
   q: string;
@@ -200,6 +232,58 @@ function identity(value: unknown): Identity {
     flakyScore: x.flakyScore === null ? null : Number(x.flakyScore),
     totalRuns: d.integer(x.totalRuns),
     recentStatuses: d.array(x.recentStatuses, d.string, 30),
+    status: identityStatus(x.status),
+    mergedIntoId: d.nullableString(x.mergedIntoId),
+  };
+}
+function identityStatus(value: unknown): Identity["status"] {
+  return value === "active" || value === "merged" || value === "retired"
+    ? value
+    : d.invalid();
+}
+function score(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : d.invalid();
+}
+function identityRef(value: unknown): IdentityRef {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    canonicalTitle: d.string(x.canonicalTitle),
+    canonicalFilePath: d.string(x.canonicalFilePath),
+    status: d.string(x.status),
+  };
+}
+function reviewItem(value: unknown): ReviewItem {
+  const x = d.record(value);
+  const breakdown: Record<string, number> = {};
+  for (const [k, v] of Object.entries(x.breakdown ? d.record(x.breakdown) : {}))
+    breakdown[k] = score(v);
+  return {
+    id: d.string(x.id),
+    createdAt: d.date(x.createdAt),
+    identity: identityRef(x.identity),
+    candidate: identityRef(x.candidate),
+    fingerprint: d.string(x.fingerprint),
+    score: score(x.score),
+    runnerUpId: d.string(x.runnerUpId ?? ""),
+    runnerUpScore: score(x.runnerUpScore ?? 0),
+    gap: score(x.gap),
+    breakdown,
+    runId: d.string(x.runId ?? ""),
+  };
+}
+function alias(value: unknown): Alias {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    fingerprint: d.string(x.fingerprint),
+    source: d.string(x.source),
+    matchScore: score(x.matchScore),
+    createdBy: d.string(x.createdBy ?? ""),
+    validFrom: d.date(x.validFrom),
+    validTo: x.validTo === null ? null : d.date(x.validTo),
   };
 }
 const scope = (id: string) => `/v1/projects/${encodeURIComponent(id)}`;
@@ -349,5 +433,68 @@ export class ReportsRepository {
     );
     // 7 categories × at most ~53 weeks in a year-long window.
     return d.array(x.items, trendBucket, 7 * 53);
+  }
+
+  // ---- §9.4 manual identity tools (admin) ----
+  async reviewQueue(projectId: string, signal: AbortSignal) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(projectId)}/review?${params({ limit: "100" })}`,
+        { signal },
+      ),
+    );
+    return d.array(x.items, reviewItem, 100);
+  }
+  async decideReview(
+    projectId: string,
+    itemId: string,
+    decision: "merged" | "kept",
+    signal: AbortSignal,
+  ) {
+    await this.api.request(
+      `${scope(projectId)}/review/${encodeURIComponent(itemId)}`,
+      { signal, body: { decision } },
+    );
+  }
+  async aliases(projectId: string, identityId: string, signal: AbortSignal) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(projectId)}/identities/${encodeURIComponent(identityId)}/aliases`,
+        { signal },
+      ),
+    );
+    return d.array(x.items, alias, 500);
+  }
+  async mergeIdentity(
+    projectId: string,
+    identityId: string,
+    into: string,
+    signal: AbortSignal,
+  ) {
+    await this.api.request(
+      `${scope(projectId)}/identities/${encodeURIComponent(identityId)}/merge`,
+      { signal, body: { into } },
+    );
+  }
+  async undoMerge(projectId: string, identityId: string, signal: AbortSignal) {
+    await this.api.request(
+      `${scope(projectId)}/identities/${encodeURIComponent(identityId)}/undo-merge`,
+      { signal, body: {} },
+    );
+  }
+  async splitIdentity(
+    projectId: string,
+    identityId: string,
+    fingerprint: string,
+    at: string,
+    signal: AbortSignal,
+  ) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(projectId)}/identities/${encodeURIComponent(identityId)}/split`,
+        { signal, body: { fingerprint, at } },
+      ),
+    );
+    return d.string(x.newIdentityId);
   }
 }

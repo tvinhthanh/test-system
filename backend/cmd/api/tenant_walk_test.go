@@ -113,20 +113,33 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	baseA := "/v1/projects/" + string(a.project)
 	resultA := a.user.get(baseA + "/runs/" + runA + "/results").items()[0].(map[string]any)["id"].(string)
 	identityA := a.user.get(baseA + "/identities").items()[0].(map[string]any)["id"].(string)
+	// A pending review item of org A (the resolver only queues one for an
+	// ambiguous rename, so it is seeded directly; the walk needs its id, not
+	// its provenance).
+	var itemA string
+	if err := db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO review_queue_items (project_id, identity_id, candidate_id, fingerprint, score, gap, breakdown, run_id)
+		VALUES ($1, $2, $2, 'fp1:walk', 0.8, 0.1, '{}', $3) RETURNING id`, string(a.project), identityA, runA).Scan(&itemA); err != nil {
+		t.Fatal(err)
+	}
 
 	// Org A's ids by path parameter name. A parameter this map does not
 	// know is a route the walk cannot exercise — fail loudly, do not skip.
 	foreign := map[string]string{
 		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
-		"localRunId": localRunA, "artifactId": artifactA,
+		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
-		"POST /v1/projects/{projectId}/results/{resultId}/triage-events": map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
-		"POST /v1/runs/{localRunId}/events":                              map[string]any{"events": []any{event}},
-		"POST /v1/runs/{localRunId}/finish":                              map[string]any{},
-		"POST /v1/artifacts/{artifactId}/complete":                       map[string]any{"sha256": strings.Repeat("ab", 32)},
-		"POST /v1/artifacts":                                             declare,
+		"POST /v1/projects/{projectId}/results/{resultId}/triage-events":   map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
+		"POST /v1/runs/{localRunId}/events":                                map[string]any{"events": []any{event}},
+		"POST /v1/runs/{localRunId}/finish":                                map[string]any{},
+		"POST /v1/artifacts/{artifactId}/complete":                         map[string]any{"sha256": strings.Repeat("ab", 32)},
+		"POST /v1/artifacts":                                               declare,
+		"POST /v1/projects/{projectId}/review/{itemId}":                    map[string]any{"decision": "kept"},
+		"POST /v1/projects/{projectId}/identities/{identityId}/merge":      map[string]any{"into": identityA},
+		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge": map[string]any{},
+		"POST /v1/projects/{projectId}/identities/{identityId}/split":      map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.
