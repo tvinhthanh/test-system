@@ -14,7 +14,7 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | **T2** load §14.2 | ⏳ dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời ✗ trên laptop (p95 ≈ 2 s; từ 8,4 s) — cần đo trên server | 17-09-2026 | §T2 |
 | **T3** failure recovery + observability | ✅ đạt — alert rules §6.4 trên tên metric thật, gauge phía api, 4 kịch bản hỏng nhìn thấy được ở `/metrics`, log không lộ bí mật | 17-09-2026 | §T3 |
 | **T4** security + tenant isolation | ✅ tenant isolation (mọi route) 16-09; security §11.6 có bằng chứng từng dòng 17-09 (govulncheck, npm audit, CORS/headers, rate limit dashboard, SSRF rule, route inventory); **restore drill ✅** (`test/restore/`: dump → DB mới → 24/24 bảng checksum bằng nhau, api trả đúng byte, worker tiếp job pending, RTO ≈ 2 s ở cỡ test); audit revoke ✅ (`authz_audit`); còn mở: pentest | 17-09-2026 | §T4 |
-| **T5** soak 24–72 h | ⏳ harness `test/soak/` chạy 20 phút trên laptop 17-09: 900 run, 0 lỗi, mọi trend phẳng (worker, goroutine, pool, backlog, latency); tìm ra và sửa: `jobs` không bao giờ dọn, gauge backlog quét cả bảng, grant store dev không xóa; heap api đã profile: chỉ payload của store dev lớn lên (`io.ReadAll` ← `memory.Store.serve`), không có holder khác. **24–72 h cần host riêng + S3 staging** | 17-09-2026 | §T5 |
+| **T5** soak 24–72 h | ⏳ harness `test/soak/` chạy **2 giờ** trên laptop 18-09: 5 400 run, 545k result, 87k request, **0 lỗi**, mọi trend phẳng (worker heap, goroutine, pool, backlog, `jobs`, latency), heap api chỉ lớn theo payload của store dev; tìm ra và sửa: `jobs` không bao giờ dọn, gauge backlog quét cả bảng, grant store dev không xóa; heap api đã profile: chỉ payload của store dev lớn lên (`io.ReadAll` ← `memory.Store.serve`), không có holder khác. **24–72 h cần host riêng + S3 staging** | 17-09-2026 | §T5 |
 
 ## T0 — reporter đẩy run thật, dashboard hiện đúng ✅ 16-09-2026
 
@@ -362,6 +362,26 @@ RSS/heap/goroutine/pool của api và worker (`metric.Process`, `db.Metrics` —
 số backend Postgres, backlog/oldest/dead/done của queue, số dòng và kích thước
 bảng `jobs`, run kẹt, result thiếu `stable_test_id`, artifact unlinked, heartbeat
 worker, p50/p95 của `/events` trong cửa sổ, tổng request/lỗi. CSV đầy đủ ở `SOAK_OUT`.
+
+**Kết quả 2 giờ, 18-09 10:05–12:05 (laptop, cùng cấu hình, `SOAK_JOB_RETENTION=5m`, 240 mẫu / 30 s) — PASS mọi kiểm tra:**
+
+| Điều đo | Thấy gì |
+|---|---|
+| Traffic | **5 400 run, 545 400 result, 87 365 request, 0 lỗi, 0 5xx**; 540 mismatch cố ý → 540/540 `422`; 774 replay dedupe đúng; 238 triage |
+| Sau khi dừng | backlog 0; 0 dead / 0 retry; 0 run `running`; 0 result thiếu id; 0 unlinked quá hạn; heartbeat < 10 s |
+| Worker | heap sống 1,6 → 1,4 MB, RSS 20 MB, 14 goroutine — **phẳng** suốt 2 giờ |
+| api | goroutine 22 → 22; pool acquired 0; backend Postgres 12 → 11 (một idle đóng); heap sống **trừ payload store 8,0 → 15,9 MB** (dưới ngưỡng ×1,3 + 8; xem giải thích dưới); RSS 92 MB vs live 51 MB — trong pacing (≤ 3× + 48) |
+| Queue | `jobs` phẳng **246 dòng, 0,29 MB** qua 5 400 run; backlog median 0, max 0 |
+| Latency | `/events` p50 median 22 ms, p95 median 62 ms (⅓ đầu 58 → ⅓ cuối 62), p95 max một cửa sổ 605 ms |
+| Bảng | `test_results` 290 MB cho 545k result (≈ 560 B/result kể cả index) |
+
+Heap sống của api trừ `sum(actual_bytes)` vẫn lên 14 MB trong 2 giờ, **đúng 0,36×
+lượng payload store thêm vào** (39 MB) ở mọi điểm lấy mẫu (300 s: 3,6/1,7; 2 400 s:
+7,5/13,6; 4 800 s: 12,3/27,3; 7 200 s: 17,7/40,9). Đó là cách store dev giữ byte:
+`io.ReadAll` trả slice có `cap` lớn hơn `len`, Go xếp 4,2 KB vào size class 4 864–5 376 B,
+cộng entry map + etag mỗi object — hệ số ~1,3–1,36 so với `actual_bytes`. Worker
+(không có store) phẳng tuyệt đối, nên phần dư này là của store, không phải của api.
+Với `OBJSTORE=s3` đường này bằng 0 — lý do run 24 h phải chạy với bucket thật.
 
 **Kết quả 20 phút, 17-09 (laptop, Postgres + api + worker + generator cùng máy):**
 
