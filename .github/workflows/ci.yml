@@ -83,9 +83,12 @@ jobs:
           RESTORE_TEST: "1"
         run: go test -count=1 -timeout 15m ./...
 
+      # Pinned: govulncheck v1.8+ requires Go 1.26, and this job runs the
+      # toolchain go.mod names under GOTOOLCHAIN=local (act caught the
+      # `` failure before the first GitHub run). Bump with the toolchain.
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
       - name: docker build (deploy/Dockerfile)
