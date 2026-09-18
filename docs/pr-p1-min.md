@@ -30,7 +30,7 @@
 ### Review pointers
 
 - `backend/GATES.md` is the record of what actually ran; `backend/README.md` the module map and conventions; `frontend/PLAN.md` the UI continuity record; `docs/openapi-contract-reimplementation.md` a review brief that was implemented (cookie name, `sequence ≥ 1`).
-- Deliberate deviation: QĐ-9 chose Flutter; the owner chose Vue on 14-09 (`frontend/PLAN.md`). The Flutter draft under `frontend/lib` is inert.
+- Stack: QĐ-9 originally chose Flutter; the owner chose Vue on 14-09 (`frontend/PLAN.md`). SPEC QĐ-9 was rewritten for Vue on 18-09 and the inert Flutter draft was removed from `frontend/` the same day.
 - `frontend/dist/trace/` is Playwright's vendored trace viewer (pinned `playwright-core` devDependency), not our bundle.
 
 ### Included beyond P1-min (was branch `p15-em-review`)

@@ -12,14 +12,14 @@ that file before changing frontend code.
 - Product and architecture requirements: `../SPEC.md`.
 - Backend conventions and current implementation: `../backend/README.md` and
   `../backend/`.
-- Historical stack decision: SPEC QD-9 selected Flutter Web in P1.
-- Current implementation decision: Vue.js, explicitly requested by the user on
-  2026-09-14. This is a deliberate deviation from QD-9 and must be reviewed
-  against the product constraints before production acceptance.
+- Stack decision: Vue 3 + TypeScript, explicitly requested by the user on
+  2026-09-14. SPEC QD-9 was rewritten for Vue on 2026-09-18 (it had said
+  Flutter Web); its four constraints are now stated for the DOM and point at
+  the tests that enforce them.
 - P1-min scope: SPEC section 4.4 and section 6.9.11.
 
-Follow SPEC for product behavior. The user's explicit Vue decision supersedes
-QD-9's framework choice; do not revert to Flutter on resume.
+Follow SPEC for product behavior. Do not revert to Flutter on resume; the
+draft was removed on 2026-09-18.
 
 ## Current Status
 
@@ -152,7 +152,7 @@ Completed local flow: slices 0-2 and slices 3-5 on fixture contracts. The full
 P1-min read/triage UI is now navigable locally. Next work is backend contract
 confirmation and live integration; HTTP schemas remain a proposal until Go
 handlers are mounted and tested.
-The Flutter files remain inactive reference material; Vite builds only `src/`.
+Vite builds only `src/` (the Flutter draft is gone since 2026-09-18).
 
 Foundation choice: Vue/Router/Pinia plus native Fetch and a small cancellable
 resource composable. A query-cache library is deferred until multiple screens
@@ -229,16 +229,27 @@ need cache invalidation; current data is route-owned and session scoped.
       (`../backend/test/load`). Numbers are `live-check.mjs` step wall times
       and include its fixed waits; rerun it against a bigger project to refresh.
 
-## Existing Draft To Retire Or Port
+## Retired Draft
 
-- `lib/` contains a Flutter draft created before the Vue.js decision. It is
-  reference material only until explicitly ported; do not extend it.
+- `lib/`, `web/`, `pubspec.yaml`, `analysis_options.yaml` were a Flutter draft
+  from before the Vue decision. Removed 2026-09-18 (git history keeps it);
+  nothing in the Vue app was ported from it.
 
 These files are a foundation draft. Do not add another API client, model set,
 pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-18 (stack recorded in SPEC; Flutter draft removed)
+
+- SPEC QD-9 now says Vue 3 + TypeScript (Vite, Pinia, vue-router) and states
+  the four client constraints for the DOM, naming the tests that enforce them
+  (`tests/architecture.test.ts`: no `v-html`, components never import a
+  repository or the HTTP client). SPEC §0.5 carries the build progress.
+- Deleted the inert Flutter draft (`lib/`, `web/`, `pubspec.yaml`,
+  `analysis_options.yaml`, Dart entries in `.gitignore`). Typecheck and the 28
+  unit tests pass without it; nothing in `src/` referenced it.
 
 ### 2026-09-18 (review queue and identity tools — §9.4 over HTTP)
 

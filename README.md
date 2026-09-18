@@ -4,11 +4,11 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 > **"Bộ nhớ dài hạn cho bộ test E2E của bạn"** — Playwright cho biết *lần chạy này* fail thế nào; platform cho biết *test này* đã hành xử ra sao qua 500 lần chạy gần nhất, có flaky không, fail lần này giống lần nào trước đó, và giả thuyết nguyên nhân là gì.
 
-## Trạng thái: Phase 0 (validation), chưa build sản phẩm
+## Trạng thái: Phase 0 (validation) song song P1-min (QĐ-11)
 
 | | |
 |---|---|
-| Spec | **v3.16** — 11 ADR đã chốt, ba plane đã đặc tả, 59 phát hiện N đã xử lý |
+| Spec | **v3.17** — 11 ADR đã chốt (QĐ-9 sửa lần hai 14-09: client Vue 3), ba plane đã đặc tả, 61 phát hiện N đã xử lý; tiến độ build ở §0.5 |
 | Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
 | Code sản phẩm | **P1-min đã đủ** theo QĐ-11 (11-09 → 18-09): `backend/` (Go, mọi module §6.9.11 trừ billing), `reporter/playwright/`, `frontend/` (Vue), `backend/deploy/` (image + compose staging + CI). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅, T5 harness 2 h sạch — xem [`backend/GATES.md`](backend/GATES.md); còn cần hạ tầng cho soak 24 h, ingest trên server, pentest |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
@@ -23,7 +23,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 | Tài liệu gửi ra ngoài | [`docs/external/`](docs/external/) — chạy `verify.sh` trước khi gửi |
 | Học Go qua chính codebase này | [`docs/go/README.md`](docs/go/README.md) |
 
-`SPEC.md` dài, nhưng §0.2 (nhật ký 59 phát hiện) và §4.10 (bức tranh tổng) là hai chỗ vào nhanh nhất.
+`SPEC.md` dài, nhưng §0.2 (nhật ký 61 phát hiện), §0.5 (tiến độ build) và §4.10 (bức tranh tổng) là ba chỗ vào nhanh nhất.
 
 ## Chạy thử
 

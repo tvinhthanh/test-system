@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.16 · **Ngày:** 11-09-2026 · **Trạng thái:** 11 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`); ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành sau Gate-0); 59 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50) và một vòng soát harness ↔ tài liệu (N56–N59)
+> **Phiên bản:** v3.17 · **Ngày:** 18-09-2026 · **Trạng thái:** 11 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 61 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59) và hai phát hiện từ chính việc build P1-min (N60–N61)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -20,7 +20,7 @@ Việc tách `docs/v3.0/` và `docs/v3.1/` cũng xử lý luôn vụ va chạm �
 
 ### 0.2 Nhật ký sửa lỗi qua các vòng review
 
-Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N55 từ vòng soát nhất quán nội bộ 08-09 → 09-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. **N56–N58 từ vòng soát harness ↔ tài liệu 10-09-2026** — vòng trước gỡ hết bản sao của một con số nhưng bỏ sót chính harness đang sinh ra nó, và quy tắc chống trôi của N51 mới chỉ được thi hành bên trong `SPEC.md`; **N59 ngày 11-09** — lần đầu chủ dự án tự chạy `-diag`, và nó in hai kết quả mâu thuẫn trên cùng màn hình. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
+Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N55 từ vòng soát nhất quán nội bộ 08-09 → 09-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. **N56–N58 từ vòng soát harness ↔ tài liệu 10-09-2026** — vòng trước gỡ hết bản sao của một con số nhưng bỏ sót chính harness đang sinh ra nó, và quy tắc chống trôi của N51 mới chỉ được thi hành bên trong `SPEC.md`; **N59 ngày 11-09** — lần đầu chủ dự án tự chạy `-diag`, và nó in hai kết quả mâu thuẫn trên cùng màn hình; **N60–N61 từ chính việc build P1-min, 16-09 → 18-09** — hai chỗ SPEC nói một đằng mà code chạy thật buộc phải làm một nẻo: §6.9.11 bảo P1-min không có Review Queue trong khi §9.3 và §6.4 buộc phải có, và `ON CONFLICT` một mình không cứu được transaction chạm nhiều key. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
 
 | # | Lỗi / rủi ro | Cách sửa | Xem mục |
 |---|---|---|---|
@@ -51,7 +51,7 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N25 | Cấm K8s/Kafka đọc như vĩnh viễn; "queue" đọc như FIFO đơn | ✅ Điều kiện cụ thể + nhiều queue | §4.6, §6.7.4, §6.7.8 |
 | N26 | Execution Plane quá mỏng | ✅ Thiết kế đầy đủ, không đổi thứ tự phase | §6.6, §6.7, QĐ-10 |
 | N27 | Thiếu gate kỹ thuật | ✅ T0–T5 | §14 |
-| N28 | Đổi client sang Flutter | ✅ QĐ-9 viết lại, ràng buộc dịch sang Flutter | §1.9 |
+| N28 | Đổi client sang Flutter | ✅ QĐ-9 viết lại, ràng buộc dịch sang Flutter. *Lật lần hai 14-09-2026 (chủ dự án): Vue 3 — QĐ-9 viết lại lần nữa, bốn ràng buộc dịch sang DOM* | §1.9 |
 | N29 | P2 ước lượng 2–4 người-tháng nhưng phạm vi thật (mapping, requirement, release gate, ROI, importer) là 3,9–7,5 — lặp đúng bẫy N02 | ✅ Ước lượng lại + gom phạm vi | §4.9.2, §4.1 |
 | N30 | Test Management Plane chưa đặc tả; link manual↔automation dễ bị trỏ nhầm vào run thay vì identity | ✅ Thiết kế đầy đủ; link bắt buộc trỏ `TestIdentity.id` | §6.8 |
 | N31 | Ý tưởng thương mại (integration, ROI, quality gate) không có chỗ chứa → nguy cơ phình P1 | ✅ Backlog có bằng chứng mở khoá từng mục | §4.9 |
@@ -83,10 +83,12 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N57 | **Bảng tầm nhìn của N39 chưa từng được chạy lại sau N49.** Đo lại 10-09: bốn dòng tầm nhìn từng phần đều lệch đúng **một ca** so với bảng đang ghi — 0,75 `0,5160→0,5200`; 0,50 `0,2960→0,3000`; 0,25 `0,1880→0,1920`; 0,10 `0,1360→0,1400`. N49 tự tổng kết rằng chỉ dòng 50% dịch, *"một ca trong 200"*, và đọc nó như nhiễu làm tròn | ✅ Sinh lại bảng. **Không phải nhiễu:** chính N49 dự đoán bản trigram cũ chấm **thấp hơn** `pg_trgm`, nên sửa đúng thì thêm đúng một ứng viên vượt ngưỡng lọc 0,4 — ở **mọi** mức và **cùng một chiều**. Bốn dòng cùng dịch một chiều là bằng chứng **mạnh hơn** cho lập luận của N49 so với một dòng mà nó đã ghi | §7.6, §9.3 |
 | N58 | **Quy tắc chống trôi của N51 chỉ được thi hành bên trong `SPEC.md`.** Bản sao nằm ngoài file đó sống sót nguyên vẹn: `phase0/README.md` vẫn ghi `recall 0,9950` — bản sao thứ **6**, đúng con số đã bị bác; `README.md` gốc vẫn ghi *"Spec **v3.10** … 52 phát hiện N"*, trễ **hai vòng**; và ngay trong SPEC, tiêu đề §12.2 vẫn đọc "(N01–N50)" trong khi thân của nó nói 55 | ✅ Sửa cả bốn chỗ. Quy tắc *"§9.6 là nơi duy nhất giữ số headline"* áp cho **cả repo**, không riêng SPEC: file điều hướng (`README.md`, `phase0/README.md`) trích thì phải ghi "trích", còn số phiên bản và số phát hiện là thứ **bắt buộc** cập nhật cùng mỗi vòng | §0.2, §9.6, §12.2 |
 | N59 | **`-diag` vẫn mang đúng lỗi harness đã khiến N32/N33 bị rút lại.** `Evaluate` được sửa ngày 26-08 để mô hình đúng thực tế — mọi test khác **vẫn có mặt** trong run, chỉ test bị rename là vắng — nhưng `Diagnose`, công cụ giải thích *vì sao* auto-match không nổ, chưa bao giờ được sửa theo: `PresentInRun` để `false` cho **mọi** ứng viên, tức cả 500 test biến mất cùng lúc. Phát hiện 11-09 khi chủ dự án chạy `-diag` lần đầu: nửa trên in **248 auto / 2 review**, nửa dưới in **215 "blocked by gap" `<-- HERE`** — hai con số không thể cùng đúng, in ngay cạnh nhau. Nặng hơn con số là **cách sửa bị chỉ sai**: tool đổ 2 ca review cho `MinGap` (→ hạ gap), thực tế chúng nằm ở dải điểm 0,60–0,85 và hạ gap không đổi được gì | ✅ `Diagnose` mô hình presence y hệt `Evaluate`. Sau sửa: 248 đủ điểm / **0** bị gap chặn / 2 ở dải review — khớp nửa trên; gap p50 nhảy `0,027 → 0,704`, đúng cơ chế N34. `diag_test.go` khóa hai chiều: số của `Diagnose` phải khớp `Evaluate` trên 3 seed (test này **fail** trên code cũ, đúng bằng 33 ≠ 248), và một test tái lập 215/250 để con số đó không thành huyền thoại. **Bài học N32 chưa học hết:** sửa một harness thì phải sửa **mọi** harness chung giả định — `grep PresentInRun` mất 5 giây, còn bug này sống 16 ngày | §9.3, §9.6, `prototype/identity/diag.go` |
+| N60 | **§6.9.11 khẳng định P1-min "không có Review Queue service" — nhưng hai mục khác của chính SPEC buộc phải có nó từ P1.** §9.3 tầng 2 đẩy mọi ứng viên ở dải 0,60–0,85 vào review (2/250 ca trên prototype, §9.6) — không có bảng thì resolver không có chỗ đặt ca mờ; §6.4 đặt alert khi queue > 50 — không có gauge thì alert đo vào khoảng không. Cái §4.4 cắt là **giao diện** và thao tác Merge/Split, không phải service. Câu "chốt scope trước, tạo thư mục sau" đúng cho `testmgmt`/`execution`, sai cho review queue | ✅ Tách "service" (P1-min, bắt buộc: bảng `review_queue_items`, gauge `review_queue_pending`, có từ T0 16-09) khỏi "UI" (cắt được). Thực tế 18-09: merge/undo/split/decide đi qua HTTP admin-only, ghi `identity_audit`; UI làm sớm theo yêu cầu chủ dự án — ghi ở §4.4 | §4.4, §6.9.11 |
+| N61 | **§9.7 chốt "`UNIQUE` + `ON CONFLICT` → chỉ một identity" cho ca hai run cùng gửi *một* fingerprint lạ — đúng, nhưng resolve thật chạm *hàng chục* key trong một transaction.** T1 (`backend/test/failure`, 16-09): 4 worker resolve song song các run cùng bộ test — ca thường nhất, CI của một project chạy đi chạy lại cùng suite — **deadlock 40P01**: mỗi transaction insert cùng bộ unique key theo thứ tự map ngẫu nhiên của Go. Queue retry che lỗi (job vẫn xong) nhưng mỗi lần là backoff 5 s — vượt p99 < 5 s của §14.2 ngay ở tải nhỏ; test race của §9.7 (N46) không thấy vì nó chỉ đua trên **một** key | ✅ Ghi thành bất biến ở §9.7: transaction ghi nhiều identity/alias/flaky phải sắp key theo **một thứ tự toàn cục** (fingerprint cho identity, identity id cho flaky) trước khi ghi — cùng thứ tự thì transaction sau chỉ xếp hàng rồi đi đường `ON CONFLICT`. Harness khẳng định `last_error IS NULL` cho mọi job: re-run chỉ được đến từ lease hết hạn | §9.7, `backend/GATES.md` §T1 |
 
 ### 0.3 Những gì vẫn CẦN người chịu trách nhiệm quyết
 
-QĐ-7 → QĐ-10 đã được **chủ dự án duyệt ngày 25-08-2026**. QĐ-9 được sửa trong cùng ngày (Next.js → Flutter). Còn lại là quyết định vận hành không thể suy ra từ kiến trúc:
+QĐ-7 → QĐ-10 đã được **chủ dự án duyệt ngày 25-08-2026**. QĐ-9 được sửa trong cùng ngày (Next.js → Flutter) và sửa lần hai ngày 14-09-2026 (Flutter → Vue 3, §1.9). Còn lại là quyết định vận hành không thể suy ra từ kiến trúc:
 
 | Vấn đề | Khi nào bắt buộc chốt | Xem mục |
 |---|---|---|
@@ -114,6 +116,22 @@ README của bộ v3.1 đánh dấu F12 và F16 là "✅ Đóng". **Sai** — qu
 Điều này nguy hiểm ở đúng thời điểm: Phase 0 tuần 1–6 là lúc mang deck đi gặp design partner. Ai tin ma trận README sẽ gửi bản pitch agent-first, roadmap cụt, cho đúng nhóm người mà v3.1 vừa quyết định pitch reporter-first.
 
 **Cấm gửi ba file đó ra ngoài cho đến khi regenerate theo §4.7.**
+
+### 0.5 Tiến độ thi hành QĐ-11 — cập nhật 18-09-2026
+
+Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập nằm ở file bằng chứng; bảng này chỉ **trích** (quy tắc N51/N58). Cập nhật cùng mỗi lần merge vào `main`.
+
+| Mảng | Kế hoạch (mục) | Trạng thái 18-09 | Bằng chứng |
+|---|---|---|---|
+| Backend Go monolith | §6.9 cột P1-min | ✅ trên `main` — mọi module §6.9.11 P1-min trừ `billing`; 12 migration; luật §6.9.3/§6.9.7 cưỡng chế bằng `test/arch` từ commit đầu (QĐ-11 #4) | `backend/README.md`, `backend/test/arch/` |
+| Reporter Playwright | §7.5 | ✅ npm reporter: batch 5 s / 100 event, retry 1/2/4/8 s, spool khi mất mạng (run của khách không bao giờ fail), artifact sha256 phía client + cap, HAR strip, fingerprint §9.2 khớp vector Go, error text sạch ANSI | `reporter/playwright/README.md` |
+| Dashboard | §4.4 "dashboard v0" + bảng cắt/dời | ✅ Vue 3 (QĐ-9 sửa lần hai): sign-in, projects, runs, failure detail (attempt, error/stack, artifact: ảnh/video inline, `trace.zip` trong trace viewer tự host), triage, identity history, flaky. **Làm sớm hơn kế hoạch theo yêu cầu chủ dự án 18-09:** lát đầu màn hình EM (P1.5), Review Queue UI và Merge/Split/Undo UI (§4.4 xếp P2) — chi tiết ở §4.4 "Thực tế" | `frontend/PLAN.md`, `frontend/API_CONTRACT.md` |
+| Hợp đồng API | §11.6 API9 | ✅ `backend/deploy/openapi.yaml` (27 operation) là nguồn sự thật; test hai chiều route ↔ spec; Redocly lint trong CI | `docs/openapi-contract-reimplementation.md` |
+| Triển khai | §6.4, §11.5 | ✅ image distroless + compose (Postgres 17, migrate một lần, api, worker, Prometheus + alert §6.4, Caddy TLS, backup hằng ngày); CI 4 job: backend, reporter, frontend, e2e trên compose (reporter thật → api thật → UI thật) | `backend/deploy/README.md`, `.github/workflows/ci.yml` |
+| Gate kỹ thuật | §14 | T0 T1 T3 T4 ✅ · T2 một phần · T5 một phần — cột "Trạng thái" §14.1 | `backend/GATES.md` |
+| Gate sản phẩm | §4.5, §5.8 | Không đổi: Gate-0 **26-10-2026**. Code không được nhắc tới ở đó (QĐ-11 #2) | §5.8 |
+
+**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA (P2, đúng kế hoạch); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
 
 ---
 
@@ -231,39 +249,45 @@ Bất biến sản phẩm:
 - Nếu Phase 0 có ≥ 5/15 ICP xếp production-safety là pain quan trọng **và** có ít nhất một khách sẵn sàng trả tiền cho execution control → được quyền xem lại thứ tự P3 bằng ADR mới.
 - Ba bản đối ngoại cũ vẫn bị cấm gửi cho tới khi regenerate theo §4.7.
 
-### 1.9 QĐ-9 — Stack: Go backend, Flutter client ✅ CHỐT *(chủ dự án duyệt 25-08-2026; sửa cùng ngày, thay Next.js bằng Flutter)*
+### 1.9 QĐ-9 — Stack: Go backend, Vue client ✅ CHỐT *(chủ dự án duyệt 25-08-2026; sửa cùng ngày Next.js → Flutter; **sửa lần hai 14-09-2026: Flutter → Vue 3** — quyết định ghi tại `frontend/PLAN.md`, SPEC cập nhật 18-09-2026)*
 
 **Quyết định:**
 
 ```text
-Client            Flutter   — Web trước, Desktop/Mobile mở ở P3
-Backend           Go        — monolith, control plane
-Local Agent       Go        — P3
+Client              Vue 3 + TypeScript — Vite, Pinia, vue-router; Web. Desktop/Mobile xét lại ở P3 (xem "Phạm vi theo phase")
+Backend             Go        — monolith, control plane; hai vai `api` và `worker` từ một module, mỗi vai một binary
+Local Agent         Go        — P3
 Playwright Reporter TypeScript — bắt buộc, §7.5
-Database          PostgreSQL
-Artifact          S3 / R2
-Async             Queue (nhiều logical queue, §6.7.4)
+Database            PostgreSQL 17 — đồng thời là job queue của P1 (bảng `jobs`, lease + `FOR UPDATE SKIP LOCKED`); nhiều logical queue §6.7.4 khi Execution cần
+Artifact            S3 / R2   — store `memory` chỉ cho dev và CI
+Observability       Prometheus + alert §6.4; log JSON có `request_id`
+Biên triển khai     Caddy (TLS, phục vụ `frontend/dist`, proxy `/v1`) trước image distroless
 ```
 
 **Vì sao Go ở backend:** ingestion là hot path (batch 500 event / 5 MB, §7.4); resolver chạy bất đồng bộ p50 < 1 s (§7.6) hợp mô hình goroutine; HMAC token verify (§8.8, N18) là stdlib; chunked upload streaming (§7.7) là thế mạnh; single binary + RAM thấp ăn thẳng vào dòng "DB + compute ~$3–5/team" của §10.3. bước **lọc** ứng viên của §9.3 dùng `pg_trgm` phía Postgres (đúng index GIN của §8.9), còn bước **chấm điểm** chạy trong Go — đo được 3,5–5,9ms cho cả một run, và tránh được giới hạn độ dài của `fuzzystrmatch` (N50). Phần còn lại vài trăm dòng Go.
 
-**Vì sao Flutter thay Next.js:** dashboard nằm hoàn toàn sau đăng nhập, dữ liệu riêng theo tenant, không cần SEO/SSR — lý do từng dùng để chọn Next.js static export cũng chính là lý do web framework không còn là ràng buộc. Một codebase UI phủ Web + Desktop + Mobile; và ở P3, Local Agent chạy trên máy tester khiến client desktop (agent status, run monitor, artifact viewer, điều khiển agent) trở thành khác biệt sản phẩm thật chứ không phải thêm một dashboard web nữa.
+**Vì sao Vue thay Flutter (14-09-2026):** chủ dự án quyết; đây là quyết định của người trả công sức, không phải kết luận của một benchmark. Điều thấy được sau bốn ngày build trên stack mới, ghi để lần lật kế tiếp (nếu có) có dữ liệu:
 
-**Bốn ràng buộc bắt buộc — vi phạm là bug, không phải style:**
+1. **Dashboard là ứng dụng văn bản dày** — error, stack trace, bảng dài, link sâu vào từng failure. DOM cho sẵn text-selection, tìm trong trang, URL chia sẻ được, đọc màn hình; ràng buộc 2 của bản Flutter (bọc `SelectionArea` mọi chỗ) tồn tại chỉ để bù cái canvas không có.
+2. **Trace viewer nhúng thẳng.** Playwright trace viewer là web app; trên DOM nó chạy cùng origin tại `/trace/` (vendored từ `playwright-core` ghim version), lấy `trace.zip` bằng chính session cookie — không webview, không host thứ ba. Ràng buộc 4 cũ về webview Linux desktop biến mất.
+3. **Hai ngôn ngữ thay ba.** Reporter bắt buộc là TypeScript (§7.5); client cùng ngôn ngữ nghĩa là một toolchain, một bộ lint/test, một cách nghĩ về kiểu — với đội 1–2 người đây là chi phí thật đã bớt.
+4. **Lý do gốc chọn Flutter chưa có gì đòi hôm nay.** "Một codebase Web + Desktop + Mobile" chỉ có giá khi P3 có Local Agent chạy trên máy tester. Đó là hai phase nữa và một quyết định riêng lúc đó (PWA, Tauri, hay Flutter cho riêng UI agent) — không trả trước bằng canvas ở P1.
 
-1. **Client KHÔNG chứa logic backend.** Toàn bộ API sống ở Go dưới `/v1/` (§6.5). Ràng buộc này giữ nguyên từ bản trước và quan trọng hơn cả framework: §11.3.3 yêu cầu **một hàm `authorize()` duy nhất** — có hai nơi enforce quyền là đường thẳng tới BOLA (API1, §11.6).
-2. **Copy được stack trace là yêu cầu chức năng, không phải chi tiết UI.** Flutter Web render bằng canvas nên không có text-selection mặc định của trình duyệt. Triage là công việc copy-paste error message và stack trace hằng ngày. Bắt buộc: bọc `SelectionArea` cho mọi vùng văn bản kỹ thuật **và** có nút Copy tường minh trên mọi khối error/stack/log. Không có cái này thì sản phẩm khó dùng đúng ở nghiệp vụ lõi của nó.
-3. **Không đưa nội dung report vào HTML thô.** Không render dữ liệu từ report (tên test, error, stack) qua `HtmlElementView` hay bất kỳ đường inject HTML nào; iframe nhúng trace viewer phải `sandbox`. *Ghi nhận mặt tích cực:* mô hình render của Flutter làm mất phần lớn vector XSS mà §11.5 lo — nó chỉ quay lại nếu tự mở đường HTML thô.
-4. **Trace viewer nhúng, không viết lại.** Playwright trace viewer là web app: trên Flutter Web nhúng bằng `HtmlElementView`/iframe. **Rủi ro đã biết:** webview trên Flutter **Linux desktop** yếu — không hứa Linux desktop cho tới khi có prototype chạy được. Windows/macOS dùng webview hệ điều hành. Tuyệt đối không viết lại trace viewer.
+**Bốn ràng buộc bắt buộc — vi phạm là bug, không phải style** (dịch từ bản Flutter sang DOM; cái nào cưỡng chế bằng test thì ghi tên test):
 
-**Phạm vi theo phase:** P1 chỉ ship **Flutter Web**. Desktop/Mobile chỉ mở khi P3 có Local Agent — chọn stack hôm nay để không phải viết lại client lúc đó, nhưng **không** build desktop ở P1.
+1. **Client KHÔNG chứa logic backend.** Toàn bộ API sống ở Go dưới `/v1/` (§6.5); §11.3.3 yêu cầu **một hàm `authorize()` duy nhất** — hai nơi enforce quyền là đường thẳng tới BOLA (API1, §11.6). Cưỡng chế: component không được import repository hay HTTP client; đường đi bắt buộc `view → composable → repository → ApiClient` (`frontend/tests/architecture.test.ts`). UI ẩn nút khi thiếu quyền là tiện; server trả 403/404 mới là luật.
+2. **Copy được stack trace là yêu cầu chức năng, không phải chi tiết UI.** DOM cho chọn văn bản sẵn, nhưng vẫn **bắt buộc nút Copy tường minh** trên mọi khối error/stack/log (`TechnicalBlock`), và văn bản phải sạch mã màu terminal — reporter gỡ ANSI tại nguồn, client gỡ lần hai cho dữ liệu cũ hoặc reporter khác.
+3. **Không đưa nội dung report vào HTML thô.** Mọi dữ liệu từ report (tên test, error, stack, tên artifact) chỉ đi qua text interpolation; **`v-html` bị cấm** bằng test kiến trúc; byte artifact trả với `Content-Security-Policy: default-src 'none'; sandbox` + `nosniff`; api có `X-Frame-Options: DENY`. Mặt tích cực của canvas ở bản cũ (XSS khó) nay phải **giữ bằng luật**, không còn miễn phí — đó là cái giá của DOM và nó được trả bằng test.
+4. **Trace viewer nhúng, không viết lại.** Vendored, ghim version cùng `playwright-core`, phục vụ từ origin của dashboard; mở ở tab riêng với URL trỏ về `/v1/projects/{id}/artifacts/{id}/content`. Tuyệt đối không viết lại trace viewer, không đẩy trace của khách qua `trace.playwright.dev`.
+
+**Phạm vi theo phase:** P1 ship **Vue Web** (bundle có ngưỡng kích thước gác trong `npm run build`; trace viewer vendored không tính vào ngưỡng). Desktop/Mobile **không** làm ở P1 và **không** còn được stack hôm nay trả trước; mở lại đúng lúc P3 có Local Agent, như một quyết định riêng có prototype.
 
 **Đánh đổi đã chấp nhận, ghi rõ để sau khỏi ngạc nhiên:**
 
-- **Ba ngôn ngữ, không phải hai:** Dart + Go + TypeScript. Reporter SDK bắt buộc là TS (§7.5 — nó là Playwright reporter). Với đội 1–2 người đây là chi phí thật.
-- **Flutter Web yếu hơn React ở dashboard rất nặng:** bảng vài chục nghìn dòng, virtualized grid, charting dày, accessibility. Scope hiện tại chưa chạm ngưỡng đó; nếu chạm thì xem lại, không cố đấm.
-- **Bundle CanvasKit vài MB** — chấp nhận được cho app sau đăng nhập.
-- Nếu sau này cần landing page, docs, pricing, public shared report thì làm **static site riêng, cực nhẹ**, không kéo app chính về React.
+- **Vector XSS quay lại ở dạng luật thay vì dạng kiến trúc.** Ràng buộc 3 sống bằng test; ai gỡ test đó là gỡ hàng rào.
+- **Client desktop cho P3 chưa có đường trả trước.** Nếu P3 đòi UI trên máy tester, đó là công sức mới — chấp nhận, vì hai phase là quá xa để trả trước bằng UX kém hơn ở P1.
+- **Hai lần đổi stack client trong ba tuần** (Next.js → Flutter → Vue). Bản nháp Flutter đã gỡ khỏi `frontend/` ngày 18-09 (còn trong lịch sử git); không giữ hai client song song.
+- Nếu sau này cần landing page, docs, pricing, public shared report thì làm **static site riêng, cực nhẹ**, không kéo app chính theo.
 
 **Chưa chốt — phải khóa cùng pricing:** model LLM cho AI Triage (§1.4). §10.3 giả định ~$0.01/hypothesis (6k token vào, 500 ra), tương đương model hạng Haiku. Model hạng Opus khoảng $0.04/hypothesis → biến phí nhảy từ $9–10 lên ~$24/team/tháng, và quy tắc "giá Team ≥ 5× biến phí" sẽ đòi giá ~$120 thay vì $49. **Không được chọn model tách rời khỏi pricing.** Benchmark ở P1.5, khóa model và giá cùng lúc trước Gate-1.5.
 
@@ -516,6 +540,19 @@ Cắt về đúng lõi chứng minh giá trị. Ước lượng sau cắt: **4�
 
 **Không được cắt, dù có gì xảy ra:** test identity + resolver (không có nó thì không có sản phẩm), artifact cap phía server (không có nó thì lỗ tiền), tenant isolation + test cross-tenant (không có nó thì rò dữ liệu giữa khách).
 
+**Thực tế trên `main` 18-09-2026** — bảng trên là kế hoạch cắt, bảng này là cái đã xảy ra:
+
+| Dòng | Đã làm | Ghi chú |
+|---|---|---|
+| OAuth, MFA | chưa — đúng kế hoạch P2 | login email + password (argon2id), session cookie + CSRF (§11.2) |
+| RBAC | 3 role `admin` / `member` / `viewer` | một `authorize()` (§11.3.3); `cmd/api/tenant_walk_test.go` gọi mọi route bằng resource của tenant khác |
+| Merge/Split | **làm sớm** — HTTP admin-only (`merge`, `undo-merge`, `split`) + UI trong lịch sử identity, ghi `identity_audit` | không có script/CSV; xem N60 |
+| Review Queue | **service có từ T0** (bắt buộc — N60); UI quyết định `merged` / `kept` làm sớm 18-09 theo yêu cầu chủ dự án | export/import CSV không làm vì UI đã có |
+| Màn hình EM | **lát đầu** 18-09 — KPI triage cửa sổ 30/90 ngày + trend theo tuần theo category §8.7 | phần còn lại của §2.5 vẫn P1.5 |
+| Artifact client-side | reporter gửi screenshot + video + trace; dashboard hiện ảnh/video inline, trace trong viewer tự host | đủ 5 loại vẫn P2 |
+
+Ba thứ "không được cắt" đều có test giữ: identity + resolver (`internal/identity`, harness T1), cap artifact phía server (`internal/artifact`), tenant isolation (`tenant_walk_test.go`, T4). Bằng chứng: `backend/GATES.md`.
+
 ### 4.5 Gates
 
 #### Gate-0 — cuối tuần 6
@@ -566,7 +603,7 @@ Chỉ viết chi tiết khi gate trước pass. Mỗi gate phải có: (a) số 
 
 1. **Prototype rủi ro cao nhất trước** — test identity đi trước dashboard.
 2. **Schema đóng băng trước khi build AI** — P1.5 chỉ bắt đầu khi §8 không có migration mới trong 2 tuần.
-3. **Boring stack** — Go monolith + Postgres + object storage (S3/R2) + queue; client Flutter (Web trước). Chi tiết và ràng buộc ở **QĐ-9 (§1.9)**. **Chưa** K8s, **chưa** microservices, **chưa** Kafka — điều kiện dùng ghi cụ thể ở §6.7.8, không phải cấm vĩnh viễn. "Queue" ở đây nghĩa là **nhiều logical queue + nhiều worker pool** (§6.7.4), không phải một FIFO toàn hệ thống. Nâng cấp khi có số đo, không khi có cảm giác.
+3. **Boring stack** — Go monolith + Postgres (kiêm job queue ở P1) + object storage (S3/R2); client Vue 3 (Web). Chi tiết và ràng buộc ở **QĐ-9 (§1.9)**. **Chưa** K8s, **chưa** microservices, **chưa** Kafka — điều kiện dùng ghi cụ thể ở §6.7.8, không phải cấm vĩnh viễn. "Queue" ở đây nghĩa là **nhiều logical queue + nhiều worker pool** (§6.7.4), không phải một FIFO toàn hệ thống. Nâng cấp khi có số đo, không khi có cảm giác.
 4. **Mọi tuần đều ship cho partner** — không sprint nào kết thúc bằng "demo nội bộ".
 
 ### 4.7 Quy tắc tài liệu đối ngoại
@@ -831,7 +868,7 @@ flowchart LR
         RES["Identity Resolver"]
         DB[("Postgres")]
         OBJ[("Object Storage<br/>S3 / R2")]
-        WEB["Flutter Client<br/>Web (P1) · Desktop (P3)"]
+        WEB["Vue Client<br/>Web (P1) · Desktop: xét ở P3"]
         AI["AI Triage<br/>(P1.5)"]
     end
     CI --> RPT --> API
@@ -847,7 +884,7 @@ flowchart LR
 | **Reporter SDK**               | P1   | Thu kết quả từ Playwright, tính fingerprint, batch event, upload artifact |
 | **API Server**                 | P1   | AuthN/AuthZ, ingestion, artifact, query báo cáo                           |
 | **Identity Resolver**          | P1   | `clientTestId` → `stableTestId` (§9)                                      |
-| **Flutter Client**             | P1   | Run list, test history, flaky view, trace viewer nhúng, triage UI, màn hình EM. P1 chỉ Web; Desktop/Mobile mở ở P3 (QĐ-9) |
+| **Vue Client**                 | P1   | Run list, test history, flaky view, trace viewer tự host, triage UI, review queue + merge/split, màn hình EM (lát đầu). P1 chỉ Web; Desktop/Mobile xét lại ở P3 (QĐ-9) |
 | **AI Triage**                  | P1.5 | Sinh hypothesis, ghi `TriageEvent`                                        |
 | **Local Agent**                | P3   | Thực thi test theo job, pull-only                                         |
 
@@ -1205,7 +1242,7 @@ Không import được thì chi phí chuyển đổi quá cao, P2 vô nghĩa. Nh
 
 ### 6.9 Bố cục module của monolith — thi hành từ 11-09-2026 theo QĐ-11
 
-> **Đang build ở `backend/` theo cột P1-min của §6.9.11.** Điều kiện vào ban đầu là Gate-0 PASS và đã chốt scope; QĐ-11 (11-09-2026) lật vế đầu và chốt vế sau là **P1-min**. Gate-0 vẫn là cổng kinh doanh — KILL thì `backend/` là bài học, không phải sản phẩm.
+> **Đã build ở `backend/` theo cột P1-min của §6.9.11 — trên `main` từ 18-09-2026, tiến độ ở §0.5.** Điều kiện vào ban đầu là Gate-0 PASS và đã chốt scope; QĐ-11 (11-09-2026) lật vế đầu và chốt vế sau là **P1-min**. Gate-0 vẫn là cổng kinh doanh — KILL thì `backend/` là bài học, không phải sản phẩm.
 >
 > Lý do mục này tồn tại: QĐ-9 chốt "Go monolith" nhưng không nói monolith đó **có hình gì bên trong**. Monolith không có ranh giới cưỡng chế được thì sau 12 tháng thành big ball of mud, và lúc đó §6.7.8 có cho phép tách microservice cũng không tách nổi — vì không tìm ra đường cắt.
 
@@ -1428,15 +1465,15 @@ Chuyển sang `backend/internal/identity/` là **port có kèm test**, không ph
 |---|---|---|---|---|---|
 | `platform/*`, `tenancy`, `authz` | ✅ | ✅ | | | |
 | `ingest`, `results`, `artifact` | ✅ | ✅ | | | |
-| `identity` | ✅ resolver + merge/split dạng **script/CSV** | ✅ + Review Queue UI, `UndoMerge` có giao diện | | | |
+| `identity` | ✅ resolver hai tầng + **review queue service** (bắt buộc — N60) + merge/undo/split qua HTTP admin-only có audit. *Thực tế 18-09: UI cũng đã có, làm sớm theo yêu cầu chủ dự án (§4.4)* | ✅ + Review Queue UI, `UndoMerge` có giao diện | | | |
 | `flaky` | ✅ | ✅ | | | |
-| `query` | ✅ dashboard v0 | ✅ + màn hình EM (§2.5) | | | |
-| `triage` | ghi `TriageEvent` thủ công | ghi `TriageEvent` thủ công | ✅ AI hypothesis | | |
+| `query` | ✅ dashboard v0. *Thực tế 18-09: có thêm lát đầu màn hình EM* | ✅ + màn hình EM (§2.5) | | | |
+| `triage` | ✅ ghi `TriageEvent` thủ công | ghi `TriageEvent` thủ công | ✅ AI hypothesis | | |
 | `billing` | — | shadow meter (§10.6) | | | |
 | `testmgmt` | — | — | — | ✅ §6.8 | |
 | `execution` | — | — | — | — | ✅ §6.7 |
 
-§4.3 Track A ghi rõ P1-min làm *"identity operations dạng script/CSV"* — nghĩa là **không có** Review Queue service ở P1-min. Dựng sẵn nó rồi Gate-0 chốt P1-min là làm thừa; giả định ngược lại là thiếu. **Chốt scope trước, tạo thư mục sau.**
+§4.3 Track A ghi P1-min làm *"identity operations dạng script/CSV"* — đọc đúng là **không cần giao diện** cho merge/split ở P1-min. Nó **không** có nghĩa là không có Review Queue service: §9.3 tầng 2 và alert §6.4 đòi bảng và gauge từ ngày đầu (N60). Nguyên tắc **chốt scope trước, tạo thư mục sau** vẫn đúng cho `testmgmt` và `execution` — hai module chưa có một dòng nào trong `backend/`.
 
 #### 6.9.12 Sáu thứ giết modular monolith
 
@@ -2059,7 +2096,7 @@ Vẫn phải chạy lại trên report thật ở tuần 3 theo §9.6 điều 1 
 | Title chứa dữ liệu động (`"order #8412 succeeds"`)    | v1: hai identity — Review Queue sẽ đầy. Backlog v2: phát hiện pattern số/uuid trong title, chuẩn hóa thành placeholder                         |
 | Xóa test rồi thêm lại sau 2 tháng | Fingerprint giống hệt → exact match nối lại đúng (alias còn đó). **Nhưng nếu title đổi nhẹ, ứng viên 60 ngày vẫn `auto_match` ở score 0.868** — `S_recency` chỉ nặng 10%, không đủ sức chặn (N45). 90+ ngày mới xuống review; không bao giờ thành identity mới. Bật `RecencyGateDays` nếu muốn chặn thật |
 | 10.000 test/run                                       | Bước 2–3 chỉ chạy cho fingerprint lạ; run bình thường có < 10 fingerprint lạ                                                                   |
-| Hai run song song cùng gửi fingerprint lạ giống nhau  | `UNIQUE(projectId, fingerprint)` §8.5 + upsert `ON CONFLICT` → chỉ một identity được tạo, request kia nhận identity đó. **Test race bắt buộc** |
+| Hai run song song cùng gửi fingerprint lạ giống nhau  | `UNIQUE(projectId, fingerprint)` §8.5 + upsert `ON CONFLICT` → chỉ một identity được tạo, request kia nhận identity đó. **Test race bắt buộc.** **Và (N61):** một transaction ghi nhiều key phải sắp key theo **thứ tự toàn cục** (fingerprint cho identity/alias, identity id cho flaky) trước khi ghi — không thì hai worker resolve cùng bộ test deadlock 40P01 và retry nuốt p99 §14.2. Harness T1 khẳng định `last_error IS NULL` cho mọi job |
 
 ---
 
@@ -2280,9 +2317,9 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 
 **15 đóng · 1 mở theo thiết kế (F03).** F12 và F16 — hai mục treo từ bản thẩm định đầu tiên — nay đã đóng thật: bản `.docx` sinh bằng pipeline `docs/external/build.mjs` và qua đủ 11/11 mục checklist §4.7 do `verify.sh` kiểm. README của bộ v3.1 từng đánh dấu chúng đóng khi hiện vật chưa sửa; lần này có script chứng minh.
 
-### 12.2 Phát hiện khi review hợp nhất (N01–N59)
+### 12.2 Phát hiện khi review hợp nhất (N01–N61)
 
-Danh sách đầy đủ 59 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
+Danh sách đầy đủ 61 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
 
 Trước đây mục này giữ một bản tóm tắt song song của đúng 50 dòng đó. Hai bảng cho cùng một danh sách nghĩa là mỗi phát hiện phải sửa hai lần — và chúng **đã** lệch nhau thật: khi sửa số đo của N47 ngày 30-08, bản thứ ba nằm trong §8.9 bị bỏ sót vì không ai nhớ nó tồn tại. Trùng lặp không làm tài liệu đầy đủ hơn, nó chỉ làm tài liệu sai ở nhiều chỗ hơn.
 
@@ -2298,10 +2335,11 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 | 6 | ~~Chọn P1-min hoặc P1-full~~ → **chốt P1-min 11-09-2026** theo QĐ-11, khởi công song song Phase 0. P1-full chỉ xét sau Gate-0 PASS | Kill-gate owner | ✅ |
 | 7 | Chạy shadow pricing meter; chưa charge theo `stableTestId` | Product/engineering | P1 → trước Gate-1.5 |
 | 8 | **Khóa model LLM cùng lúc với giá** — benchmark hypothesis trên vài model; model hạng Opus đẩy biến phí $9–10 → ~$24/team và phá sàn giá $49 (QĐ-9, §10.3) | Product/engineering | P1.5, trước Gate-1.5 |
+| 9 | Xây P1-min song song Phase 0 (QĐ-11) | Owner dự án | ✅ code trên `main` 18-09-2026 (§0.5); T2/T5 phần cần server còn mở (§14.1) |
 
 **Phase 0 khởi động lại 15-09-2026** (§5.8) — lần chốt 26-08 không diễn ra. Mục 1 và 2 đã đóng. Mốc kế tiếp: **14-09 đủ 30 tên trong tracker**, **21-09 chốt ≥ 3 booking**, **12-10 hạn chót partner #3**, rồi **26-10 họp Gate-0**.  
 **Blocker để gửi tài liệu đối ngoại:** chỉ còn mục 4 — mọi claim competitor chưa kiểm chứng. Mục 3 đã đóng: `.md` và `.docx` đều sẵn sàng, `verify.sh` gác 11/11. `.pptx` chưa có nguồn, và đó là lựa chọn có lý do ghi ở `docs/external/README.md`.  
-**P1-min/P1-full không chặn phỏng vấn; nó chặn việc bắt đầu build sau Gate-0.**
+**P1-min đã build song song theo QĐ-11 (§0.5); Gate-0 không đổi và code không được nhắc tới ở đó (QĐ-11 #2). P1-full chỉ xét sau Gate-0 PASS.**
 
 ---
 ## 14. Technical Readiness Gates (T0–T5)
@@ -2312,15 +2350,15 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 
 ### 14.1 Các gate
 
-| Gate | Chứng minh được điều gì | Phase áp dụng |
-|---|---|---|
-| **T0** | Core flow chạy end-to-end: reporter đẩy được run thật lên, dashboard hiện đúng | P1, trước partner đầu tiên |
-| **T1** | **Không mất dữ liệu** + idempotency + retry an toàn | P1, trước partner đầu tiên |
-| **T2** | Load/concurrency đạt target §14.2 | P1, trước partner thứ ba |
-| **T3** | Failure recovery + observability đủ để biết mình đang hỏng | P1, trước Gate-1 |
-| **T4** | Security + tenant isolation | P1, trước partner đầu tiên (không phải sau) |
-| **T5** | Soak test 24–72 h ổn định, không rò bộ nhớ / không phình queue | P1, trước Gate-1 |
-| **T2-EX** | Parallelism và fairness của Execution Plane | **P3**, không áp dụng ở P1 |
+| Gate | Chứng minh được điều gì | Phase áp dụng | Trạng thái 18-09-2026 — trích `backend/GATES.md` |
+|---|---|---|---|
+| **T0** | Core flow chạy end-to-end: reporter đẩy được run thật lên, dashboard hiện đúng | P1, trước partner đầu tiên | ✅ 16-09 — reporter thật đẩy run, dashboard hiện đúng; CI `e2e` chạy lại toàn bộ trên compose (reporter → api → UI, 12 bước) |
+| **T1** | **Không mất dữ liệu** + idempotency + retry an toàn | P1, trước partner đầu tiên | ✅ 16-09 — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm và sửa deadlock 40P01 (N61) |
+| **T2** | Load/concurrency đạt target §14.2 | P1, trước partner thứ ba | ⏳ 17-09 — dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời **✗ trên laptop** (p95 ≈ 2 s, từ 8,4 s) — cần server + máy phát tải riêng |
+| **T3** | Failure recovery + observability đủ để biết mình đang hỏng | P1, trước Gate-1 | ✅ 17-09 — alert §6.4 trên tên metric thật, gauge phía api, 4 kịch bản hỏng nhìn thấy ở `/metrics`, log không lộ bí mật |
+| **T4** | Security + tenant isolation | P1, trước partner đầu tiên (không phải sau) | ✅ 16/17-09 — walk mọi route bằng resource tenant khác; §11.6 có bằng chứng từng dòng; restore drill ✅ (RTO ≈ 2 s ở cỡ test); audit revoke ✅. **Còn mở: pentest** |
+| **T5** | Soak test 24–72 h ổn định, không rò bộ nhớ / không phình queue | P1, trước Gate-1 | ⏳ 18-09 — harness chạy 2 h trên laptop: 0 lỗi, mọi trend phẳng; sửa 3 lỗi tích lũy (`jobs` không dọn, backlog quét cả bảng, grant store dev không xóa). **24–72 h cần host riêng + S3** |
+| **T2-EX** | Parallelism và fairness của Execution Plane | **P3**, không áp dụng ở P1 | · P3 |
 
 > **Lưu ý về thứ tự:** T4 (tenant isolation) phải xong **trước** người dùng thật đầu tiên, không xếp sau như thói quen thường thấy. Rò dữ liệu giữa hai khách là lỗi không sửa lại được bằng patch — uy tín đã mất rồi.
 >
@@ -2341,18 +2379,18 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 
 Mỗi kịch bản phải giữ đúng invariant, không chỉ "không crash":
 
-| Kịch bản | Invariant phải giữ |
-|---|---|
-| Kill worker giữa job | Job được recover hoặc đánh dấu đúng; không mất kết quả đã nhận |
-| Kill API giữa batch ingest | Client retry cùng `(localRunId, sequence)` → không nhân đôi event (§7.1) |
-| Restart kết nối DB | Không run nào kẹt vĩnh viễn ở `running` |
-| Queue không khả dụng 30 s | Ingest vẫn nhận, xử lý trễ; không trả 5xx cho reporter |
-| S3/R2 timeout khi upload | Artifact về trạng thái retry được; **run vẫn hợp lệ** (§10.4) |
-| Duplicate event/webhook | Idempotency key chặn; không double-count |
-| Hai run song song gửi cùng fingerprint lạ | Chỉ một `TestIdentity` được tạo (§9.7, `ON CONFLICT`) |
-| Reporter mất mạng toàn bộ | Spool local, **test run của khách vẫn xanh** — bất biến sản phẩm §7.5 |
-| User A gọi mọi endpoint với resource của org B | 100% trả `403`/`404` (§11.3.3) — đây là gate release |
-| Restore backup Postgres | Restore thật thành công trước Gate-1 (§11.5) — backup chưa restore thử = chưa có backup |
+| Kịch bản | Invariant phải giữ | Đã chạy — trích `backend/GATES.md` |
+|---|---|---|
+| Kill worker giữa job | Job được recover hoặc đánh dấu đúng; không mất kết quả đã nhận | ✅ `test/failure` `TestKillWorkerMidJobThenRecover` — 36/36 job done, 0 dead, đúng 12 identity dù 4 worker song song |
+| Kill API giữa batch ingest | Client retry cùng `(localRunId, sequence)` → không nhân đôi event (§7.1) | ✅ `TestKillAPIMidBatchThenReplay` — kill giữa dòng, replay 40 batch: `accepted + duplicates = 1000`, không nhân đôi |
+| Restart kết nối DB | Không run nào kẹt vĩnh viễn ở `running` | ✅ `TestDBConnectionsDroppedUnderTraffic` — `pg_terminate_backend` ×4 giữa traffic; 503 rồi retry qua; 0 run kẹt `running` |
+| Queue không khả dụng 30 s | Ingest vẫn nhận, xử lý trễ; không trả 5xx cho reporter | ✅ đọc là *worker vắng* (queue P1 là bảng Postgres) — 108 request 201/200 khi không có worker, xử lý hết khi worker lên |
+| S3/R2 timeout khi upload | Artifact về trạng thái retry được; **run vẫn hợp lệ** (§10.4) | 🔶 unit với `memory.Fail`; S3/R2 thật chờ staging |
+| Duplicate event/webhook | Idempotency key chặn; không double-count | ✅ `internal/ingest` `TestIngestEndToEnd`; soak 2 h: 90/90 bit lật → `422 CHECKSUM_MISMATCH`, run vẫn hợp lệ |
+| Hai run song song gửi cùng fingerprint lạ | Chỉ một `TestIdentity` được tạo (§9.7, `ON CONFLICT`) | ✅ `TestRaceOnUnknownFingerprint` + harness T1 trên binary thật (N61) |
+| Reporter mất mạng toàn bộ | Spool local, **test run của khách vẫn xanh** — bất biến sản phẩm §7.5 | ✅ test của reporter (spool `.jsonl`, không bao giờ fail run); chưa có bài cắt mạng thật của binary |
+| User A gọi mọi endpoint với resource của org B | 100% trả `403`/`404` (§11.3.3) — đây là gate release | ✅ `cmd/api/tenant_walk_test.go` — mọi pattern router đã đăng ký; route chưa phân loại = test fail |
+| Restore backup Postgres | Restore thật thành công trước Gate-1 (§11.5) — backup chưa restore thử = chưa có backup | ✅ `test/restore` 17-09 — dump → DB mới → 24/24 bảng checksum bằng nhau → api trả đúng byte → worker tiếp job |
 
 ### 14.4 Quan hệ với gate sản phẩm
 

@@ -1,6 +1,3 @@
-.dart_tool/
-.flutter-plugins-dependencies
-build/
 coverage/
 *.iml
 node_modules/

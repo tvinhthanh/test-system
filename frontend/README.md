@@ -2,9 +2,9 @@
 
 Vue 3 + TypeScript web client. Read [PLAN.md](PLAN.md),
 [FRONTEND_RULES.md](FRONTEND_RULES.md), and [API_CONTRACT.md](API_CONTRACT.md)
-before changing code. The user-selected Vue stack supersedes SPEC QD-9's
-Flutter choice. `lib/`, `pubspec.yaml`, `analysis_options.yaml`, and `web/` are
-inactive Flutter draft files; npm/Vite never compile them.
+before changing code. SPEC QD-9 records the stack: Vue 3 was chosen on 2026-09-14 (replacing the
+earlier Flutter choice); the inert Flutter draft was removed on 2026-09-18 and
+lives only in git history.
 
 ## Run
 
