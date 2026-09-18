@@ -375,6 +375,17 @@ worker, p50/p95 của `/events` trong cửa sổ, tổng request/lỗi. CSV đ�
 | Latency | `/events` (100 event) p50 ≈ 32 ms, p95 median 65 ms, p95 ⅓ đầu 79 ms → ⅓ cuối 59 ms — **không trôi** |
 | `test_results` | 47 MB cho 90 900 result (≈ 520 B/result kể cả index) |
 
+**Lần chạy dài hơn, 17-09 tối (laptop, 2 h dự kiến):** máy ngủ sau **51 phút**
+(102 mẫu / 30 s) và `go test` bị giết vì quá `-timeout` theo giờ tường — CSV cuối
+không được ghi (đã sửa: giờ flush từng mẫu), số lấy từ log: **2 298 run,
+232 098 result, 37 169 request, 0 lỗi**; goroutine api 22 → 22, worker 14; backend
+Postgres 12 → 12; worker RSS 21 → 20 MB; `jobs` phẳng 228 dòng (`JOB_RETENTION=5m`);
+backlog 0 suốt; `/events` p95 median 108 → 53 ms. api RSS 34 → 60 MB (trừ payload
+store: 31 → 45) — chính điều khiến harness đổi thước đo sang heap sống sau GC
+(xem ghi chú heap dưới); mẫu đầu sau khi máy thức: gauge DB trả −1 rồi hồi — đúng
+như thiết kế ("không với tới DB" khác "rỗng"). Sau khi bị giết, api/worker con
+thành orphan giữ 5 connection — dọn tay; ghi vào doc của harness.
+
 **Lỗi thật harness bắt được (sửa cùng ngày):**
 
 1. **`jobs` không bao giờ được dọn.** Mỗi run một job `done` nằm lại vĩnh viễn —

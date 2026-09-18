@@ -16,6 +16,11 @@
 //	SOAK_OBJSTORE      s3 to upload to a real bucket (OBJSTORE_* from the environment); default memory
 //	SOAK_OUT           CSV of every sample (default: next to the test binary's temp dir, path logged)
 //
+// The CSV is flushed per sample. If the test process is killed outright (a
+// -timeout hit because the host slept, kill -9), the api and worker it
+// started are orphaned: stop the `atp-gate-*/api` and `worker` processes and
+// drop the schema whose connections they hold before the next run.
+//
 // Traffic per run: create → 2 batches of events (every 25th test fails,
 // every 40th is flaky: fails then passes on retry) → 2 artifacts through the
 // presigned PUT, one in ten completed with a wrong checksum on purpose
@@ -343,10 +348,14 @@ func TestSoakSteadyTraffic(t *testing.T) {
 	}()
 
 	// Sampler: rows every interval until the traffic stops, then one more
-	// after the drain.
+	// after the drain. Every row is flushed to the CSV as it is taken, so a
+	// run the host kills (or a laptop that sleeps through the -timeout) still
+	// leaves its data behind.
 	var rows []sample
 	var times []time.Time
 	started := time.Now()
+	out := newCSV(t, outPath)
+	defer out.close()
 	log := func(x sample) {
 		t.Logf("%5.0fs api rss %4.0f live %4.0f (net %4.0f) MB/%3.0f gor  wrk rss %3.0f live %3.0f MB/%3.0f gor  conns %2.0f  backlog %3.0f (oldest %3.0fs)  jobs %5.0f rows (%4.0f done, %3.1f MB)  runs %5.0f results %7.0f  events p50 %4.0f p95 %4.0f ms (n=%3.0f)  errors %.0f/%.0f  5xx %.0f",
 			x["elapsed_s"], x["api_rss_mb"], x["api_heap_live_mb"], x["api_heap_live_adj_mb"], x["api_goroutines"], x["worker_rss_mb"], x["worker_heap_live_mb"], x["worker_goroutines"], x["db_connections"],
@@ -366,6 +375,7 @@ loop:
 			}
 			x := s.collect(started, c)
 			rows, times = append(rows, x), append(times, time.Now())
+			out.row(x, times[len(times)-1])
 			log(x)
 		}
 	}
@@ -379,8 +389,9 @@ loop:
 	})
 	final := s.collect(started, c)
 	rows, times = append(rows, final), append(times, time.Now())
+	out.row(final, times[len(times)-1])
 	log(final)
-	writeCSV(t, outPath, rows, times)
+	t.Logf("%d samples written to %s", len(rows), outPath)
 
 	// ---- invariants at the end ----
 	req, errs := c.totals()
@@ -641,19 +652,37 @@ func (s *soak) browser(ctx context.Context, c *counters, project string) {
 	}
 }
 
-func writeCSV(t *testing.T, path string, rows []sample, times []time.Time) {
+// csvOut appends one row per sample and flushes each, so the file is always
+// complete up to the last sample taken.
+type csvOut struct {
+	f *os.File
+	w *csv.Writer
+}
+
+func newCSV(t *testing.T, path string) *csvOut {
 	t.Helper()
 	f, err := os.Create(path)
 	if err != nil {
-		t.Logf("csv: %v", err)
-		return
+		t.Logf("csv: %v (samples will only be in the log)", err)
+		return &csvOut{}
 	}
-	defer f.Close()
 	w := csv.NewWriter(f)
 	_ = w.Write(columns)
-	for i, r := range rows {
-		_ = w.Write(r.row(times[i]))
-	}
 	w.Flush()
-	t.Logf("samples written to %s", path)
+	return &csvOut{f: f, w: w}
+}
+
+func (c *csvOut) row(x sample, at time.Time) {
+	if c.w == nil {
+		return
+	}
+	_ = c.w.Write(x.row(at))
+	c.w.Flush()
+	_ = c.f.Sync()
+}
+
+func (c *csvOut) close() {
+	if c.f != nil {
+		_ = c.f.Close()
+	}
 }
