@@ -122,7 +122,7 @@ POST /v1/runs                       Authorization: Bearer atp_ing_…   X-Protoc
   200 cùng body nếu localRunId đã có
 
 POST /v1/runs/{localRunId}/events   ≤ 500 event, ≤ 5 MB
-  {events:[{sequence, type:"test.finished", clientTestId, occurrenceIndex, attempt,
+  {events:[{sequence (≥ 1, duy nhất trong run — khóa idempotency cùng localRunId), type:"test.finished", clientTestId, occurrenceIndex, attempt,
             identity{framework,filePath,titlePath[],paramSignature},
             status: passed|failed|skipped|timed_out|interrupted,
             outcome: expected|unexpected|flaky|skipped,        ← verdict của framework, N36/N41
