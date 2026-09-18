@@ -43,7 +43,12 @@ ATP_URL=https://api.example.com ATP_TOKEN=atp_ing_… npx playwright test
 ```bash
 npm install
 npm test          # tsc + node --test: 14 test (retry policy, batching, spool, HAR, fingerprint parity, end-to-end với server giả)
-npm run example   # chạy example/ qua reporter thật — cần ATP_URL/ATP_TOKEN trỏ vào backend đang chạy
+npm run example   # chạy example/ qua reporter thật — cần ATP_URL/ATP_TOKEN trỏ vào backend đang chạy, và `npx playwright install chromium` (một test dùng browser thật)
 ```
 
 Đã chạy thật 16-09 với `example/` (3 test: pass, flaky có chủ đích, fail) vào `backend` local: 5 event, 6 artifact verified, worker resolve 3 identity, run `failed` với `flaky_count 1`, `final_status` = passed / flaky_pass / failed đúng bảng N41.
+Từ 18-09 `example/` có thêm một test Chromium thật cố ý fail (`receipt.spec.ts`)
+với `trace/video/screenshot: retain-on-failure` — một run demo mang đủ mọi
+kind artifact mà dashboard xử lý phía client (video, trace, screenshot): 7 event,
+17 artifact. Text lỗi được bỏ mã màu ANSI trước khi gửi (`src/text.ts`) —
+Playwright tô màu message khi nghĩ mình đang in ra terminal.

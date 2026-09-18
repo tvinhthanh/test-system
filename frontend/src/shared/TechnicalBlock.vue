@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { Copy, Check } from "@lucide/vue";
-import { ref } from "vue";
-defineProps<{ title: string; text: string }>();
+import { computed, ref } from "vue";
+import { stripAnsi } from "./format";
+const props = defineProps<{ title: string; text: string }>();
+// Report text is untrusted and may still carry terminal colour codes from
+// frameworks that thought they were printing to a TTY (the reporter strips
+// them at the source since 2026-09-17; older rows and other reporters may
+// not). Shown and copied as clean text; never rendered as HTML.
+const clean = computed(() => stripAnsi(props.text));
 const feedback = ref("");
 async function copy(text: string) {
   try {
@@ -21,7 +27,7 @@ async function copy(text: string) {
         class="icon-button"
         :aria-label="`Copy ${title}`"
         :title="`Copy ${title}`"
-        @click="copy(text)"
+        @click="copy(clean)"
       >
         <Check v-if="feedback === 'Copied'" :size="16" /><Copy
           v-else
@@ -29,6 +35,6 @@ async function copy(text: string) {
         />
       </button>
     </header>
-    <pre>{{ text }}</pre>
+    <pre>{{ clean }}</pre>
   </section>
 </template>

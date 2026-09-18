@@ -110,3 +110,13 @@ it("decodes attempt artifacts, tolerates their absence, bounds them, and owns th
     ),
   ).rejects.toThrow();
 });
+
+it("opens traces in the same-origin trace viewer with an absolute artifact URL", () => {
+  const repository = new ReportsRepository(new ApiClient(vi.fn<Transport>()));
+  expect(repository.traceViewerUrl("https://atp.example", "p", "a1")).toBe(
+    "/trace/index.html?trace=" +
+      encodeURIComponent(
+        "https://atp.example/v1/projects/p/artifacts/a1/content",
+      ),
+  );
+});

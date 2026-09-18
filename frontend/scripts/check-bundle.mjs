@@ -24,6 +24,9 @@ function check(directory) {
   for (const name of readdirSync(directory)) {
     const file = resolve(directory, name);
     if (statSync(file).isDirectory()) {
+      // dist/trace is Playwright's vendored trace viewer, not our bundle
+      // (scripts/copy-trace-viewer.mjs); its own chunks are its own business.
+      if (name === "trace" && directory === root) continue;
       check(file);
       continue;
     }

@@ -72,8 +72,8 @@ Explicitly out of the current slice:
 - Review Queue UI; P1-min uses CSV/script operations.
 - Merge/Split UI; P1-min uses CSV/script operations.
 - Desktop and mobile application targets; the current client is Web only.
-- Trace viewer integration until the artifact contract and safe iframe policy
-  are implemented.
+- Embedding the trace viewer *inside* the failure page (iframe policy). It
+  opens in a new tab on our origin instead (2026-09-18).
 
 ## Architecture Rules
 
@@ -202,8 +202,14 @@ need cache invalidation; current data is route-owned and session scoped.
 - [x] Add triage actions and event timeline.
 - [x] List each attempt's verified artifacts with links to the server's
       content route (2026-09-17). The server decides inline vs download
-      (§11.5 allowlist); the UI never embeds artifact bytes. Trace viewer
-      integration is still out of scope (needs a safe iframe policy).
+      (§11.5 allowlist); the UI never embeds artifact bytes.
+- [x] §4.4 P1-min client-side handling of video + trace (2026-09-18):
+      screenshots render as `<img>`, videos as `<video controls>` from the
+      content route; `trace.zip` opens in Playwright's trace viewer served
+      from our own origin at `/trace/` (vendored `playwright-core` 1.63.0,
+      `scripts/copy-trace-viewer.mjs` → `dist/trace/`, Vite dev middleware),
+      whose service worker fetches the zip with the session cookie — no
+      customer trace ever goes to trace.playwright.dev.
 
 ### Slice 5: History And Flaky
 
@@ -240,6 +246,25 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-18 (video, screenshots and traces on the failure page)
+
+- Screenshot artifacts render inline (`img`, lazy), videos as `video controls
+  preload=metadata`, both straight from the content route (the two kinds the
+  server serves inline). Trace artifacts get "Open in trace viewer": the
+  vendored Playwright trace viewer at `/trace/index.html?trace=<absolute
+  content URL>` on our origin; its service worker fetches the zip with the
+  session cookie. Verified in Chrome against the real api: 1280×720
+  screenshots decoded, 2.3 s 800×450 videos with metadata parsed, the viewer
+  shows the actions and the failing `toHaveText`.
+- `playwright-core` 1.63.0 is a pinned devDependency only for its
+  `lib/vite/traceViewer`; `npm run build` copies it to `dist/trace/`
+  (skipped by the bundle gate as third-party); `vite dev` serves it from
+  node_modules. Caddy serves `dist/trace/` like the rest of `dist/`.
+- `TechnicalBlock` strips terminal colour codes (Playwright leaves `[2m`,
+  `[31m` in assertion text); the reporter now strips them at the source too.
+- Reporter example gained a real Chromium test that fails on purpose with
+  trace/video/screenshot retained, so a demo run carries every kind.
 
 ### 2026-09-17 (artifacts reach the user)
 
@@ -308,7 +333,7 @@ All commands below ran from `frontend/` on 2026-09-14.
 | Check | Result |
 | --- | --- |
 | `npm run build` (includes typecheck + bundle gate) | PASS; initial JS 41.2 KiB gzip, nine lazy modules, no fixture markers |
-| `npm run test:unit` | PASS; 17 tests in 7 files |
+| `npm run test:unit` | PASS; 20 tests in 7 files (2026-09-18) |
 | `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |

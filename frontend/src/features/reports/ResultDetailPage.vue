@@ -24,10 +24,12 @@ const {
   refresh,
   emit,
   artifactUrl,
+  traceUrl,
 } = useResultDetail();
 // Only these kinds are ever rendered inline by the server (§11.5 allowlist);
 // the rest download, so the link says so up front.
 const inlineKinds = new Set(["screenshot", "video", "log"]);
+const isMedia = (kind: string) => kind === "screenshot" || kind === "video";
 </script>
 <template>
   <RouterLink class="back-link" :to="`/p/${encodeURIComponent(project)}/runs`"
@@ -118,23 +120,60 @@ const inlineKinds = new Set(["screenshot", "video", "log"]);
             No error payload for this attempt.
           </p>
           <ul v-if="attempt.artifacts.length" class="artifact-list">
-            <li v-for="artifact in attempt.artifacts" :key="artifact.id">
-              <Paperclip :size="14" />
-              <!-- Report content is untrusted: rendered as text, never HTML.
-                   The server sets Content-Disposition; a download attribute
-                   is added only for kinds it will not render inline. -->
-              <a
-                :href="artifactUrl(artifact.id)"
-                target="_blank"
-                rel="noopener"
-                :download="
-                  inlineKinds.has(artifact.kind) ? null : artifact.name
-                "
-                >{{ artifact.name }}</a
-              >
-              <span class="muted"
-                >{{ artifact.kind }} / {{ bytes(artifact.sizeBytes) }}</span
-              >
+            <li
+              v-for="artifact in attempt.artifacts"
+              :key="artifact.id"
+              :class="{ media: isMedia(artifact.kind) }"
+            >
+              <div class="artifact-row">
+                <Paperclip :size="14" />
+                <!-- Report content is untrusted: rendered as text, never HTML.
+                     The server sets Content-Disposition; a download attribute
+                     is added only for kinds it will not render inline. -->
+                <a
+                  :href="artifactUrl(artifact.id)"
+                  target="_blank"
+                  rel="noopener"
+                  :download="
+                    inlineKinds.has(artifact.kind) ? null : artifact.name
+                  "
+                  >{{ artifact.name }}</a
+                >
+                <span class="muted"
+                  >{{ artifact.kind }} / {{ bytes(artifact.sizeBytes) }}</span
+                >
+                <!-- §4.4 P1-min: client-side handling for video + trace. The
+                     trace opens in Playwright's viewer served from this origin
+                     (/trace/), which fetches the zip with the session cookie;
+                     no third-party host ever sees a customer's trace. -->
+                <a
+                  v-if="artifact.kind === 'trace'"
+                  class="trace-link"
+                  :href="traceUrl(artifact.id)"
+                  target="_blank"
+                  rel="noopener"
+                  >Open in trace viewer</a
+                >
+              </div>
+              <!-- Screenshots and videos are the two inline kinds the server
+                   allows (§11.5 allowlist); bytes come from our content route
+                   with the declared, validated content type. -->
+              <img
+                v-if="artifact.kind === 'screenshot'"
+                class="artifact-media"
+                :src="artifactUrl(artifact.id)"
+                :alt="artifact.name"
+                loading="lazy"
+                decoding="async"
+              />
+              <video
+                v-else-if="artifact.kind === 'video'"
+                class="artifact-media"
+                :src="artifactUrl(artifact.id)"
+                controls
+                preload="metadata"
+                playsinline
+              ></video>
             </li>
           </ul>
         </article>

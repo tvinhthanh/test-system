@@ -19,6 +19,7 @@ import { uploadAttachment, type Attachment, type UploadOutcome } from "./artifac
 import { Client, type RunResponse } from "./client";
 import { clientTestId, normalizeFilePath, normalizeParams, type Signals } from "./fingerprint";
 import { EventQueue, describe } from "./queue";
+import { stripAnsi } from "./text";
 
 export { Client, ApiError, NetworkError } from "./client";
 export { clientTestId, fingerprint, normalize, normalizeFilePath, normalizeParams, normalizeTitle, TITLE_SEP, type Signals } from "./fingerprint";
@@ -163,9 +164,9 @@ export default class AtpReporter implements Reporter {
       };
       if (result.error) {
         event.error = {
-          message: result.error.message ?? "",
-          stack: result.error.stack ?? "",
-          snippet: result.error.snippet ?? "",
+          message: stripAnsi(result.error.message ?? ""),
+          stack: stripAnsi(result.error.stack ?? ""),
+          snippet: stripAnsi(result.error.snippet ?? ""),
         };
       }
       // Enqueue after the run exists; the queue preserves order.

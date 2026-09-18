@@ -229,6 +229,12 @@ export class ReportsRepository {
   artifactContentUrl(projectId: string, artifactId: string) {
     return `${scope(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
   }
+  // The vendored Playwright trace viewer (/trace/, same origin) opened on an
+  // artifact's bytes. The viewer needs an absolute URL for the zip; the
+  // caller supplies the page origin so this module stays free of window.
+  traceViewerUrl(origin: string, projectId: string, artifactId: string) {
+    return `/trace/index.html?trace=${encodeURIComponent(origin + this.artifactContentUrl(projectId, artifactId))}`;
+  }
   async triage(
     projectId: string,
     resultId: string,

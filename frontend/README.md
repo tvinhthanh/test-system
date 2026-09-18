@@ -50,6 +50,17 @@ It lists every `/v1` call with its real status and fails on any non-2xx (other
 than the deliberate wrong-password 401) or console error. This is the
 repeatable form of GATES.md T0 layer 3.
 
+## Artifacts on the failure page
+
+Screenshots and videos render inline from the api's content route; `trace.zip`
+opens in Playwright's trace viewer served from **this origin** at `/trace/`
+(`vite dev` serves it from `node_modules/playwright-core`; `npm run build`
+copies it to `dist/trace/`, which Caddy serves with the rest of `dist/`). The
+viewer's service worker fetches the zip with the session cookie, so a
+customer's trace never leaves the deployment. `playwright-core` is a pinned
+devDependency for that directory alone — it is not part of the SPA bundle and
+the bundle gate skips `dist/trace/`.
+
 Build includes a bundle gate: initial JS and each lazy JS chunk at most 100 KiB
 gzip, at least four lazy route modules, no known fixture payload markers.
 These are initial project budgets, not performance measurements of a real

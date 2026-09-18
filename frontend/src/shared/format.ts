@@ -39,3 +39,11 @@ export function bytes(value: number) {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
+// Terminal colour codes (CSI sequences and the odd bare escape) that some
+// frameworks leave in error text. The reporter strips them at the source;
+// this is the belt for rows that predate it or came from other reporters.
+// eslint-disable-next-line no-control-regex
+const ansi = /\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_]/g;
+export function stripAnsi(value: string) {
+  return value.replace(ansi, "");
+}

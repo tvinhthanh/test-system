@@ -682,15 +682,32 @@ tr:hover td {
   font-size: var(--small);
 }
 .artifact-list li {
+  min-width: 0;
+}
+.artifact-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-.artifact-list a {
+.artifact-row a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.artifact-row .trace-link {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+.artifact-media {
+  display: block;
+  margin-top: var(--space-2);
+  max-width: min(100%, 720px);
+  max-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted, #f6f7f8);
 }
 .event-row {
   display: flex;

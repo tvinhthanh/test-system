@@ -69,6 +69,8 @@ export function useResultDetail() {
   // Same-origin URL for an artifact's bytes — the repository owns the path.
   const artifactUrl = (artifactId: string) =>
     reports.artifactContentUrl(project.value, artifactId);
+  const traceUrl = (artifactId: string) =>
+    reports.traceViewerUrl(window.location.origin, project.value, artifactId);
   return {
     ...resource,
     project,
@@ -78,5 +80,6 @@ export function useResultDetail() {
     refresh,
     emit,
     artifactUrl,
+    traceUrl,
   };
 }
