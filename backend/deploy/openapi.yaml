@@ -515,9 +515,9 @@ paths:
                     items:
                       type: object
                       properties:
-                        Week: { type: string, format: date-time }
-                        Category: { type: string }
-                        Count: { type: integer }
+                        week: { type: string, format: date-time, description: Start of the week, UTC. }
+                        category: { type: string, enum: [app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown], description: "§8.7; `unknown` = not triaged yet." }
+                        count: { type: integer }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 

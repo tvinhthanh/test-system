@@ -2,6 +2,7 @@
 import {
   Activity,
   FolderGit2,
+  Gauge,
   GitBranch,
   LogOut,
   ChevronRight,
@@ -37,6 +38,13 @@ async function logout() {
       <nav aria-label="Main navigation">
         <RouterLink to="/" :class="{ active: !project }">
           <FolderGit2 :size="18" />Projects
+        </RouterLink>
+        <RouterLink
+          v-if="project"
+          :to="`/p/${encodeURIComponent(project)}/overview`"
+          :class="{ active: route.path.endsWith('/overview') }"
+        >
+          <Gauge :size="18" />Overview
         </RouterLink>
         <RouterLink
           v-if="project"

@@ -280,6 +280,38 @@ await step(
   },
 );
 
+await step(
+  "engineering overview: four tiles, the weekly category chart and its table",
+  async () => {
+    await page.goto(base + "/p/" + project + "/overview");
+    await page.locator(".stat-tile").nth(3).waitFor({ timeout: 10000 });
+    // Either a chart with a legend or the empty state — never an error.
+    const chart = await page.locator(".trend-chart .column").count();
+    const empty = await page.locator(".trend .empty-state").count();
+    if (!chart && !empty)
+      throw new Error("neither chart columns nor the empty state rendered");
+    if (chart) {
+      await page.locator(".trend-chart .column").first().hover();
+      await page.locator(".chart-tooltip").waitFor({ timeout: 3000 });
+      await page.getByRole("button", { name: "Show table" }).click();
+      await page
+        .locator(".trend-table tbody tr")
+        .first()
+        .waitFor({ timeout: 3000 });
+    }
+    await Promise.all([
+      page.waitForResponse(v1(/\/metrics\/triage\?days=90/), {
+        timeout: 10000,
+      }),
+      page.getByRole("button", { name: "Last 90 days" }).click(),
+    ]);
+    await page.screenshot({
+      path: "test-results/live-overview.png",
+      fullPage: true,
+    });
+  },
+);
+
 await step("sign out → session gone, anonymous bootstrap again", async () => {
   const btn = page
     .locator("button[aria-label='Sign out'], button:has-text('Sign out')")

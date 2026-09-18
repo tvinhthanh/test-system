@@ -1,5 +1,6 @@
 import type { ApiClient } from "../../core/api/client";
 import * as d from "../../core/api/decode";
+import { isFailureCategory } from "./categories";
 
 export interface Project {
   id: string;
@@ -55,6 +56,22 @@ export interface ResultDetail {
   result: TestResult;
   attempts: Attempt[];
   events: TriageEvent[];
+}
+// Engineering overview (§2.5 EM screen, §6.4 product signals). Every number is
+// computed by the server over the window; the client only formats.
+export interface TriageMetrics {
+  failures: number;
+  triaged: number;
+  seen: number;
+  untriagedRate: number;
+  triageCoverage: number;
+  ttrcMedianSeconds: number | null;
+  timeToFirstViewSeconds: number | null;
+}
+export interface TrendBucket {
+  week: string; // start of the week, RFC3339 UTC
+  category: string; // §8.7 enum; "unknown" = not triaged yet
+  count: number;
 }
 export interface Identity {
   id: string;
@@ -134,6 +151,35 @@ function attempt(value: unknown): Attempt {
     stack: error ? d.nullableString(error.stack) : null,
     artifacts: d.array(x.artifacts ?? [], artifactRef, 20),
   };
+}
+function ratio(value: unknown): number {
+  return typeof value === "number" && value >= 0 && value <= 1
+    ? value
+    : d.invalid();
+}
+function nullableSeconds(value: unknown): number | null {
+  if (value === null) return null;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : d.invalid();
+}
+export function parseTriageMetrics(value: unknown): TriageMetrics {
+  const x = d.record(value);
+  return {
+    failures: d.integer(x.failures),
+    triaged: d.integer(x.triaged),
+    seen: d.integer(x.seen),
+    untriagedRate: ratio(x.untriagedRate),
+    triageCoverage: ratio(x.triageCoverage),
+    ttrcMedianSeconds: nullableSeconds(x.ttrcMedianSeconds),
+    timeToFirstViewSeconds: nullableSeconds(x.timeToFirstViewSeconds),
+  };
+}
+function trendBucket(value: unknown): TrendBucket {
+  const x = d.record(value);
+  const category = d.string(x.category);
+  if (!isFailureCategory(category)) return d.invalid();
+  return { week: d.date(x.week), category, count: d.integer(x.count) };
 }
 function triageEvent(value: unknown): TriageEvent {
   const x = d.record(value);
@@ -284,5 +330,24 @@ export class ReportsRepository {
       parseRun,
       20,
     );
+  }
+  // Engineering overview. `days` is the window the server aggregates over.
+  async triageMetrics(projectId: string, days: number, signal: AbortSignal) {
+    return parseTriageMetrics(
+      await this.api.request(
+        `${scope(projectId)}/metrics/triage?${params({ days: String(days) })}`,
+        { signal },
+      ),
+    );
+  }
+  async categoryTrend(projectId: string, days: number, signal: AbortSignal) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(projectId)}/metrics/trend?${params({ days: String(days) })}`,
+        { signal },
+      ),
+    );
+    // 7 categories × at most ~53 weeks in a year-long window.
+    return d.array(x.items, trendBucket, 7 * 53);
   }
 }

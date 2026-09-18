@@ -113,6 +113,19 @@ recentStatuses[]}`. `view=flaky` is server filtering, not a client threshold.
 returns the bounded run DTO page for that identity. The server defines the
 history ordering and verifies that the identity belongs to the project.
 
+## Engineering Overview (§2.5 EM screen, P1.5)
+
+`GET /v1/projects/{projectId}/metrics/triage?days=30` returns the window's
+`{failures, triaged, seen, untriagedRate, triageCoverage, ttrcMedianSeconds,
+timeToFirstViewSeconds}`; the two medians are `null` when nothing in the window
+qualifies. Rates are ratios in `[0,1]` computed by the server — the client
+formats, never re-derives them from the counts.
+`GET /v1/projects/{projectId}/metrics/trend?days=90` returns
+`{items:[{week, category, count}]}`: `week` is the start of the ISO week in
+**UTC** (the bucket is part of the contract, not the connection's timezone),
+`category` is the closed §8.7 enum (`unknown` = not triaged yet). The client
+refuses categories outside the enum. `days` defaults to 30 / 90.
+
 ## Handoff And Verification
 
 Backend owner must confirm session bootstrap semantics, list limits, query

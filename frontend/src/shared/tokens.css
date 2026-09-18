@@ -1103,3 +1103,198 @@ tr:hover td {
     min-height: var(--control);
   }
 }
+
+/* ---- Engineering overview (OverviewPage) ---- */
+/* Chart series: §8.7 categories in fixed order → the validated reference
+   palette slots 1–6 (dataviz skill, light-mode values; CVD-separated,
+   contrast relief provided by the table view and legend labels). `unknown`
+   is the de-emphasis gray: "not triaged yet", not a kind of failure. */
+:root {
+  --series-app_bug: #2a78d6;
+  --series-test_bug: #eb6834;
+  --series-flaky_timing: #1baf7a;
+  --series-env_infra: #eda100;
+  --series-env_data: #e87ba4;
+  --series-dependency_external: #008300;
+  --series-unknown: #b3b7b4;
+}
+.view-tabs .tab-button {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  align-self: stretch;
+  padding: 0;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+.view-tabs .tab-button.selected {
+  border-bottom-color: var(--green);
+  font-weight: 600;
+  color: #245a3b;
+}
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+.stat-label {
+  color: var(--muted);
+  font-size: var(--small);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.stat-value {
+  font-size: 32px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.stat-note {
+  color: var(--muted);
+  font-size: var(--small);
+}
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.trend-chart {
+  margin: 0;
+}
+.chart-scroll {
+  position: relative;
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+.trend-chart svg {
+  display: block;
+}
+.trend-chart .baseline {
+  stroke: #c3c2b7;
+  stroke-width: 1;
+}
+.trend-chart .tick {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.trend-chart .hit {
+  fill: transparent;
+}
+.trend-chart .column:hover .hit,
+.trend-chart .column.hovered .hit {
+  fill: rgba(37, 43, 41, 0.05);
+}
+.trend-chart .column:focus {
+  outline: none;
+}
+.trend-chart .column:focus-visible .hit {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+.series-app_bug {
+  fill: var(--series-app_bug);
+  background: var(--series-app_bug);
+}
+.series-test_bug {
+  fill: var(--series-test_bug);
+  background: var(--series-test_bug);
+}
+.series-flaky_timing {
+  fill: var(--series-flaky_timing);
+  background: var(--series-flaky_timing);
+}
+.series-env_infra {
+  fill: var(--series-env_infra);
+  background: var(--series-env_infra);
+}
+.series-env_data {
+  fill: var(--series-env_data);
+  background: var(--series-env_data);
+}
+.series-dependency_external {
+  fill: var(--series-dependency_external);
+  background: var(--series-dependency_external);
+}
+.series-unknown {
+  fill: var(--series-unknown);
+  background: var(--series-unknown);
+}
+.chart-tooltip {
+  position: absolute;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  font-size: var(--small);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+.chart-tooltip span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.chart-tooltip b {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tooltip .total {
+  border-top: 1px solid var(--line);
+  padding-top: 2px;
+  margin-top: 2px;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  color: var(--muted);
+  font-size: var(--small);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.trend-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--small);
+  font-variant-numeric: tabular-nums;
+}
+.trend-table th,
+.trend-table td {
+  text-align: right;
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+.trend-table th[scope="row"],
+.trend-table th:first-child {
+  text-align: left;
+}

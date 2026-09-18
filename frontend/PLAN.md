@@ -27,9 +27,9 @@ QD-9's framework choice; do not revert to Flutter on resume.
   failure detail with attempts / artifacts (screenshots and video inline,
   trace viewer on our origin) / triage, identity history, flaky view —
   verified against the real Go backend (no mocks) on 2026-09-16, -17 and -18.
-  Everything §4.4 defers (EM screen → P1.5; Review Queue / Merge-Split UI,
-  OAuth, MFA, 6-role RBAC → P2) stays deferred until the product gate says
-  otherwise.
+  Beyond P1-min, on the owner's call (2026-09-18, "all of this"): the §2.5
+  engineering overview (P1.5) is in; Review Queue / Merge-Split UI (P2) is
+  next; OAuth, MFA and 6-role RBAC stay deferred.
 - Target: Vue.js web client only.
 - Backend status: every route in `API_CONTRACT.md` is mounted and inventoried
   in `../backend/deploy/routes.txt` (a test fails if the mux and the file
@@ -64,7 +64,6 @@ Build these screens in this order:
 
 Explicitly out of the current slice:
 
-- EM dashboard; this is P1.5.
 - Review Queue UI; P1-min uses CSV/script operations.
 - Merge/Split UI; P1-min uses CSV/script operations.
 - Desktop and mobile application targets; the current client is Web only.
@@ -242,6 +241,26 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-18 (engineering overview — the §2.5 EM screen, first P1.5 slice)
+
+- New route `p/:project/overview` and nav item "Overview": a KPI row (median
+  time to root cause, time to first view, untriaged rate, triage coverage,
+  each with the counts behind it) and "Failure categories by week" — a
+  stacked weekly column chart with hover tooltip, legend and a table view,
+  over a 30/90-day window kept in the URL (`?days=`). Data comes from the
+  existing `metrics/triage` and `metrics/trend` routes; the client formats,
+  never re-derives.
+- Chart palette: the §8.7 categories in fixed order → the validated
+  reference categorical slots 1–6 (dataviz skill validator: CVD and
+  normal-vision floors pass; the light-mode contrast warning is relieved by
+  the legend labels and the table view); `unknown` in de-emphasis gray.
+  `categories.ts` owns the enum, its order and labels.
+- Backend: `TrendBucket` gained camelCase JSON names (`week`, `category`,
+  `count`) and weeks are truncated in UTC regardless of the session timezone;
+  `openapi.yaml` updated.
+- `live-check.mjs` walks the overview (tiles, hover, table, 90-day switch);
+  35 `/v1` calls, all 2xx.
 
 ### 2026-09-18 (video, screenshots and traces on the failure page)
 

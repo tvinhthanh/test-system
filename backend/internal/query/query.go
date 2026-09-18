@@ -136,9 +136,9 @@ type TriageMetrics struct {
 
 // TrendBucket is §8.7's "failure category trends".
 type TrendBucket struct {
-	Week     time.Time
-	Category string
-	Count    int
+	Week     time.Time `json:"week"`     // start of the ISO week, UTC
+	Category string    `json:"category"` // §8.7 enum; "unknown" = not triaged yet
+	Count    int       `json:"count"`
 }
 
 var (

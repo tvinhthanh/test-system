@@ -461,7 +461,9 @@ func (s *service) CategoryTrend(ctx context.Context, projectID string, since tim
 		return nil, ErrNotFound
 	}
 	rows, err := s.db.Q(ctx).Query(ctx, `
-		SELECT date_trunc('week', coalesce(t.first_failed_at, t.failure_observed_at)) AS week, coalesce(t.failure_category, 'unknown'), count(*)
+		-- Weeks start Monday 00:00 UTC whatever the session timezone: the bucket
+		-- is part of the contract, not of the connection's TimeZone setting.
+		SELECT date_trunc('week', coalesce(t.first_failed_at, t.failure_observed_at) AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS week, coalesce(t.failure_category, 'unknown'), count(*)
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
 		 WHERE r.project_id = $1 AND t.failure_observed_at >= $2
 		 GROUP BY 1, 2 ORDER BY 1, 2`, projectID, since.UTC())

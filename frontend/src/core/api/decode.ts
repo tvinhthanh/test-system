@@ -1,6 +1,6 @@
 import { ApiError, isRecord } from "./client";
 
-function invalid(): never {
+export function invalid(): never {
   throw new ApiError(
     0,
     "INVALID_RESPONSE",
