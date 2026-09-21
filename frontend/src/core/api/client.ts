@@ -13,7 +13,13 @@ export type Transport = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
-export type RequestOptions = { signal?: AbortSignal; body?: unknown };
+// method defaults to POST when a body is given, GET otherwise; PATCH and
+// DELETE (Test Management) are state-changing and carry the CSRF token too.
+export type RequestOptions = {
+  signal?: AbortSignal;
+  body?: unknown;
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+};
 
 const statusMessage = (status: number) =>
   ({
@@ -44,7 +50,9 @@ export class ApiClient {
   async request(path: string, options: RequestOptions = {}): Promise<unknown> {
     if (!path.startsWith("/v1/") || path.includes("://"))
       throw new Error("Only same-origin /v1/ API paths are allowed.");
-    const mutation = options.body !== undefined;
+    const method =
+      options.method ?? (options.body !== undefined ? "POST" : "GET");
+    const mutation = method !== "GET";
     if (mutation && !this.csrfToken)
       throw new ApiError(
         0,
@@ -64,19 +72,19 @@ export class ApiClient {
     this.pending.add(controller);
     try {
       const response = await this.transport(path, {
-        method: mutation ? "POST" : "GET",
+        method,
         credentials: "include",
         signal: controller.signal,
         headers: {
           Accept: "application/json",
-          ...(mutation
-            ? {
-                "Content-Type": "application/json",
-                "X-CSRF-Token": this.csrfToken!,
-              }
+          ...(mutation ? { "X-CSRF-Token": this.csrfToken! } : {}),
+          ...(options.body !== undefined
+            ? { "Content-Type": "application/json" }
             : {}),
         },
-        ...(mutation ? { body: JSON.stringify(options.body) } : {}),
+        ...(options.body !== undefined
+          ? { body: JSON.stringify(options.body) }
+          : {}),
       });
       if (epoch !== this.epoch || controller.signal.aborted)
         throw new DOMException("Aborted", "AbortError");

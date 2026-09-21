@@ -62,6 +62,10 @@ func (c *client) do(method, path string, body any, headers map[string]string) re
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// Every state-changing method is a browser mutation: Origin + CSRF, as a
+	// fetch() would send them (DELETE has no body and still needs both).
+	if method != "GET" {
 		req.Header.Set("Origin", origin)
 		if c.csrf != "" {
 			req.Header.Set(authz.CSRFHeader, c.csrf)
@@ -565,6 +569,15 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	}
 	if r := web.get(base + "/requirements"); len(r.items()) != 1 || r.items()[0].(map[string]any)["coveredBy"] != 1.0 {
 		t.Errorf("requirement coverage: %s", r.raw)
+	}
+	if r := web.do("DELETE", base+"/test-cases/"+caseID+"/requirements/"+reqID, nil, nil); r.code != 204 {
+		t.Errorf("uncover: %d %s", r.code, r.raw)
+	}
+	if r := web.do("DELETE", base+"/test-cases/"+caseID+"/requirements/"+reqID, nil, nil); r.code != 404 {
+		t.Errorf("uncover twice: %d %s", r.code, r.raw)
+	}
+	if r := web.do("POST", base+"/test-cases/"+caseID+"/requirements/"+reqID, map[string]any{}, nil); r.code != 204 {
+		t.Errorf("re-cover: %d %s", r.code, r.raw)
 	}
 	imp := web.do("POST", base+"/test-cases/import", map[string]any{"csv": "key,title,suite,priority\nTC-1,Apply discount,Checkout,p2\nTC-2,Refund,Checkout,p1"}, nil)
 	if imp.code != 200 || imp.body["created"] != 2.0 || imp.body["suites"] != 1.0 {
