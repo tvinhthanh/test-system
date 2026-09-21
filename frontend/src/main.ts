@@ -5,6 +5,7 @@ import { ApiClient, type Transport } from "./core/api/client";
 import { SessionRepository } from "./features/auth/sessionRepository";
 import { createSessionStore } from "./features/auth/sessionStore";
 import { ReportsRepository } from "./features/reports/reportsRepository";
+import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
 import "./shared/theme.css";
@@ -26,6 +27,7 @@ async function start() {
   app.provide(servicesKey, {
     session,
     reports: new ReportsRepository(api),
+    testmgmt: new TestmgmtRepository(api),
     fixture,
   });
   app.use(router);

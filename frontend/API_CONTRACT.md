@@ -150,7 +150,7 @@ role.
   (nullable): merged and retired identities stay readable by id but leave the
   active list; the history page shows a notice and offers Undo for merged ones.
 
-## Test Management (§6.8, P2 — backend implemented 2026-09-21, UI pending)
+## Test Management (§6.8, P2 — backend and UI implemented 2026-09-21)
 
 All under `/v1/projects/{projectId}`; reads need `view`, writes need
 `testmgmt.write` (member), the release decision needs `release.decide`

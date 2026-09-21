@@ -2,6 +2,7 @@
 import {
   Activity,
   ChevronsUpDown,
+  ClipboardList,
   FolderGit2,
   Gauge,
   GitBranch,
@@ -41,6 +42,16 @@ const items = computed(() =>
             route.path.includes("/tests") ||
             route.path.includes("/flaky") ||
             route.path.endsWith("/review"),
+        },
+        {
+          to: `/p/${p.value}/cases`,
+          label: "Test management",
+          icon: ClipboardList,
+          active:
+            route.path.includes("/cases") ||
+            route.path.includes("/requirements") ||
+            route.path.includes("/plans") ||
+            route.path.includes("/releases"),
         },
       ]
     : [],

@@ -44,8 +44,15 @@ draft was removed on 2026-09-18.
   proxies `/v1`).
 - Preview data: allowed only through an explicit fixture transport. Live API
   failures must never silently fall back to fixtures.
+- P2 (SPEC §6.8, QĐ-12) since 2026-09-21: Test Management screens — test
+  cases (list, filters, create, CSV import, detail with steps / automation
+  links / requirement coverage), requirements, test plans with manual
+  executions, releases with the server-side quality gate and the human
+  decision. Routes under `p/:project/{cases,requirements,plans,releases}`,
+  repository `features/testmgmt/testmgmtRepository.ts`, vocabularies in
+  `features/testmgmt/enums.ts`.
 - Last reviewed: 2026-09-21.
-- Latest verification: typecheck, 28 unit tests, production build + bundle gate
+- Latest verification: typecheck, 32 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -246,6 +253,37 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-21 (P2 — Test Management screens, §6.8)
+
+- `ApiClient.request` gained `method: PATCH | DELETE`; every non-GET carries
+  the CSRF header, a body-less DELETE sends no content type. GET/POST
+  behaviour unchanged (client tests still pass).
+- New feature folder `src/features/testmgmt/`: repository (paths + decoders
+  for suites, requirements, cases, links, plans, executions, releases, gate,
+  import report), `enums.ts` (closed vocabularies shared with screens),
+  `useMutation` (one in-flight write per screen, error kept for the row
+  that asked), `ErrorNote`, `TmTabs`, `GateBadge`.
+- Screens: TestCasesPage (URL-state filters, create panel, CSV import with
+  file picker and per-row error report), TestCaseDetailPage (editable title /
+  priority / automation / critical, steps editor, automation links picked
+  from the project's active identities with the server's 404/409 shown,
+  requirement coverage), RequirementsPage (create, inline priority/status,
+  p0 coverage line, `uncovered` badge), PlansPage + PlanDetailPage (progress
+  tiles, one-click pass/fail/blocked/skipped with a note, close/reopen),
+  ReleasesPage + ReleaseDetailPage (gate rules with level / applies / details,
+  Evaluate, Approve / Block / Ship with note, override notice naming the
+  decider, curl snippet for the CI gate URL).
+- Sidebar gained "Test management"; breadcrumbs know the four sections;
+  `tone()` learned the new statuses (approved/shipped/automated/done →
+  success, blocked/dropped/uncovered → danger, warn/automation_candidate →
+  warning, active/open → info).
+- Fixture transport answers every Test Management route with a coherent set
+  (two suites, three requirements, five cases, one plan, two releases — one
+  blocked, one shipped by override), so `dev:fixture` shows the whole plane.
+- `scripts/live-check.mjs`: 13th step for the plane against the real api.
+- Verified: typecheck, 32 unit tests, prettier, bundle gate 46.6 KiB, live-check
+  13/13 (58 calls), screenshots of the six screens reviewed.
+
 ### 2026-09-21 (visual system: Tailwind CSS 4 + shadcn-vue)
 
 - Replaced the 1 468-line hand-written `tokens.css` with `src/shared/theme.css`:
@@ -413,10 +451,10 @@ All commands below ran from `frontend/`; dates per row.
 
 | Check | Result |
 | --- | --- |
-| `npm run build` (includes typecheck + bundle gate) | PASS 2026-09-21 after the Tailwind/shadcn-vue restyle; initial JS 44.4 KiB gzip (was 41.2), 11 lazy modules, no fixture markers |
-| `npm run test:unit` | PASS; 28 tests in 9 files (2026-09-21, unchanged by the restyle — tests hook semantic classes, not styles) |
+| `npm run build` (includes typecheck + bundle gate) | PASS 2026-09-21 with the Test Management screens; initial JS 46.6 KiB gzip, 18 lazy modules, no fixture markers |
+| `npm run test:unit` | PASS; 32 tests in 10 files (2026-09-21: + `tests/testmgmt.test.ts` — decoders, PATCH/DELETE with CSRF, 403/409/404 mapping, CI URL, CSV import) |
 | `npx prettier --check "src/**/*.{vue,ts,css}"` | PASS (2026-09-21) |
-| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, two `npm run example` runs | PASS 2026-09-21; 12 steps, 44 `/v1` calls all 2xx except the deliberate 401, console clean — the restyle changed no route, DTO or hook |
+| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, `npm run example` runs | PASS 2026-09-21; **13 steps** (the new one creates a case, links it to a real identity, opens a release and evaluates the gate — verdict `blocked` on the seed data, five rules rendered), 58 `/v1` calls all 2xx except the deliberate 401, console clean |
 | `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |

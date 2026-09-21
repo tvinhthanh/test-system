@@ -1,0 +1,381 @@
+<script setup lang="ts">
+import {
+  ChevronRight,
+  ClipboardList,
+  FileUp,
+  ListFilter,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+} from "@lucide/vue";
+import { computed, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useServices } from "../../app/providers/services";
+import { useResource } from "../../core/state/useResource";
+import { automationStatuses, priorities, type Priority } from "./enums";
+import type { TestCase } from "./testmgmtRepository";
+import { useMutation } from "./useMutation";
+import AsyncState from "../../shared/AsyncState.vue";
+import EmptyState from "../../shared/EmptyState.vue";
+import NativeSelect from "../../shared/NativeSelect.vue";
+import PageHeader from "../../shared/PageHeader.vue";
+import StatusBadge from "../../shared/StatusBadge.vue";
+import ErrorNote from "./ErrorNote.vue";
+import TmTabs from "./TmTabs.vue";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const route = useRoute(),
+  router = useRouter();
+const { testmgmt } = useServices();
+const project = computed(() => String(route.params.project));
+const base = () => `/p/${encodeURIComponent(project.value)}`;
+
+// Filters are URL state so a filtered list is a shareable link.
+const q = computed(() => String(route.query.q ?? ""));
+const automation = computed(() => String(route.query.automation ?? ""));
+const critical = computed(() => String(route.query.critical ?? ""));
+const filtered = computed(
+  () => !!(q.value || automation.value || critical.value),
+);
+function setFilter(patch: Record<string, string>) {
+  const query = { ...route.query, ...patch };
+  for (const k of Object.keys(query)) if (!query[k]) delete query[k];
+  void router.replace({ query });
+}
+const search = ref(q.value);
+let timer: ReturnType<typeof setTimeout> | undefined;
+watch(search, (v) => {
+  clearTimeout(timer);
+  timer = setTimeout(() => setFilter({ q: v.trim() }), 300);
+});
+
+const cases = useResource<TestCase[]>();
+function refresh() {
+  return cases.load((signal) =>
+    testmgmt.testCases(
+      project.value,
+      {
+        q: q.value,
+        automation: automation.value as never,
+        critical: critical.value as never,
+      },
+      signal,
+    ),
+  );
+}
+watch(
+  () => [project.value, q.value, automation.value, critical.value],
+  refresh,
+  {
+    immediate: true,
+  },
+);
+
+// Create + import live in two collapsible panels; both end in a refresh.
+const panel = ref<"" | "new" | "import">("");
+const draft = ref({ title: "", priority: "p2" as Priority, isCritical: false });
+const csv = ref("");
+const report = ref<null | Awaited<ReturnType<typeof testmgmt.importCsv>>>(null);
+const mutation = useMutation();
+async function create() {
+  const created = await mutation.run("new", (signal) =>
+    testmgmt.createTestCase(project.value, { ...draft.value }, signal),
+  );
+  if (created) {
+    draft.value = { title: "", priority: "p2", isCritical: false };
+    panel.value = "";
+    await router.push(`${base()}/cases/${encodeURIComponent(created.id)}`);
+  }
+}
+async function importSheet() {
+  report.value = null;
+  const rep = await mutation.run("import", (signal) =>
+    testmgmt.importCsv(project.value, csv.value, signal),
+  );
+  if (rep) {
+    report.value = rep;
+    csv.value = "";
+    await refresh();
+  }
+}
+async function readFile(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (file) csv.value = await file.text();
+}
+const label = (s: string) => s.replaceAll("_", " ");
+</script>
+<template>
+  <PageHeader
+    eyebrow="Test management"
+    title="Test cases"
+    description="Manual and automated cases in one list. A case linked to a test identity carries that test's history and flaky signal (§6.8.1)."
+  >
+    <Button
+      :variant="panel === 'import' ? 'secondary' : 'outline'"
+      size="sm"
+      @click="panel = panel === 'import' ? '' : 'import'"
+      ><FileUp />Import CSV</Button
+    >
+    <Button
+      :variant="panel === 'new' ? 'secondary' : 'default'"
+      size="sm"
+      @click="panel = panel === 'new' ? '' : 'new'"
+      ><Plus />New case</Button
+    >
+    <Button
+      variant="outline"
+      size="icon-sm"
+      aria-label="Refresh test cases"
+      title="Refresh test cases"
+      @click="refresh"
+      ><RefreshCw
+    /></Button>
+  </PageHeader>
+  <TmTabs :project="project" current="cases" />
+
+  <form
+    v-if="panel === 'new'"
+    class="bg-card mb-5 grid gap-4 rounded-lg border p-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto_auto] sm:items-end"
+    @submit.prevent="create"
+  >
+    <div class="space-y-2">
+      <Label for="new-title">Title</Label>
+      <Input
+        id="new-title"
+        v-model="draft.title"
+        required
+        maxlength="500"
+        placeholder="What the tester checks"
+      />
+    </div>
+    <div class="space-y-2">
+      <Label for="new-priority">Priority</Label>
+      <NativeSelect id="new-priority" v-model="draft.priority" class="w-full">
+        <option v-for="p in priorities" :key="p" :value="p">{{ p }}</option>
+      </NativeSelect>
+    </div>
+    <label class="flex h-9 items-center gap-2 text-sm">
+      <input
+        v-model="draft.isCritical"
+        type="checkbox"
+        class="accent-primary size-4"
+      />
+      Critical flow
+    </label>
+    <Button type="submit" size="sm" :disabled="mutation.busy.value !== null"
+      >Create</Button
+    >
+    <ErrorNote
+      v-if="mutation.error.value?.key === 'new'"
+      class="sm:col-span-4"
+      :error="mutation.error.value.error"
+    />
+  </form>
+
+  <form
+    v-if="panel === 'import'"
+    class="bg-card mb-5 space-y-3 rounded-lg border p-4"
+    @submit.prevent="importSheet"
+  >
+    <p class="text-muted-foreground text-sm">
+      Columns (any order, case-insensitive): <code>key</code>,
+      <code>title</code>, <code>suite</code>, <code>steps</code> (<code
+        >action =&gt; expected</code
+      >, one per line or <code>|</code>-separated), <code>expected</code>,
+      <code>priority</code> (p0–p3), <code>critical</code>,
+      <code>requirement</code>. Rows with a key update the same case on
+      re-import; rows without one match by title.
+    </p>
+    <div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+      <textarea
+        v-model="csv"
+        class="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 min-h-32 w-full rounded-md border px-3 py-2 font-mono text-xs outline-none focus-visible:ring-3"
+        placeholder="key,title,suite,priority,critical&#10;TC-1,Pay with saved card,Checkout,p0,yes"
+        spellcheck="false"
+      />
+      <div class="flex flex-col gap-2">
+        <Button as-child variant="outline" size="sm">
+          <label
+            >Choose file<input
+              type="file"
+              accept=".csv,text/csv"
+              class="sr-only"
+              @change="readFile"
+          /></label>
+        </Button>
+        <Button
+          type="submit"
+          size="sm"
+          :disabled="!csv.trim() || mutation.busy.value !== null"
+          >Import</Button
+        >
+      </div>
+    </div>
+    <ErrorNote
+      v-if="mutation.error.value?.key === 'import'"
+      :error="mutation.error.value.error"
+    />
+    <div
+      v-if="report"
+      class="bg-muted/50 rounded-md border px-3 py-2 text-sm"
+      role="status"
+    >
+      <strong class="font-medium"
+        >{{ report.created }} created · {{ report.updated }} updated ·
+        {{ report.skipped }} skipped</strong
+      >
+      <span class="text-muted-foreground">
+        · {{ report.suites }} new suite(s) · {{ report.requirements }} new
+        requirement(s)</span
+      >
+      <ul
+        v-if="report.errors.length"
+        class="text-danger mt-1 list-disc pl-5 text-xs"
+      >
+        <li v-for="e in report.errors" :key="e">{{ e }}</li>
+      </ul>
+    </div>
+  </form>
+
+  <form
+    class="mb-4 flex flex-col gap-3 md:flex-row md:items-end"
+    role="search"
+    @submit.prevent
+  >
+    <label class="relative min-w-0 flex-1">
+      <span class="sr-only">Search title or key</span>
+      <Search
+        :size="16"
+        aria-hidden="true"
+        class="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
+      />
+      <Input
+        v-model="search"
+        type="search"
+        class="pl-9"
+        placeholder="Search title or key…"
+        maxlength="200"
+      />
+    </label>
+    <label class="flex flex-col gap-1.5 text-xs font-medium">
+      <span class="text-muted-foreground">Automation</span>
+      <NativeSelect
+        class="w-full md:w-48"
+        :model-value="automation"
+        @update:model-value="setFilter({ automation: $event })"
+      >
+        <option value="">Any status</option>
+        <option v-for="s in automationStatuses" :key="s" :value="s">
+          {{ label(s) }}
+        </option>
+      </NativeSelect>
+    </label>
+    <label class="flex flex-col gap-1.5 text-xs font-medium">
+      <span class="text-muted-foreground">Critical</span>
+      <NativeSelect
+        class="w-full md:w-36"
+        :model-value="critical"
+        @update:model-value="setFilter({ critical: $event })"
+      >
+        <option value="">All</option>
+        <option value="true">Critical only</option>
+        <option value="false">Not critical</option>
+      </NativeSelect>
+    </label>
+    <Button
+      v-if="filtered"
+      variant="ghost"
+      size="sm"
+      type="button"
+      @click="
+        search = '';
+        setFilter({ q: '', automation: '', critical: '' });
+      "
+      ><ListFilter />Clear</Button
+    >
+  </form>
+
+  <AsyncState
+    :loading="cases.loading.value"
+    :error="cases.error.value"
+    @retry="refresh"
+  >
+    <EmptyState
+      v-if="!cases.data.value?.length"
+      :icon="ClipboardList"
+      :title="filtered ? 'No matching cases' : 'No test cases yet'"
+      :description="
+        filtered
+          ? 'Try another word or filter.'
+          : 'Write the first case, or import your sheet — a CSV export from Excel, TestRail or a wiki table is enough to start.'
+      "
+    >
+      <Button v-if="!filtered" size="sm" @click="panel = 'new'"
+        ><Plus />New case</Button
+      >
+      <Button
+        v-if="!filtered"
+        variant="outline"
+        size="sm"
+        @click="panel = 'import'"
+        ><FileUp />Import CSV</Button
+      >
+    </EmptyState>
+    <ul
+      v-else
+      class="case-list bg-card divide-y overflow-hidden rounded-lg border"
+    >
+      <li v-for="c in cases.data.value" :key="c.id">
+        <RouterLink
+          :to="`${base()}/cases/${encodeURIComponent(c.id)}`"
+          class="case-row hover:bg-accent focus-visible:bg-accent group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-4 py-3 transition-colors outline-none md:grid-cols-[minmax(0,1fr)_4rem_auto_1.25rem]"
+        >
+          <span class="min-w-0">
+            <span class="flex min-w-0 items-center gap-2">
+              <code
+                v-if="c.externalKey"
+                class="text-muted-foreground shrink-0 text-xs"
+                >{{ c.externalKey }}</code
+              >
+              <strong class="truncate text-sm font-medium">{{
+                c.title
+              }}</strong>
+              <ShieldAlert
+                v-if="c.isCritical"
+                :size="14"
+                class="text-danger shrink-0"
+                aria-label="Critical flow"
+              />
+            </span>
+            <span class="text-muted-foreground block truncate text-xs">
+              {{ c.suiteName || "No suite" }}
+              <template v-if="c.steps.length">
+                · {{ c.steps.length }} step{{
+                  c.steps.length === 1 ? "" : "s"
+                }}</template
+              >
+            </span>
+          </span>
+          <Badge variant="outline" class="font-mono uppercase">{{
+            c.priority
+          }}</Badge>
+          <StatusBadge :status="c.automationStatus" />
+          <ChevronRight
+            :size="16"
+            aria-hidden="true"
+            class="text-muted-foreground hidden transition-transform group-hover:translate-x-0.5 md:block"
+          />
+        </RouterLink>
+      </li>
+    </ul>
+    <p class="text-muted-foreground mt-3 text-xs">
+      {{ cases.data.value?.length ?? 0 }} case{{
+        (cases.data.value?.length ?? 0) === 1 ? "" : "s"
+      }}
+    </p>
+  </AsyncState>
+</template>

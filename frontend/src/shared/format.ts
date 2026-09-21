@@ -28,10 +28,26 @@ export function tone(value: string, flaky = 0) {
     ["flaky_pass", "flaky", "suspect"].includes(value)
   )
     return "warning";
-  if (["failed", "error", "timed_out", "interrupted"].includes(value))
+  if (
+    [
+      "failed",
+      "error",
+      "timed_out",
+      "interrupted",
+      "blocked",
+      "dropped",
+      "uncovered",
+    ].includes(value)
+  )
     return "danger";
-  if (["passed", "stable"].includes(value)) return "success";
-  if (["running", "queued"].includes(value)) return "info";
+  if (
+    ["passed", "stable", "approved", "shipped", "automated", "done"].includes(
+      value,
+    )
+  )
+    return "success";
+  if (["warn", "automation_candidate"].includes(value)) return "warning";
+  if (["running", "queued", "active", "open"].includes(value)) return "info";
   return "neutral";
 }
 export function bytes(value: number) {

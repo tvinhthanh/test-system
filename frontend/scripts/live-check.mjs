@@ -337,6 +337,54 @@ await step(
   },
 );
 
+await step(
+  "test management: create a case, link it to a real identity, open a release and evaluate the gate (§6.8)",
+  async () => {
+    const stamp = Date.now().toString(36);
+    await page.goto(base + "/p/" + project + "/cases");
+    await page.getByRole("button", { name: "New case" }).first().click();
+    await page.fill("#new-title", "Live check case " + stamp);
+    await page.locator("form:has(#new-title) input[type=checkbox]").check();
+    await Promise.all([
+      page.waitForResponse(v1(/\/test-cases$/, 201), { timeout: 10000 }),
+      page.getByRole("button", { name: "Create", exact: true }).click(),
+    ]);
+    // The detail page opens; link the first active identity of the project.
+    await page.locator("#case-title").waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "Link a test" }).click();
+    const candidate = page.locator(".bg-card button:has(.status)").first();
+    await candidate.waitFor({ timeout: 10000 });
+    await Promise.all([
+      page.waitForResponse(v1(/\/links$/, 201), { timeout: 10000 }),
+      candidate.click(),
+    ]);
+    await page.locator(".link-list li").first().waitFor({ timeout: 10000 });
+    // A release, evaluated against the newest finished run: five rules.
+    await page.goto(base + "/p/" + project + "/releases");
+    await page.getByRole("button", { name: "New release" }).first().click();
+    await page.fill("#rel-version", "live-" + stamp);
+    await Promise.all([
+      page.waitForResponse(v1(/\/releases$/, 201), { timeout: 10000 }),
+      page.getByRole("button", { name: "Create", exact: true }).click(),
+    ]);
+    await Promise.all([
+      page.waitForResponse(v1(/\/evaluate$/), { timeout: 10000 }),
+      page.getByRole("button", { name: "Evaluate gate" }).first().click(),
+    ]);
+    await page.locator(".gate-rules li").nth(4).waitFor({ timeout: 10000 });
+    const verdict = await page
+      .locator(".gate-badge")
+      .first()
+      .getAttribute("data-verdict");
+    if (!["approved", "warn", "blocked"].includes(verdict))
+      throw new Error("gate verdict " + verdict + " (a finished run exists)");
+    await page.screenshot({
+      path: "test-results/live-release.png",
+      fullPage: true,
+    });
+  },
+);
+
 await step("sign out → session gone, anonymous bootstrap again", async () => {
   const btn = page
     .locator("button[aria-label='Sign out'], button:has-text('Sign out')")

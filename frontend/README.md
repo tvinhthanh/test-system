@@ -1,7 +1,10 @@
 # ATP Frontend
 
 Vue 3 + TypeScript web client, styled with Tailwind CSS 4 and shadcn-vue
-(reka-ui) on self-hosted Geist fonts; light and dark palettes. Read [PLAN.md](PLAN.md),
+(reka-ui) on self-hosted Geist fonts; light and dark palettes. Screens: sign-in,
+projects, runs, failure detail, test intelligence (identities, flaky, review
+queue), engineering overview, and — since 2026-09-21 — the Test Management
+Plane (cases, requirements, plans, releases with the quality gate). Read [PLAN.md](PLAN.md),
 [FRONTEND_RULES.md](FRONTEND_RULES.md), and [API_CONTRACT.md](API_CONTRACT.md)
 before changing code. SPEC QD-9 records the stack: Vue 3 was chosen on 2026-09-14 (replacing the
 earlier Flutter choice); the inert Flutter draft was removed on 2026-09-18 and

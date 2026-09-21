@@ -137,18 +137,18 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 
 | Khối §4.9.2 | Trạng thái 21-09 | Bằng chứng |
 |---|---|---|
-| TestCase / Suite / Plan CRUD | ✅ backend: `internal/testmgmt` (migration 0013), 24 route dashboard + 1 route CI, hợp đồng trong `openapi.yaml` (52 operation); **UI chưa có** | `backend/README.md`, `internal/testmgmt/testmgmt_test.go` |
-| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối); **evidence artifact chưa** (`manual_evidence` chưa thêm vào enum §8.4 — làm khi có UI upload) | cùng trên |
+| TestCase / Suite / Plan CRUD | ✅ backend: `internal/testmgmt` (migration 0013), 24 route dashboard + 1 route CI, hợp đồng trong `openapi.yaml` (52 operation); ✅ UI: `frontend/src/features/testmgmt/` — 4 màn hình chính + 3 màn chi tiết, live-check bước 13 chạy trên api thật | `backend/README.md`, `frontend/PLAN.md` |
+| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối) + UI một nút mỗi verdict, ghi chú; **evidence artifact chưa** (`manual_evidence` chưa thêm vào enum §8.4 — làm khi có upload từ trình duyệt) | cùng trên |
 | Automation mapping `TestCaseAutomationLink` | ✅ trỏ `TestIdentity.id`, kiểm qua contract của identity: khác project → 404, merged/retired → 409; case thành `automated` ở link đầu | test module + `cmd/api/api_test.go` |
 | Requirement mapping v0 + coverage | ✅ `requirement_coverage`, `coveredBy` trên requirement, p0 coverage tính cho gate | cùng trên |
 | Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; JUnit backfill **chưa** | `internal/testmgmt/csv.go` |
 | Importer TestRail | — đúng luật §6.8.5: chỉ khi có khách nêu tên | |
-| Release + quality gate + API cho CI | ✅ 5 rule khai báo, mức riêng từng rule, verdict máy đọc, override ghi tên, `GET /v1/releases/{id}/gate` cho token `project:read`; ngưỡng 3 % là `[ASSUMPTION]` trong `testmgmt.DefaultPolicy` | `internal/testmgmt/gate.go` |
+| Release + quality gate + API cho CI | ✅ 5 rule khai báo, mức riêng từng rule, verdict máy đọc, override ghi tên, `GET /v1/releases/{id}/gate` cho token `project:read`; ngưỡng 3 % là `[ASSUMPTION]` trong `testmgmt.DefaultPolicy`. UI: trang release hiện 5 rule (mức, áp dụng, chi tiết), nút Evaluate, quyết định Approve/Block/Ship kèm ghi chú, cảnh báo override có tên người, snippet curl cho CI | `internal/testmgmt/gate.go`, `frontend/…/ReleaseDetailPage.vue` |
 | ROI dashboard | — cần baseline TTRC đo được (§6.8.3 #3); không có baseline thì không có màn hình | |
 
 Cross-tenant walk (§14.3) nay đi 52 route với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
 
-**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA và RBAC 6 role (P2 theo §4.4, chưa tới); UI của Test Management (lát kế tiếp); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
+**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA và RBAC 6 role (P2 theo §4.4, chưa tới); evidence artifact cho manual execution; JUnit backfill; ROI (chờ baseline); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
 
 ---
 
@@ -1143,7 +1143,7 @@ Lưu ý: **Kafka không phải công cụ điều phối job.** Nó là event lo
 
 ### 6.8 Test Management Plane — thiết kế P2
 
-> **Backend đang build từ 21-09-2026 theo QĐ-12** (`backend/internal/testmgmt`, migration 0013, tiến độ ở §0.5); UI chưa có. Mục này vẫn là bản thiết kế; chỗ code buộc phải khác đi được ghi thành N62–N63 và sửa ngay dưới. Điều kiện vào P2 của §4.1 vẫn là cổng **sản phẩm**; QĐ-12 chỉ lật phần code.
+> **Đang build từ 21-09-2026 theo QĐ-12** — backend `backend/internal/testmgmt` (migration 0013) và UI `frontend/src/features/testmgmt` cùng ngày; tiến độ ở §0.5. Mục này vẫn là bản thiết kế; chỗ code buộc phải khác đi được ghi thành N62–N63 và sửa ngay dưới. Điều kiện vào P2 của §4.1 vẫn là cổng **sản phẩm**; QĐ-12 chỉ lật phần code.
 
 #### 6.8.1 Chuỗi truy vết — lý do tồn tại của plane này
 
@@ -1517,7 +1517,7 @@ Chuyển sang `backend/internal/identity/` là **port có kèm test**, không ph
 | `query` | ✅ dashboard v0. *Thực tế 18-09: có thêm lát đầu màn hình EM* | ✅ + màn hình EM (§2.5) | | | |
 | `triage` | ✅ ghi `TriageEvent` thủ công | ghi `TriageEvent` thủ công | ✅ AI hypothesis | | |
 | `billing` | — | shadow meter (§10.6) | | | |
-| `testmgmt` | — | — | — | ✅ §6.8 — *backend trên `main` từ 21-09 (QĐ-12), UI chưa* | |
+| `testmgmt` | — | — | — | ✅ §6.8 — *backend + UI trên `main` từ 21-09 (QĐ-12)* | |
 | `execution` | — | — | — | — | ✅ §6.7 |
 
 §4.3 Track A ghi P1-min làm *"identity operations dạng script/CSV"* — đọc đúng là **không cần giao diện** cho merge/split ở P1-min. Nó **không** có nghĩa là không có Review Queue service: §9.3 tầng 2 và alert §6.4 đòi bảng và gauge từ ngày đầu (N60). Nguyên tắc **chốt scope trước, tạo thư mục sau** vẫn đúng cho `execution` — module chưa có một dòng nào trong `backend/`; `testmgmt` được tạo khi chủ dự án chốt QĐ-12.

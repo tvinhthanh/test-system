@@ -202,6 +202,11 @@ export function createFixtureTransport(): Transport {
       });
     }
     if (path.endsWith("/triage-events")) return response({});
+    // Test Management (§6.8): a small, coherent set — two suites, three
+    // requirements, five cases (two critical, one linked), one plan with
+    // executions, two releases (one blocked, one shipped by override).
+    const tm = fixtureTestmgmt(url, init);
+    if (tm) return response(tm.body, tm.status);
     // §2.5 overview and §9.4 review/aliases, so every screen renders offline.
     if (path.endsWith("/metrics/triage")) {
       const long = url.searchParams.get("days") === "90";
@@ -372,4 +377,443 @@ export function createFixtureTransport(): Transport {
         offset + 20 < items.length ? `fixture-page-${offset + 20}` : null,
     });
   };
+}
+
+// ---- Test Management fixture ------------------------------------------------
+
+const tmNow = Date.UTC(2026, 8, 20, 9, 0);
+const iso = (minusMinutes: number) =>
+  new Date(tmNow - minusMinutes * 60000).toISOString();
+const tmRequirements = [
+  {
+    id: "req-1",
+    externalKey: "PAY-1",
+    title: "Card payments settle",
+    priority: "p0",
+    status: "active",
+    coveredBy: 2,
+    createdAt: iso(4000),
+    updatedAt: iso(4000),
+  },
+  {
+    id: "req-2",
+    externalKey: "PAY-7",
+    title: "Refunds reach the customer",
+    priority: "p0",
+    status: "active",
+    coveredBy: 0,
+    createdAt: iso(3800),
+    updatedAt: iso(3800),
+  },
+  {
+    id: "req-3",
+    externalKey: "",
+    title: "Search results paginate",
+    priority: "p2",
+    status: "draft",
+    coveredBy: 1,
+    createdAt: iso(2000),
+    updatedAt: iso(2000),
+  },
+];
+const tmCase = (i: number) => ({
+  id: `case-${i}`,
+  suiteId: i < 3 ? "suite-1" : "suite-2",
+  suiteName: i < 3 ? "Checkout" : "Search",
+  externalKey: i === 4 ? "" : `TC-${i + 1}`,
+  title:
+    [
+      "Pay with saved card",
+      "Apply discount code",
+      "Refund an order",
+      "Search returns matching products",
+      "Empty search shows suggestions",
+    ][i] ?? "Case",
+  steps:
+    i === 4
+      ? []
+      : [
+          {
+            action: "Open the cart with one item",
+            expected: "Cart shows the item and total",
+          },
+          {
+            action: i === 2 ? "Request a refund" : "Proceed to payment",
+            expected: i === 2 ? "Refund is queued" : "Payment form appears",
+          },
+        ],
+  expected: i === 2 ? "Money returns within 5 days" : "Order confirmed",
+  priority: i < 2 ? "p0" : i === 2 ? "p1" : "p2",
+  isCritical: i < 2,
+  automationStatus:
+    i === 0 ? "automated" : i === 3 ? "automation_candidate" : "manual_only",
+  ownerId: "",
+  links:
+    i === 0
+      ? [
+          {
+            id: "link-1",
+            testCaseId: "case-0",
+            stableTestId: "identity-0",
+            linkType: "exact",
+            createdBy: "alex@example.test",
+            createdAt: iso(3000),
+          },
+        ]
+      : [],
+  requirements:
+    i === 0 ? ["req-1"] : i === 1 ? ["req-1"] : i === 3 ? ["req-3"] : [],
+  createdAt: iso(3500 - i * 100),
+  updatedAt: iso(500 - i * 20),
+});
+const tmGateBlocked = {
+  verdict: "blocked",
+  evaluatedAt: iso(30),
+  runId: runIds[1],
+  branch: "main",
+  p0Coverage: 0.5,
+  rules: [
+    {
+      id: "critical_regression",
+      level: "blocked",
+      passed: true,
+      applies: true,
+      summary: "1 of 1 linked critical identities ran, none failed",
+      details: {
+        criticalCases: 2,
+        linkedIdentities: 1,
+        seenInRun: 1,
+        regressions: [],
+      },
+    },
+    {
+      id: "untriaged_failures",
+      level: "blocked",
+      passed: false,
+      applies: true,
+      summary: "2 of 5 failure(s) have no triage decision",
+      details: { failures: 5, untriaged: 2 },
+    },
+    {
+      id: "flaky_rate",
+      level: "warn",
+      passed: false,
+      applies: true,
+      summary: "flaky rate 3.9% is above 3.0%",
+      details: { flakyPass: 5, total: 128, rate: 0.039, threshold: 0.03 },
+    },
+    {
+      id: "p0_coverage",
+      level: "warn",
+      passed: true,
+      applies: false,
+      summary: "p0 coverage 50% — first evaluated release, nothing to compare",
+      details: { coverage: 0.5 },
+    },
+    {
+      id: "prod_smoke_approved",
+      level: "blocked",
+      passed: true,
+      applies: false,
+      summary:
+        "production smoke approval is an Execution Plane rule (P3, QĐ-8)",
+    },
+  ],
+};
+const tmReleases = [
+  {
+    id: "rel-2",
+    version: "2026.09.20",
+    branch: "main",
+    status: "open",
+    decidedBy: "",
+    decidedAt: null,
+    decisionNote: "",
+    gate: tmGateBlocked,
+    evaluatedAt: iso(30),
+    createdAt: iso(600),
+    updatedAt: iso(30),
+  },
+  {
+    id: "rel-1",
+    version: "2026.09.13",
+    branch: "",
+    status: "shipped",
+    decidedBy: "alex@example.test",
+    decidedAt: iso(1900),
+    decisionNote:
+      "Hotfix for the checkout outage; the env failure is a known issue",
+    gate: { ...tmGateBlocked, evaluatedAt: iso(2000), runId: runIds[3] },
+    evaluatedAt: iso(2000),
+    createdAt: iso(2600),
+    updatedAt: iso(1900),
+  },
+];
+const tmPlan = {
+  id: "plan-1",
+  name: "Release 2026.09.20 regression",
+  environmentId: "",
+  status: "active",
+  executions: [
+    {
+      id: "exec-1",
+      planId: "plan-1",
+      testCaseId: "case-1",
+      caseTitle: "Apply discount code",
+      executedBy: "alex@example.test",
+      status: "passed",
+      note: "",
+      executedAt: iso(120),
+    },
+    {
+      id: "exec-2",
+      planId: "plan-1",
+      testCaseId: "case-2",
+      caseTitle: "Refund an order",
+      executedBy: "alex@example.test",
+      status: "failed",
+      note: "Refund button disabled for gift cards",
+      executedAt: iso(90),
+    },
+  ],
+  createdAt: iso(700),
+  updatedAt: iso(90),
+};
+function fixtureTestmgmt(
+  url: URL,
+  init?: RequestInit,
+): { body: unknown; status?: number } | null {
+  const path = url.pathname;
+  const m = path.match(
+    /^\/v1\/projects\/(commerce|platform)\/(suites|requirements|test-cases|test-plans|releases)(?:\/([^/]+))?(?:\/([^/]+))?(?:\/([^/]+))?$/,
+  );
+  if (!m) return null;
+  const [, , kind, id, sub, subId] = m;
+  const method = init?.method ?? "GET";
+  const body =
+    typeof init?.body === "string"
+      ? (JSON.parse(init.body) as Record<string, unknown>)
+      : {};
+  const stamp = (extra: Record<string, unknown>) => ({
+    createdAt: iso(0),
+    updatedAt: iso(0),
+    ...extra,
+  });
+  const missing = {
+    body: { error: { code: "NOT_FOUND", message: "not found" } },
+    status: 404,
+  };
+  switch (kind) {
+    case "suites":
+      return method === "POST"
+        ? {
+            body: stamp({
+              id: "suite-new",
+              parentId: "",
+              name: body.name,
+              cases: 0,
+            }),
+            status: 201,
+          }
+        : {
+            body: {
+              items: [
+                {
+                  id: "suite-1",
+                  parentId: "",
+                  name: "Checkout",
+                  cases: 3,
+                  createdAt: iso(5000),
+                },
+                {
+                  id: "suite-2",
+                  parentId: "",
+                  name: "Search",
+                  cases: 2,
+                  createdAt: iso(4000),
+                },
+              ],
+            },
+          };
+    case "requirements":
+      if (method === "POST")
+        return {
+          body: stamp({
+            id: "req-new",
+            externalKey: body.externalKey ?? "",
+            title: body.title,
+            priority: body.priority ?? "p2",
+            status: "active",
+            coveredBy: 0,
+          }),
+          status: 201,
+        };
+      if (id && method === "PATCH") {
+        const r = tmRequirements.find((x) => x.id === id);
+        return r ? { body: { ...r, ...body, updatedAt: iso(0) } } : missing;
+      }
+      return { body: { items: tmRequirements } };
+    case "test-cases": {
+      if (id === "import")
+        return {
+          body: {
+            created: 3,
+            updated: 1,
+            skipped: 0,
+            suites: 1,
+            requirements: 0,
+            errors: ['row 5: priority "urgent" not in p0..p3'],
+          },
+        };
+      if (!id) {
+        if (method === "POST")
+          return {
+            body: stamp({
+              ...tmCase(4),
+              id: "case-new",
+              externalKey: body.externalKey ?? "",
+              title: body.title,
+              priority: body.priority ?? "p2",
+              isCritical: !!body.isCritical,
+              steps: body.steps ?? [],
+              automationStatus: "manual_only",
+              links: [],
+              requirements: [],
+            }),
+            status: 201,
+          };
+        const q = (url.searchParams.get("q") ?? "").toLowerCase();
+        const crit = url.searchParams.get("critical");
+        const auto = url.searchParams.get("automation");
+        return {
+          body: {
+            items: [0, 1, 2, 3, 4]
+              .map(tmCase)
+              .filter(
+                (c) =>
+                  (!q || c.title.toLowerCase().includes(q)) &&
+                  (!crit || String(c.isCritical) === crit) &&
+                  (!auto || c.automationStatus === auto),
+              )
+              .map(({ links: _l, requirements: _r, ...rest }) => rest),
+          },
+        };
+      }
+      const idx = Number(id.replace("case-", ""));
+      const c =
+        id === "case-new"
+          ? { ...tmCase(4), id, title: "New case" }
+          : tmCase(Number.isInteger(idx) && idx >= 0 && idx < 5 ? idx : 0);
+      if (sub === "links")
+        return method === "DELETE"
+          ? { body: {}, status: 204 }
+          : {
+              body: {
+                id: "link-new",
+                testCaseId: id,
+                stableTestId: body.stableTestId,
+                linkType: "exact",
+                createdBy: "alex@example.test",
+                createdAt: iso(0),
+              },
+              status: 201,
+            };
+      if (sub === "requirements") return { body: {}, status: 204 };
+      if (method === "PATCH")
+        return { body: { ...c, ...body, updatedAt: iso(0) } };
+      return subId ? missing : { body: c };
+    }
+    case "test-plans":
+      if (!id)
+        return method === "POST"
+          ? {
+              body: stamp({
+                id: "plan-new",
+                name: body.name,
+                environmentId: "",
+                status: "draft",
+                executions: [],
+              }),
+              status: 201,
+            }
+          : { body: { items: [{ ...tmPlan, executions: undefined }] } };
+      if (sub === "executions")
+        return {
+          body: {
+            id: "exec-new",
+            planId: id,
+            testCaseId: body.testCaseId,
+            caseTitle: "",
+            executedBy: "alex@example.test",
+            status: body.status,
+            note: body.note ?? "",
+            executedAt: iso(0),
+          },
+          status: 201,
+        };
+      if (method === "PATCH")
+        return { body: { ...tmPlan, status: body.status, updatedAt: iso(0) } };
+      return {
+        body:
+          id === "plan-new"
+            ? {
+                ...tmPlan,
+                id,
+                name: "New plan",
+                status: "draft",
+                executions: [],
+              }
+            : tmPlan,
+      };
+    case "releases": {
+      if (!id)
+        return method === "POST"
+          ? {
+              body: stamp({
+                id: "rel-new",
+                version: body.version,
+                branch: body.branch ?? "",
+                status: "open",
+                decidedBy: "",
+                decidedAt: null,
+                decisionNote: "",
+                gate: null,
+                evaluatedAt: null,
+              }),
+              status: 201,
+            }
+          : { body: { items: tmReleases } };
+      const rel = tmReleases.find((r) => r.id === id) ?? {
+        ...tmReleases[0]!,
+        id,
+        version: "new",
+        gate: null,
+        evaluatedAt: null,
+        status: "open",
+        decidedBy: "",
+        decidedAt: null,
+        decisionNote: "",
+      };
+      if (sub === "evaluate")
+        return {
+          body: {
+            ...rel,
+            gate: { ...tmGateBlocked, evaluatedAt: iso(0) },
+            evaluatedAt: iso(0),
+          },
+        };
+      if (sub === "decision")
+        return {
+          body: {
+            ...rel,
+            status: body.status,
+            decidedBy: "alex@example.test",
+            decidedAt: iso(0),
+            decisionNote: body.note ?? "",
+          },
+        };
+      return { body: rel };
+    }
+  }
+  return null;
 }

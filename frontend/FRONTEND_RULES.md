@@ -122,8 +122,10 @@ a persistent state change.
 - Keep the hook classes `scripts/live-check.mjs` navigates by (`run-link`,
   `test-row`, `clickable`, `artifact-list`, `review-item`, `empty-state`,
   `alias-table`, `tools`, `stat-tile`, `trend-chart`, `column`,
-  `chart-tooltip`, `trend-table`, `trend`, `status` + tone). They carry
-  no styles; removing one breaks the e2e job.
+  `chart-tooltip`, `trend-table`, `trend`, `status` + tone; Test Management:
+  `case-list`, `case-row`, `link-list`, `requirement-table`, `plan-list`,
+  `execution-list`, `release-list`, `gate-rules`, `gate-badge` with
+  `data-verdict`). They carry no styles; removing one breaks the e2e job.
 - Use a restrained operational dashboard style: dense, scannable, calm, and
   focused on comparison and repeated triage work.
 - Avoid nested cards, decorative gradients, excessive shadows, generic purple

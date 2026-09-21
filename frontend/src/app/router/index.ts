@@ -54,6 +54,39 @@ export function makeRouter(
               import("../../features/reports/ReviewQueuePage.vue"),
           },
           {
+            path: "p/:project/cases",
+            component: () =>
+              import("../../features/testmgmt/TestCasesPage.vue"),
+          },
+          {
+            path: "p/:project/cases/:case",
+            component: () =>
+              import("../../features/testmgmt/TestCaseDetailPage.vue"),
+          },
+          {
+            path: "p/:project/requirements",
+            component: () =>
+              import("../../features/testmgmt/RequirementsPage.vue"),
+          },
+          {
+            path: "p/:project/plans",
+            component: () => import("../../features/testmgmt/PlansPage.vue"),
+          },
+          {
+            path: "p/:project/plans/:plan",
+            component: () =>
+              import("../../features/testmgmt/PlanDetailPage.vue"),
+          },
+          {
+            path: "p/:project/releases",
+            component: () => import("../../features/testmgmt/ReleasesPage.vue"),
+          },
+          {
+            path: "p/:project/releases/:release",
+            component: () =>
+              import("../../features/testmgmt/ReleaseDetailPage.vue"),
+          },
+          {
             path: "p/:project/tests/:identity/history",
             component: () =>
               import("../../features/reports/IdentityHistoryPage.vue"),

@@ -20,6 +20,10 @@ const section = computed(() => {
   if (path.endsWith("/overview")) return "Overview";
   if (path.includes("/runs")) return "Test runs";
   if (path.endsWith("/review")) return "Review queue";
+  if (path.includes("/cases")) return "Test cases";
+  if (path.includes("/requirements")) return "Requirements";
+  if (path.includes("/plans")) return "Test plans";
+  if (path.includes("/releases")) return "Releases";
   if (path.includes("/flaky")) return "Flaky tests";
   if (path.includes("/tests")) return "Test intelligence";
   return "";
