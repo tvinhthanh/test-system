@@ -202,6 +202,93 @@ export function createFixtureTransport(): Transport {
       });
     }
     if (path.endsWith("/triage-events")) return response({});
+    // §2.5 overview and §9.4 review/aliases, so every screen renders offline.
+    if (path.endsWith("/metrics/triage")) {
+      const long = url.searchParams.get("days") === "90";
+      return response({
+        failures: long ? 412 : 137,
+        triaged: long ? 301 : 96,
+        seen: long ? 377 : 121,
+        untriagedRate: long ? 0.269 : 0.299,
+        triageCoverage: long ? 0.915 : 0.883,
+        ttrcMedianSeconds: long ? 5460 : 3900,
+        timeToFirstViewSeconds: long ? 1320 : 960,
+      });
+    }
+    if (path.endsWith("/metrics/trend")) {
+      const weeks = url.searchParams.get("days") === "90" ? 13 : 5;
+      const mix: Record<string, number[]> = {
+        app_bug: [6, 4, 9, 5, 7, 3, 8, 6, 4, 5, 7, 6, 5],
+        test_bug: [3, 5, 2, 4, 3, 6, 2, 3, 5, 2, 3, 4, 3],
+        flaky_timing: [4, 3, 5, 6, 4, 2, 5, 4, 3, 6, 4, 3, 5],
+        env_infra: [1, 0, 3, 1, 2, 0, 1, 2, 0, 1, 3, 1, 0],
+        env_data: [0, 2, 1, 0, 1, 1, 0, 2, 1, 0, 1, 0, 1],
+        dependency_external: [1, 1, 0, 2, 0, 1, 1, 0, 2, 1, 0, 1, 1],
+        unknown: [5, 6, 4, 7, 5, 8, 6, 5, 7, 4, 6, 5, 7],
+      };
+      const items: { week: string; category: string; count: number }[] = [];
+      for (let w = 0; w < weeks; w++) {
+        const week = new Date(
+          Date.UTC(2026, 8, 14) - (weeks - 1 - w) * 7 * 86400000,
+        ).toISOString();
+        for (const [category, counts] of Object.entries(mix))
+          if (counts[w]) items.push({ week, category, count: counts[w]! });
+      }
+      return response({ items });
+    }
+    if (path.endsWith("/review"))
+      return response({
+        items: [0, 1].map((i) => ({
+          id: `review-${i}`,
+          createdAt: new Date(Date.UTC(2026, 8, 14, 8 - i, 12)).toISOString(),
+          identity: {
+            id: `identity-${10 + i}`,
+            canonicalTitle: i
+              ? "Search returns matching products (paginated)"
+              : "Checkout completes with a stored card",
+            canonicalFilePath: "tests/checkout/flow.spec.ts",
+            status: "active",
+          },
+          candidate: {
+            id: `identity-${i === 0 ? 0 : 5}`,
+            canonicalTitle: i
+              ? "Search returns matching products"
+              : "Checkout completes with a saved card",
+            canonicalFilePath: "tests/checkout/flow.spec.ts",
+            status: "active",
+          },
+          fingerprint: `f${i}9c2a1e4b7d`,
+          score: i ? 0.71 : 0.83,
+          runnerUpId: i ? "" : "identity-3",
+          runnerUpScore: i ? 0 : 0.79,
+          gap: i ? 0.71 : 0.04,
+          breakdown: { title: i ? 0.66 : 0.9, structure: 0.8, recency: 0.7 },
+          runId: runIds[1 + i],
+        })),
+      });
+    if (path.endsWith("/aliases"))
+      return response({
+        items: [
+          {
+            id: "alias-1",
+            fingerprint: "a72f91c298bc0f31d4e5",
+            source: "exact",
+            matchScore: 1,
+            createdBy: "",
+            validFrom: new Date(Date.UTC(2026, 6, 2, 9)).toISOString(),
+            validTo: null,
+          },
+          {
+            id: "alias-0",
+            fingerprint: "5d1c0be4a97f2e6b8c03",
+            source: "auto_match",
+            matchScore: 0.91,
+            createdBy: "resolver",
+            validFrom: new Date(Date.UTC(2026, 4, 11, 9)).toISOString(),
+            validTo: new Date(Date.UTC(2026, 6, 2, 9)).toISOString(),
+          },
+        ],
+      });
     const identityMatch = path.match(
       /^\/v1\/projects\/(commerce|platform)\/identities(?:\/([^/]+))?/,
     );

@@ -30,7 +30,12 @@ draft was removed on 2026-09-18.
   Beyond P1-min, on the owner's call (2026-09-18, "all of this"): the §2.5
   engineering overview (P1.5) and the Review Queue / Merge-Split UI (§9.4)
   are in; OAuth, MFA and 6-role RBAC stay deferred.
-- Target: Vue.js web client only.
+- Target: Vue.js web client only. Visual system since 2026-09-21: Tailwind
+  CSS 4 + shadcn-vue (reka-ui) on `src/shared/theme.css` tokens, Geist /
+  Geist Mono self-hosted, light and dark palettes with a toggle in the shell.
+  The owner judged the hand-rolled CSS "nhót" (cheap-looking) on 2026-09-20
+  and chose this over a Next.js port: the framework was never the problem,
+  the styling was.
 - Backend status: every route in `API_CONTRACT.md` is mounted and inventoried
   in `../backend/deploy/routes.txt` (a test fails if the mux and the file
   differ). `scripts/live-check.mjs` drives the real UI through the real api:
@@ -39,8 +44,8 @@ draft was removed on 2026-09-18.
   proxies `/v1`).
 - Preview data: allowed only through an explicit fixture transport. Live API
   failures must never silently fall back to fixtures.
-- Last reviewed: 2026-09-18.
-- Latest verification: typecheck, 20 unit tests, production build + bundle gate
+- Last reviewed: 2026-09-21.
+- Latest verification: typecheck, 28 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -241,6 +246,37 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-21 (visual system: Tailwind CSS 4 + shadcn-vue)
+
+- Replaced the 1 468-line hand-written `tokens.css` with `src/shared/theme.css`:
+  Tailwind 4 (`@tailwindcss/vite`), OKLCH semantic tokens (background, card,
+  muted, accent, primary = brand green used only for primary action / ring /
+  mark), reserved status tones with soft fills, the validated §8.7 chart
+  palette as `--chart-<category>`, and a selected dark palette under `.dark`.
+  Fonts: Geist + Geist Mono via `@fontsource-variable` (self-hosted).
+- shadcn-vue `new-york` primitives generated into `src/components/ui/`
+  (button, badge, input, label, table, skeleton, separator, alert, sheet,
+  card) with `components.json` and the `@/` alias; `src/lib/utils.ts` (`cn`).
+  Icons stay on `@lucide/vue`, which the generated components also use.
+- New layout blocks in `src/shared/`: PageHeader, SectionHeading, ViewTabs /
+  ViewTab, StatTile, EmptyState (heading level configurable), Pagination,
+  BackLink, NativeSelect; StatusBadge / AsyncState / TechnicalBlock restyled.
+  Shell: sidebar rail (`SidebarNav`) reused inside a focus-trapped Sheet on
+  phones, breadcrumb top bar, `ThemeToggle` (light → dark → system, stored in
+  `localStorage`, applied inline in `index.html` before first paint).
+- Every page rebuilt on those blocks; hook classes the live-check and tests
+  rely on were kept (listed in FRONTEND_RULES.md). Sign-in gained a product
+  statement panel on wide screens. The overview chart widens its columns when
+  the window has few weeks and thins tick labels so they never collide.
+- Fixture transport now answers `metrics/triage`, `metrics/trend`, `review`
+  and `identities/{id}/aliases`, so `npm run dev:fixture` renders every
+  screen offline (it used to error on overview, review and fingerprints).
+- Fixed: IdentitiesPage used `<GitMerge>` without importing it (the review
+  queue tab rendered without its icon); status badge label casing.
+- Verified: typecheck, 28 unit tests, bundle gate 44.4 KiB, prettier, and the
+  12-step live-check on a real api (44 calls, console clean). Screenshots of
+  every screen in light, dark and 390 px were reviewed by eye.
+
 ### 2026-09-18 (stack recorded in SPEC; Flutter draft removed)
 
 - SPEC QD-9 now says Vue 3 + TypeScript (Vite, Pinia, vue-router) and states
@@ -373,12 +409,14 @@ files and updating this plan.
 
 ## Latest Verification
 
-All commands below ran from `frontend/` on 2026-09-14.
+All commands below ran from `frontend/`; dates per row.
 
 | Check | Result |
 | --- | --- |
-| `npm run build` (includes typecheck + bundle gate) | PASS; initial JS 41.2 KiB gzip, nine lazy modules, no fixture markers |
-| `npm run test:unit` | PASS; 28 tests in 9 files (2026-09-18) |
+| `npm run build` (includes typecheck + bundle gate) | PASS 2026-09-21 after the Tailwind/shadcn-vue restyle; initial JS 44.4 KiB gzip (was 41.2), 11 lazy modules, no fixture markers |
+| `npm run test:unit` | PASS; 28 tests in 9 files (2026-09-21, unchanged by the restyle — tests hook semantic classes, not styles) |
+| `npx prettier --check "src/**/*.{vue,ts,css}"` | PASS (2026-09-21) |
+| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, two `npm run example` runs | PASS 2026-09-21; 12 steps, 44 `/v1` calls all 2xx except the deliberate 401, console clean — the restyle changed no route, DTO or hook |
 | `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |

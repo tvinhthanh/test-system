@@ -1,21 +1,33 @@
 <script setup lang="ts">
-import {
-  ArrowLeft,
-  Calendar,
-  GitMerge,
-  RefreshCw,
-  Split,
-  Undo2,
-} from "@lucide/vue";
+import { Calendar, GitMerge, RefreshCw, Split, Undo2 } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { ApiError } from "../../core/api/client";
 import { useResource } from "../../core/state/useResource";
 import { useIdentityActions } from "./useIdentityActions";
-import { time } from "../../shared/format";
+import { time, tone } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
+import BackLink from "../../shared/BackLink.vue";
+import EmptyState from "../../shared/EmptyState.vue";
+import NativeSelect from "../../shared/NativeSelect.vue";
+import PageHeader from "../../shared/PageHeader.vue";
+import SectionHeading from "../../shared/SectionHeading.vue";
+import StatTile from "../../shared/StatTile.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 const route = useRoute(),
   router = useRouter();
 const { reports } = useServices();
@@ -25,6 +37,7 @@ const identity = useResource<Awaited<ReturnType<typeof reports.identity>>>();
 const history = useResource<Awaited<ReturnType<typeof reports.runs>>>();
 const identityData = computed(() => identity.data.value);
 const historyData = computed(() => history.data.value);
+const base = () => `/p/${encodeURIComponent(project.value)}`;
 function refresh() {
   void identity.load((signal) =>
     reports.identity(project.value, identityId.value, signal),
@@ -57,136 +70,174 @@ const visibleCandidates = computed(() => {
 async function doSplit() {
   const newId = await actions.split();
   if (newId)
-    await router.push(
-      `/p/${encodeURIComponent(project.value)}/tests/${encodeURIComponent(newId)}/history`,
-    );
+    await router.push(`${base()}/tests/${encodeURIComponent(newId)}/history`);
 }
 const reason = (e: unknown) =>
   e instanceof ApiError ? e.message : "The action could not be completed.";
 </script>
 <template>
-  <RouterLink class="back-link" :to="`/p/${encodeURIComponent(project)}/tests`"
-    ><ArrowLeft :size="16" />Test history</RouterLink
+  <BackLink :to="`${base()}/tests`">Test history</BackLink>
+  <PageHeader
+    eyebrow="Identity history"
+    :title="identityData?.canonicalTitle ?? identityId"
   >
-  <header class="page-heading">
-    <div>
-      <p class="eyebrow">IDENTITY HISTORY</p>
-      <h1>{{ identityData?.canonicalTitle ?? identityId }}</h1>
-      <p class="muted">
-        <code>{{ identityData?.canonicalFilePath }}</code>
-      </p>
-    </div>
-    <button
-      class="icon-button"
+    <template #description>
+      <span class="inline-flex flex-wrap items-center gap-2">
+        <code v-if="identityData?.canonicalFilePath" class="text-xs">{{
+          identityData.canonicalFilePath
+        }}</code>
+        <StatusBadge v-if="identityData" :status="identityData.verdict" />
+      </span>
+    </template>
+    <Button
+      variant="outline"
+      size="icon-sm"
       aria-label="Refresh identity history"
       title="Refresh identity history"
       @click="refresh"
-    >
-      <RefreshCw :size="18" />
-    </button>
-  </header>
+      ><RefreshCw
+    /></Button>
+  </PageHeader>
+
   <AsyncState
     :loading="identity.loading.value"
     :error="identity.error.value"
+    :rows="2"
     @retry="refresh"
-    ><template v-if="identityData"
-      ><div
+  >
+    <template v-if="identityData">
+      <Alert
         v-if="identityData.status === 'merged'"
-        class="notice"
+        class="notice mb-4"
         role="status"
       >
-        <GitMerge :size="16" />
-        <span
-          >This identity was merged into
+        <GitMerge />
+        <AlertTitle>Merged into another test</AlertTitle>
+        <AlertDescription class="block">
+          Its history lives
           <RouterLink
             v-if="identityData.mergedIntoId"
-            :to="`/p/${encodeURIComponent(project)}/tests/${encodeURIComponent(identityData.mergedIntoId)}/history`"
-            >another test</RouterLink
-          ><template v-else>another test</template>. Its history lives there
-          now.</span
-        >
-        <button
-          type="button"
-          class="button quiet"
-          :disabled="actions.busy.value !== null"
-          @click="actions.undo"
-        >
-          <Undo2 :size="16" />Undo merge
-        </button>
-      </div>
-      <div
+            class="text-foreground font-medium underline underline-offset-4"
+            :to="`${base()}/tests/${encodeURIComponent(identityData.mergedIntoId)}/history`"
+            >there</RouterLink
+          ><template v-else>there</template> now. Undo puts every fingerprint
+          back exactly where it was.
+          <Button
+            variant="outline"
+            size="xs"
+            class="mt-2"
+            :disabled="actions.busy.value !== null"
+            @click="actions.undo"
+            ><Undo2 />Undo merge</Button
+          >
+        </AlertDescription>
+      </Alert>
+      <Alert
         v-else-if="identityData.status === 'retired'"
-        class="notice"
+        class="notice mb-4"
         role="status"
       >
-        <Split :size="16" />
-        <span
-          >Retired: this test was split and a newer identity owns its
-          fingerprint now. History before the split stays here.</span
-        >
-      </div>
-      <StatusBadge :status="identityData.verdict" />
-      <div class="metrics">
-        <div>
-          <span>Runs</span><strong>{{ identityData.totalRuns }}</strong>
-        </div>
-        <div>
-          <span>Flaky score</span
-          ><strong>{{
-            identityData.flakyScore === null
-              ? "N/A"
-              : `${Math.round(identityData.flakyScore * 100)}%`
-          }}</strong>
-        </div>
-      </div>
-      <div class="history-large">
-        <i
-          v-for="(status, index) in identityData.recentStatuses"
-          :key="`${status}-${index}`"
-          :class="status.toLowerCase().replace('_', '-')"
-          :title="status"
-        /></div></template
-  ></AsyncState>
+        <Split />
+        <AlertTitle>Retired</AlertTitle>
+        <AlertDescription>
+          This test was split and a newer identity owns its fingerprint now.
+          History before the split stays here.
+        </AlertDescription>
+      </Alert>
 
-  <div class="section-heading">
-    <h2>Fingerprints</h2>
-    <span class="muted"
+      <section
+        class="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_2fr]"
+        aria-label="Stability figures"
+      >
+        <StatTile label="Runs" :value="identityData.totalRuns" />
+        <StatTile
+          label="Flaky score"
+          :value="
+            identityData.flakyScore === null
+              ? 'n/a'
+              : `${Math.round(identityData.flakyScore * 100)}%`
+          "
+          :note="
+            identityData.flakyScore === null ? 'Fewer than 2 runs' : undefined
+          "
+        />
+        <article
+          class="bg-card col-span-2 flex flex-col gap-2 rounded-lg border p-4 sm:col-span-1"
+        >
+          <span class="text-muted-foreground text-xs font-medium"
+            >Recent outcomes · oldest → latest</span
+          >
+          <div
+            class="history-large flex h-8 items-end gap-1"
+            role="img"
+            :aria-label="`Last ${identityData.recentStatuses.length} outcomes: ${identityData.recentStatuses.join(', ')}`"
+          >
+            <i
+              v-for="(status, index) in identityData.recentStatuses"
+              :key="`${status}-${index}`"
+              :class="cn('h-full flex-1 rounded-sm', `tone-${tone(status)}`)"
+              :title="status"
+            />
+          </div>
+        </article>
+      </section>
+    </template>
+  </AsyncState>
+
+  <SectionHeading title="Fingerprints">
+    <span class="text-xs"
       >{{ actions.inForce.value.length }} in force ·
       {{
         (actions.aliases.data.value?.length ?? 0) - actions.inForce.value.length
       }}
       historical</span
     >
-  </div>
+  </SectionHeading>
   <AsyncState
     :loading="actions.aliases.loading.value"
     :error="actions.aliases.error.value"
+    :rows="3"
     @retry="actions.loadAliases"
-    ><table v-if="actions.aliases.data.value?.length" class="alias-table">
-      <thead>
-        <tr>
-          <th scope="col">Fingerprint</th>
-          <th scope="col">Source</th>
-          <th scope="col">Match</th>
-          <th scope="col">From</th>
-          <th scope="col">To</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="a in actions.aliases.data.value" :key="a.id">
-          <td>
-            <code>{{ a.fingerprint }}</code>
-          </td>
-          <td>{{ a.source }}</td>
-          <td>
-            {{ a.source === "exact" ? "—" : `${Math.round(a.matchScore * 100)}%` }}
-          </td>
-          <td>{{ time(a.validFrom) }}</td>
-          <td>{{ a.validTo ? time(a.validTo) : "in force" }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-else class="muted">No fingerprint recorded.</p>
+  >
+    <div
+      v-if="actions.aliases.data.value?.length"
+      class="bg-card overflow-x-auto rounded-lg border"
+    >
+      <Table class="alias-table">
+        <TableHeader>
+          <TableRow class="hover:bg-transparent">
+            <TableHead>Fingerprint</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Match</TableHead>
+            <TableHead>From</TableHead>
+            <TableHead>To</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="a in actions.aliases.data.value" :key="a.id">
+            <TableCell
+              ><code class="text-xs">{{ a.fingerprint }}</code></TableCell
+            >
+            <TableCell class="capitalize">{{
+              a.source.replaceAll("_", " ")
+            }}</TableCell>
+            <TableCell class="font-mono text-xs tabular-nums">{{
+              a.source === "exact" ? "—" : `${Math.round(a.matchScore * 100)}%`
+            }}</TableCell>
+            <TableCell class="text-muted-foreground text-xs">{{
+              time(a.validFrom)
+            }}</TableCell>
+            <TableCell class="text-xs">
+              <span v-if="a.validTo" class="text-muted-foreground">{{
+                time(a.validTo)
+              }}</span>
+              <span v-else class="text-success font-medium">in force</span>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
+    <p v-else class="text-muted-foreground text-sm">No fingerprint recorded.</p>
   </AsyncState>
 
   <section
@@ -194,131 +245,191 @@ const reason = (e: unknown) =>
     class="tools"
     aria-labelledby="tools-title"
   >
-    <div class="section-heading">
-      <h2 id="tools-title">Identity tools</h2>
-      <span class="muted">admin · audited</span>
-    </div>
-    <div class="tool-tabs">
-      <button
+    <SectionHeading id="tools-title" title="Identity tools">
+      <span class="text-xs">admin · audited</span>
+    </SectionHeading>
+    <div class="flex flex-wrap gap-2" role="group" aria-label="Tool">
+      <Button
         type="button"
-        class="button quiet"
-        :class="{ selected: tools === 'merge' }"
+        :variant="tools === 'merge' ? 'secondary' : 'outline'"
+        size="sm"
+        :class="tools === 'merge' && 'selected'"
+        :aria-pressed="tools === 'merge'"
         @click="tools = tools === 'merge' ? '' : 'merge'"
+        ><GitMerge />Merge into another test</Button
       >
-        <GitMerge :size="16" />Merge into another test
-      </button>
-      <button
+      <Button
         type="button"
-        class="button quiet"
-        :class="{ selected: tools === 'split' }"
+        :variant="tools === 'split' ? 'secondary' : 'outline'"
+        size="sm"
+        :class="tools === 'split' && 'selected'"
+        :aria-pressed="tools === 'split'"
         @click="tools = tools === 'split' ? '' : 'split'"
+        ><Split />Split from a point in time</Button
       >
-        <Split :size="16" />Split from a point in time
-      </button>
     </div>
-    <div v-if="tools === 'merge'" class="tool-panel">
-      <p class="muted">
+
+    <div
+      v-if="tools === 'merge'"
+      class="tool-panel bg-card mt-3 space-y-4 rounded-lg border p-4"
+    >
+      <p class="text-muted-foreground text-sm">
         Use when the resolver missed a rename: every fingerprint of this
         identity moves to the chosen test and the two histories become one. Undo
         puts it back exactly.
       </p>
-      <label class="field"
-        ><span>Filter tests</span
-        ><input
+      <div class="space-y-2">
+        <Label for="candidate-filter">Filter tests</Label>
+        <Input
+          id="candidate-filter"
           v-model="candidateFilter"
           type="search"
           placeholder="title or file path"
-      /></label>
+          class="max-w-md"
+        />
+      </div>
       <AsyncState
         :loading="actions.candidates.loading.value"
         :error="actions.candidates.error.value"
+        :rows="4"
         @retry="actions.loadCandidates"
-        ><ul class="candidate-list" role="radiogroup" aria-label="Merge into">
+      >
+        <ul
+          class="candidate-list max-h-80 divide-y overflow-y-auto rounded-md border"
+          role="radiogroup"
+          aria-label="Merge into"
+        >
           <li v-for="c in visibleCandidates.slice(0, 20)" :key="c.id">
             <label
-              ><input
+              class="has-checked:bg-accent hover:bg-accent/60 flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors"
+            >
+              <input
                 v-model="actions.mergeTarget.value"
                 type="radio"
                 name="merge-target"
                 :value="c.id"
-              /><strong>{{ c.canonicalTitle }}</strong
-              ><code>{{ c.canonicalFilePath }}</code></label
-            >
+                class="accent-primary mt-1 size-3.5"
+              />
+              <span class="min-w-0">
+                <strong class="block truncate text-sm font-medium">{{
+                  c.canonicalTitle
+                }}</strong>
+                <code class="text-muted-foreground block truncate text-xs">{{
+                  c.canonicalFilePath
+                }}</code>
+              </span>
+            </label>
           </li>
-        </ul></AsyncState
-      >
-      <button
+          <li
+            v-if="!visibleCandidates.length"
+            class="text-muted-foreground px-3 py-6 text-center text-sm"
+          >
+            No other active test matches.
+          </li>
+        </ul>
+      </AsyncState>
+      <Button
         type="button"
-        class="button primary"
+        size="sm"
         :disabled="!actions.mergeTarget.value || actions.busy.value !== null"
         @click="actions.merge"
+        ><GitMerge />Merge this identity into the selected test</Button
       >
-        <GitMerge :size="16" />Merge this identity into the selected test
-      </button>
     </div>
-    <div v-if="tools === 'split'" class="tool-panel">
-      <p class="muted">
+
+    <div
+      v-if="tools === 'split'"
+      class="tool-panel bg-card mt-3 space-y-4 rounded-lg border p-4"
+    >
+      <p class="text-muted-foreground text-sm">
         Use when the same fingerprint started meaning a different test at some
         point: the alias closes there and a new identity owns it from then on.
         History before that point stays here. This does not undo a merge — use
         Undo for that.
       </p>
-      <label class="field"
-        ><span>Fingerprint</span
-        ><select v-model="actions.splitFingerprint.value">
-          <option value="">Choose a fingerprint in force</option>
-          <option
-            v-for="a in actions.inForce.value"
-            :key="a.id"
-            :value="a.fingerprint"
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="space-y-2">
+          <Label for="split-fingerprint">Fingerprint</Label>
+          <NativeSelect
+            id="split-fingerprint"
+            v-model="actions.splitFingerprint.value"
+            class="w-full"
           >
-            {{ a.fingerprint }}
-          </option>
-        </select></label
-      >
-      <label class="field"
-        ><span>Diverged at</span
-        ><input v-model="actions.splitAt.value" type="datetime-local"
-      /></label>
-      <button
+            <option value="">Choose a fingerprint in force</option>
+            <option
+              v-for="a in actions.inForce.value"
+              :key="a.id"
+              :value="a.fingerprint"
+            >
+              {{ a.fingerprint }}
+            </option>
+          </NativeSelect>
+        </div>
+        <div class="space-y-2">
+          <Label for="split-at">Diverged at</Label>
+          <Input
+            id="split-at"
+            v-model="actions.splitAt.value"
+            type="datetime-local"
+          />
+        </div>
+      </div>
+      <Button
         type="button"
-        class="button primary"
+        size="sm"
         :disabled="
           !actions.splitFingerprint.value ||
           !actions.splitAt.value ||
           actions.busy.value !== null
         "
         @click="doSplit"
+        ><Split />Split here</Button
       >
-        <Split :size="16" />Split here
-      </button>
     </div>
-    <p v-if="actions.actionError.value" class="error-text" role="alert">
+    <p
+      v-if="actions.actionError.value"
+      class="bg-danger-soft text-danger border-danger/20 mt-3 rounded-md border px-3 py-2 text-sm"
+      role="alert"
+    >
       {{ reason(actions.actionError.value) }}
     </p>
   </section>
 
-  <div class="section-heading">
-    <h2>Recent runs</h2>
-    <Calendar :size="18" />
-  </div>
+  <SectionHeading title="Recent runs"><Calendar :size="16" /></SectionHeading>
   <AsyncState
     :loading="history.loading.value"
     :error="history.error.value"
+    :rows="4"
     @retry="refresh"
-    ><div v-if="!historyData?.items.length" class="empty-state compact">
-      <p>No matching history runs.</p>
-    </div>
-    <div v-else class="history-runs">
-      <RouterLink
-        v-for="run in historyData.items"
-        :key="run.id"
-        class="event-row"
-        :to="`/p/${encodeURIComponent(project)}/runs/${encodeURIComponent(run.id)}`"
-        ><StatusBadge :status="run.status" :flaky="run.flakyCount" /><span
-          >{{ run.branch }} / {{ run.environmentName }}</span
-        ><span class="muted">{{ run.startedAt }}</span></RouterLink
-      >
-    </div></AsyncState
   >
+    <EmptyState
+      v-if="!historyData?.items.length"
+      compact
+      description="No matching history runs."
+    />
+    <ul
+      v-else
+      class="history-runs bg-card divide-y overflow-hidden rounded-lg border"
+    >
+      <li v-for="run in historyData.items" :key="run.id">
+        <RouterLink
+          :to="`${base()}/runs/${encodeURIComponent(run.id)}`"
+          class="hover:bg-accent focus-visible:bg-accent flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm transition-colors outline-none"
+        >
+          <StatusBadge :status="run.status" :flaky="run.flakyCount" />
+          <span class="min-w-0 flex-1 truncate font-medium"
+            >{{ run.branch }}
+            <span class="text-muted-foreground font-normal"
+              >· {{ run.environmentName }}</span
+            ></span
+          >
+          <time
+            class="text-muted-foreground text-xs"
+            :datetime="run.startedAt"
+            >{{ time(run.startedAt) }}</time
+          >
+        </RouterLink>
+      </li>
+    </ul>
+  </AsyncState>
 </template>

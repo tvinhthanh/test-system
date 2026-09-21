@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { defineConfig, type Plugin } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
+import tailwindcss from "@tailwindcss/vite";
 
 // Serves Playwright's trace viewer at /trace/ from node_modules during
 // `vite dev`, the way Caddy serves dist/trace/ in production
@@ -59,7 +60,8 @@ export default defineConfig(({ command, mode }) => {
   if (command === "build" && mode === "fixture")
     throw new Error("Fixture mode is development only.");
   return {
-    plugins: [vue(), traceViewer()],
+    plugins: [vue(), tailwindcss(), traceViewer()],
+    resolve: { alias: { "@": resolve(import.meta.dirname, "src") } },
     // ATP_API points the dev proxy at another api (a soak's, a staging box) for
     // scripts/live-check.mjs; default is the local `go run ./cmd/api`.
     server: {

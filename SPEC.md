@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.17 · **Ngày:** 18-09-2026 · **Trạng thái:** 11 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 61 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59) và hai phát hiện từ chính việc build P1-min (N60–N61)
+> **Phiên bản:** v3.18 · **Ngày:** 21-09-2026 · **Trạng thái:** 11 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 61 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59) và hai phát hiện từ chính việc build P1-min (N60–N61)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -125,7 +125,7 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 |---|---|---|---|
 | Backend Go monolith | §6.9 cột P1-min | ✅ trên `main` — mọi module §6.9.11 P1-min trừ `billing`; 12 migration; luật §6.9.3/§6.9.7 cưỡng chế bằng `test/arch` từ commit đầu (QĐ-11 #4) | `backend/README.md`, `backend/test/arch/` |
 | Reporter Playwright | §7.5 | ✅ npm reporter: batch 5 s / 100 event, retry 1/2/4/8 s, spool khi mất mạng (run của khách không bao giờ fail), artifact sha256 phía client + cap, HAR strip, fingerprint §9.2 khớp vector Go, error text sạch ANSI | `reporter/playwright/README.md` |
-| Dashboard | §4.4 "dashboard v0" + bảng cắt/dời | ✅ Vue 3 (QĐ-9 sửa lần hai): sign-in, projects, runs, failure detail (attempt, error/stack, artifact: ảnh/video inline, `trace.zip` trong trace viewer tự host), triage, identity history, flaky. **Làm sớm hơn kế hoạch theo yêu cầu chủ dự án 18-09:** lát đầu màn hình EM (P1.5), Review Queue UI và Merge/Split/Undo UI (§4.4 xếp P2) — chi tiết ở §4.4 "Thực tế" | `frontend/PLAN.md`, `frontend/API_CONTRACT.md` |
+| Dashboard | §4.4 "dashboard v0" + bảng cắt/dời | ✅ Vue 3 (QĐ-9 sửa lần hai; giao diện Tailwind + shadcn-vue, sáng/tối, từ 21-09): sign-in, projects, runs, failure detail (attempt, error/stack, artifact: ảnh/video inline, `trace.zip` trong trace viewer tự host), triage, identity history, flaky. **Làm sớm hơn kế hoạch theo yêu cầu chủ dự án 18-09:** lát đầu màn hình EM (P1.5), Review Queue UI và Merge/Split/Undo UI (§4.4 xếp P2) — chi tiết ở §4.4 "Thực tế" | `frontend/PLAN.md`, `frontend/API_CONTRACT.md` |
 | Hợp đồng API | §11.6 API9 | ✅ `backend/deploy/openapi.yaml` (27 operation) là nguồn sự thật; test hai chiều route ↔ spec; Redocly lint trong CI | `docs/openapi-contract-reimplementation.md` |
 | Triển khai | §6.4, §11.5 | ✅ image distroless + compose (Postgres 17, migrate một lần, api, worker, Prometheus + alert §6.4, Caddy TLS, backup hằng ngày); CI 4 job: backend, reporter, frontend, e2e trên compose (reporter thật → api thật → UI thật) | `backend/deploy/README.md`, `.github/workflows/ci.yml` |
 | Gate kỹ thuật | §14 | T0 T1 T3 T4 ✅ · T2 một phần · T5 một phần — cột "Trạng thái" §14.1 | `backend/GATES.md` |
@@ -254,7 +254,7 @@ Bất biến sản phẩm:
 **Quyết định:**
 
 ```text
-Client              Vue 3 + TypeScript — Vite, Pinia, vue-router; Web. Desktop/Mobile xét lại ở P3 (xem "Phạm vi theo phase")
+Client              Vue 3 + TypeScript — Vite, Pinia, vue-router; giao diện Tailwind CSS 4 + shadcn-vue (reka-ui), token OKLCH trong một file, font Geist tự host, sáng/tối; Web. Desktop/Mobile xét lại ở P3 (xem "Phạm vi theo phase")
 Backend             Go        — monolith, control plane; hai vai `api` và `worker` từ một module, mỗi vai một binary
 Local Agent         Go        — P3
 Playwright Reporter TypeScript — bắt buộc, §7.5
@@ -287,6 +287,7 @@ Biên triển khai     Caddy (TLS, phục vụ `frontend/dist`, proxy `/v1`) tr�
 - **Vector XSS quay lại ở dạng luật thay vì dạng kiến trúc.** Ràng buộc 3 sống bằng test; ai gỡ test đó là gỡ hàng rào.
 - **Client desktop cho P3 chưa có đường trả trước.** Nếu P3 đòi UI trên máy tester, đó là công sức mới — chấp nhận, vì hai phase là quá xa để trả trước bằng UX kém hơn ở P1.
 - **Hai lần đổi stack client trong ba tuần** (Next.js → Flutter → Vue). Bản nháp Flutter đã gỡ khỏi `frontend/` ngày 18-09 (còn trong lịch sử git); không giữ hai client song song.
+- **Giao diện là hệ thống token + bộ primitive, không phải CSS tự viết.** 20-09 chủ dự án thấy dashboard "nhìn nhót" và định quay về Next.js; nguyên nhân nằm ở 1 468 dòng CSS tay, không ở framework. 21-09 thay bằng Tailwind CSS 4 + shadcn-vue trên `frontend/src/shared/theme.css` (một file giữ màu/chữ/bo góc, palette tối chọn tay, màu trạng thái dành riêng, palette biểu đồ §8.7 đã kiểm chứng), `src/components/ui/` sinh bằng CLI và không sửa tay. Kết quả đo được: bundle đầu 41,2 → 44,4 KiB gzip, 28 test và live-check 12 bước không đổi — đổi vỏ, không đổi hợp đồng.
 - Nếu sau này cần landing page, docs, pricing, public shared report thì làm **static site riêng, cực nhẹ**, không kéo app chính theo.
 
 **Chưa chốt — phải khóa cùng pricing:** model LLM cho AI Triage (§1.4). §10.3 giả định ~$0.01/hypothesis (6k token vào, 500 ra), tương đương model hạng Haiku. Model hạng Opus khoảng $0.04/hypothesis → biến phí nhảy từ $9–10 lên ~$24/team/tháng, và quy tắc "giá Team ≥ 5× biến phí" sẽ đòi giá ~$120 thay vì $49. **Không được chọn model tách rời khỏi pricing.** Benchmark ở P1.5, khóa model và giá cùng lúc trước Gate-1.5.

@@ -8,7 +8,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.17** — 11 ADR đã chốt (QĐ-9 sửa lần hai 14-09: client Vue 3), ba plane đã đặc tả, 61 phát hiện N đã xử lý; tiến độ build ở §0.5 |
+| Spec | **v3.18** — 11 ADR đã chốt (QĐ-9 sửa lần hai 14-09: client Vue 3; giao diện Tailwind + shadcn-vue 21-09), ba plane đã đặc tả, 61 phát hiện N đã xử lý; tiến độ build ở §0.5 |
 | Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
 | Code sản phẩm | **P1-min đã đủ** theo QĐ-11 (11-09 → 18-09): `backend/` (Go, mọi module §6.9.11 trừ billing), `reporter/playwright/`, `frontend/` (Vue), `backend/deploy/` (image + compose staging + CI). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅, T5 harness 2 h sạch — xem [`backend/GATES.md`](backend/GATES.md); còn cần hạ tầng cho soak 24 h, ingest trên server, pentest |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |

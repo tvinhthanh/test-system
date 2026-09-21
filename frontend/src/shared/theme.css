@@ -1,0 +1,242 @@
+/* Design tokens + Tailwind. One place owns colour, type and radius; pages use
+   utilities and the ui/ primitives (shadcn-vue) and never introduce hex values.
+   Dark mode is a selected palette under `.dark` (set by shared/theme.ts), not
+   an automatic inversion. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-sans:
+    "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  --radius: 0.375rem;
+
+  /* Neutrals carry the UI; the brand green appears only as primary action,
+     focus ring and the logo mark. */
+  --background: oklch(0.992 0.001 150);
+  --foreground: oklch(0.2 0.012 155);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.37 0.075 158);
+  --primary-foreground: oklch(0.99 0.005 150);
+  --secondary: oklch(0.962 0.004 150);
+  --secondary-foreground: oklch(0.28 0.012 155);
+  --muted: oklch(0.965 0.003 150);
+  --muted-foreground: oklch(0.5 0.012 155);
+  --accent: oklch(0.955 0.006 152);
+  --accent-foreground: oklch(0.22 0.012 155);
+  --destructive: oklch(0.55 0.19 24);
+  --border: oklch(0.905 0.005 150);
+  --input: oklch(0.885 0.006 150);
+  --ring: oklch(0.55 0.11 158);
+  --sidebar: oklch(0.975 0.003 150);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+
+  /* Status colours are reserved for state (§1.7: never "clean green" when
+     flaky). Each has an ink and a soft fill so badges never rely on colour
+     alone — they always carry an icon and a label. */
+  --success: oklch(0.5 0.12 155);
+  --success-soft: oklch(0.955 0.03 155);
+  --warning: oklch(0.56 0.12 75);
+  --warning-soft: oklch(0.965 0.04 85);
+  --danger: oklch(0.53 0.18 24);
+  --danger-soft: oklch(0.96 0.03 24);
+  --info: oklch(0.52 0.13 252);
+  --info-soft: oklch(0.955 0.025 252);
+  --neutral: oklch(0.55 0.01 155);
+  --neutral-soft: oklch(0.955 0.004 150);
+
+  /* §8.7 failure categories → fixed dataviz slots (validated palette, light
+     and dark); `unknown` is the de-emphasis gray. categories.ts owns order. */
+  --chart-app_bug: #2a78d6;
+  --chart-test_bug: #eb6834;
+  --chart-flaky_timing: #1baf7a;
+  --chart-env_infra: #eda100;
+  --chart-env_data: #e87ba4;
+  --chart-dependency_external: #008300;
+  --chart-unknown: #b3b7b4;
+}
+
+.dark {
+  --background: oklch(0.165 0.006 155);
+  --foreground: oklch(0.95 0.005 150);
+  --card: oklch(0.2 0.007 155);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.21 0.007 155);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.8 0.12 158);
+  --primary-foreground: oklch(0.18 0.03 158);
+  --secondary: oklch(0.26 0.008 155);
+  --secondary-foreground: oklch(0.93 0.005 150);
+  --muted: oklch(0.235 0.007 155);
+  --muted-foreground: oklch(0.7 0.01 152);
+  --accent: oklch(0.255 0.009 155);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.18 24);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.7 0.12 158);
+  --sidebar: oklch(0.15 0.006 155);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: oklch(1 0 0 / 8%);
+
+  --success: oklch(0.76 0.13 155);
+  --success-soft: oklch(0.5 0.12 155 / 18%);
+  --warning: oklch(0.8 0.13 80);
+  --warning-soft: oklch(0.56 0.12 75 / 20%);
+  --danger: oklch(0.74 0.16 24);
+  --danger-soft: oklch(0.53 0.18 24 / 20%);
+  --info: oklch(0.76 0.11 252);
+  --info-soft: oklch(0.52 0.13 252 / 20%);
+  --neutral: oklch(0.72 0.01 155);
+  --neutral-soft: oklch(1 0 0 / 7%);
+
+  --chart-app_bug: #5b9be6;
+  --chart-test_bug: #f2895f;
+  --chart-flaky_timing: #3cc492;
+  --chart-env_infra: #f4b62e;
+  --chart-env_data: #f09bbb;
+  --chart-dependency_external: #4aa84a;
+  --chart-unknown: #6f7472;
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-neutral: var(--neutral);
+  --color-neutral-soft: var(--neutral-soft);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground text-sm antialiased;
+    margin: 0;
+    font-feature-settings: "ss01", "cv11";
+  }
+  code,
+  pre,
+  kbd,
+  .mono {
+    font-family: var(--font-mono);
+    font-feature-settings: normal;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  svg {
+    flex-shrink: 0;
+  }
+  h1 {
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--ring) 28%, transparent);
+  }
+}
+
+/* Chart series (SVG fill and legend swatches) keyed by §8.7 category. */
+.series-app_bug {
+  fill: var(--chart-app_bug);
+  background: var(--chart-app_bug);
+}
+.series-test_bug {
+  fill: var(--chart-test_bug);
+  background: var(--chart-test_bug);
+}
+.series-flaky_timing {
+  fill: var(--chart-flaky_timing);
+  background: var(--chart-flaky_timing);
+}
+.series-env_infra {
+  fill: var(--chart-env_infra);
+  background: var(--chart-env_infra);
+}
+.series-env_data {
+  fill: var(--chart-env_data);
+  background: var(--chart-env_data);
+}
+.series-dependency_external {
+  fill: var(--chart-dependency_external);
+  background: var(--chart-dependency_external);
+}
+.series-unknown {
+  fill: var(--chart-unknown);
+  background: var(--chart-unknown);
+}
+
+/* Fine-grained status colour for the run-history strips and result bars. */
+.tone-success {
+  background: var(--success);
+}
+.tone-warning {
+  background: var(--warning);
+}
+.tone-danger {
+  background: var(--danger);
+}
+.tone-info {
+  background: var(--info);
+}
+.tone-neutral {
+  background: var(--neutral);
+  opacity: 0.45;
+}

@@ -7,7 +7,7 @@ import { createSessionStore } from "./features/auth/sessionStore";
 import { ReportsRepository } from "./features/reports/reportsRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
-import "./shared/tokens.css";
+import "./shared/theme.css";
 
 async function start() {
   let transport: Transport = (input, init) => fetch(input, init);
