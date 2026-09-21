@@ -123,11 +123,23 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Org A's Test Management rows (P2): a requirement, a case linked to
+	// A's identity, a plan, a release — created through the api as A.
+	reqA := a.user.post(baseA+"/requirements", map[string]any{"title": "Card payments", "priority": "p0"}).body["id"].(string)
+	caseA := a.user.post(baseA+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true}).body["id"].(string)
+	linkA := a.user.post(baseA+"/test-cases/"+caseA+"/links", map[string]any{"stableTestId": identityA}).body["id"].(string)
+	planA := a.user.post(baseA+"/test-plans", map[string]any{"name": "Sprint 12"}).body["id"].(string)
+	releaseA := a.user.post(baseA+"/releases", map[string]any{"version": "2026.09.21"}).body["id"].(string)
+	if reqA == "" || caseA == "" || linkA == "" || planA == "" || releaseA == "" {
+		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q", reqA, caseA, linkA, planA, releaseA)
+	}
+
 	// Org A's ids by path parameter name. A parameter this map does not
 	// know is a route the walk cannot exercise — fail loudly, do not skip.
 	foreign := map[string]string{
 		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
 		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
+		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "releaseId": releaseA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -140,6 +152,20 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/identities/{identityId}/merge":      map[string]any{"into": identityA},
 		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge": map[string]any{},
 		"POST /v1/projects/{projectId}/identities/{identityId}/split":      map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
+		// Test Management (P2). Valid bodies, so only the tenant check can refuse.
+		"POST /v1/projects/{projectId}/suites":                         map[string]any{"name": "Walk"},
+		"POST /v1/projects/{projectId}/requirements":                   map[string]any{"title": "Walk"},
+		"PATCH /v1/projects/{projectId}/requirements/{requirementId}":  map[string]any{"title": "Walk"},
+		"POST /v1/projects/{projectId}/test-cases":                     map[string]any{"title": "Walk"},
+		"POST /v1/projects/{projectId}/test-cases/import":              map[string]any{"csv": "title\nWalk"},
+		"PATCH /v1/projects/{projectId}/test-cases/{testCaseId}":       map[string]any{"title": "Walk"},
+		"POST /v1/projects/{projectId}/test-cases/{testCaseId}/links":  map[string]any{"stableTestId": identityA},
+		"POST /v1/projects/{projectId}/test-plans":                     map[string]any{"name": "Walk"},
+		"PATCH /v1/projects/{projectId}/test-plans/{planId}":           map[string]any{"status": "active"},
+		"POST /v1/projects/{projectId}/test-plans/{planId}/executions": map[string]any{"testCaseId": caseA, "status": "passed"},
+		"POST /v1/projects/{projectId}/releases":                       map[string]any{"version": "walk"},
+		"POST /v1/projects/{projectId}/releases/{releaseId}/evaluate":  map[string]any{},
+		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":  map[string]any{"status": "approved"},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.
@@ -197,6 +223,16 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			if r := rep.do(method, fill(path, foreign), body, bearerA); r.code != 401 {
 				t.Errorf("bearer token on %s: %d %s", pat, r.code, r.raw)
 			}
+		case strings.HasPrefix(path, "/v1/releases/"):
+			// CI gate (§6.8.4 #2): a bearer route whose URL names no project.
+			walked++
+			refused("B token → "+pat, rep.do(method, fill(path, foreign), nil, map[string]string{"Authorization": "Bearer " + b.token}))
+			// A's own ingest token lacks project:read — the permission
+			// boundary answers like the tenant boundary.
+			refused("A ingest token → "+pat, rep.do(method, fill(path, foreign), nil, bearerA))
+			if r := a.user.do(method, fill(path, foreign), nil, nil); r.code != 401 {
+				t.Errorf("session cookie on %s: %d %s", pat, r.code, r.raw)
+			}
 		case strings.HasPrefix(path, "/v1/runs/") || strings.HasPrefix(path, "/v1/artifacts/"):
 			walked++
 			if body == nil {
@@ -211,7 +247,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			t.Fatalf("unclassified route %q — add it to the cross-tenant walk (§14.3)", pat)
 		}
 	}
-	if walked < 12 {
+	if walked < 36 {
 		t.Errorf("walked only %d resource routes: %v", walked, patterns)
 	}
 

@@ -15,6 +15,8 @@ var minRole = map[Action]Role{
 	ActionMemberManage:     RoleAdmin,
 	ActionOrgManage:        RoleAdmin,
 	ActionDataDelete:       RoleAdmin,
+	ActionTestmgmtWrite:    RoleMember,
+	ActionReleaseDecide:    RoleAdmin,
 }
 
 var roleRank = map[Role]int{RoleViewer: 1, RoleMember: 2, RoleAdmin: 3}
@@ -37,7 +39,7 @@ func stronger(a, b Role) Role {
 // reach the human matrix above.
 var permissionActions = map[Permission]map[Action]bool{
 	PermProjectIngest: {ActionIngest: true},
-	PermProjectRead:   {ActionView: true},
+	PermProjectRead:   {ActionView: true}, // also reads a release gate for CI (§6.8.4 #2)
 }
 
 func permissionsAllow(perms []Permission, a Action) bool {

@@ -60,6 +60,11 @@ const (
 	ActionOrgManage        Action = "org.manage" // billing, delete org
 	ActionDataDelete       Action = "data.delete"
 	ActionIngest           Action = "ingest" // tokens only: POST /v1/runs and friends
+	// P2 (§6.8, QĐ-12): manual test management is daily work like triage;
+	// the release decision is a named override and sits with maintainers.
+	ActionTestmgmtWrite Action = "testmgmt.write" // cases, requirements, plans, executions, imports
+	ActionReleaseDecide Action = "release.decide" // approve/block/ship a release
+
 )
 
 // Resource is the ancestry of the thing being acted on, as ids. Environment

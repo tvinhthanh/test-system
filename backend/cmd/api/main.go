@@ -33,6 +33,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
 )
 
@@ -127,11 +128,31 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// Dashboard: cookie sessions (§11.2) and the read model (§6.9.5).
 	web := authz.WebOptions{AllowedOrigins: cfg.DashboardOrigins, Secure: cfg.CookieSecure}
 	authz.AuthRoutes(mux, az, web)
-	(&dashboard{tenancy: ten, authz: az, query: query.New(db), triage: triage.New(db, res), idents: idn, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute}).routes(mux)
+	// Test Management (P2, §6.8): the gate reads the Intelligence Plane
+	// through query — the consumer-side Evidence interface (§6.9.4) keeps
+	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
+	qry := query.New(db)
+	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it
 	// reads the matched route pattern) → routes.
 	policy := httpx.BrowserPolicy{AllowedOrigins: cfg.DashboardOrigins, HSTS: cfg.CookieSecure}
 	return httpx.RequestID(httpx.Logging(logger)(policy.Middleware(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux))))), mux
+}
+
+// gateEvidence adapts query's read model to testmgmt.Evidence.
+type gateEvidence struct{ q query.Service }
+
+func (g gateEvidence) LatestFinishedRun(ctx context.Context, projectID, branch string) (testmgmt.RunEvidence, bool, error) {
+	run, ok, err := g.q.GateEvidence(ctx, projectID, branch)
+	if err != nil || !ok {
+		return testmgmt.RunEvidence{}, ok, err
+	}
+	out := testmgmt.RunEvidence{RunID: run.RunID, Branch: run.Branch, FinishedAt: run.FinishedAt, Total: run.Total, FlakyPass: run.FlakyPass, Results: make([]testmgmt.ResultEvidence, 0, len(run.Results))}
+	for _, r := range run.Results {
+		out.Results = append(out.Results, testmgmt.ResultEvidence{ResultID: r.ResultID, StableTestID: r.StableTestID, FinalStatus: r.FinalStatus, Triaged: r.Triaged})
+	}
+	return out, true, nil
 }

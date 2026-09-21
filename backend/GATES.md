@@ -223,6 +223,8 @@ của §6.4 (storage/org, hypothesis LLM, `untriaged_rate`…) là Gate-1.5.
 
 ## T4 — tenant isolation ✅ 16-09-2026 · security còn mục mở
 
+> 21-09: walk cross-tenant mở rộng theo P2 — 52 route (25 route Test Management mới, gồm `GET /v1/releases/{id}/gate` cho token CI: token org khác → 404, token chỉ `project:ingest` → 404, cookie → 401). Vẫn ba principal lạ mỗi route; route mới không phân loại = test fail.
+
 **Tenant isolation, mọi endpoint:** `cmd/api/tenant_walk_test.go` —
 `TestEveryRouteRefusesCrossTenant`. Router của binary (`httpx.Router`) ghi lại
 **mọi** pattern đã mount; test đi qua từng pattern, **không có danh sách tay**:

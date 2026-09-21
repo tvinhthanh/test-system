@@ -150,6 +150,49 @@ role.
   (nullable): merged and retired identities stay readable by id but leave the
   active list; the history page shows a notice and offers Undo for merged ones.
 
+## Test Management (§6.8, P2 — backend implemented 2026-09-21, UI pending)
+
+All under `/v1/projects/{projectId}`; reads need `view`, writes need
+`testmgmt.write` (member), the release decision needs `release.decide`
+(admin). Lists are `{items:[…]}` without cursors (bounded, ≤ 200–500).
+Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
+
+- Suites: `GET|POST /suites` → `{id, parentId, name, cases, createdAt}`.
+- Requirements: `GET|POST /requirements`, `PATCH /requirements/{id}`
+  `{title?, priority?, status?}` → `{id, externalKey, title, priority
+  (p0..p3), status (draft|active|done|dropped), coveredBy, createdAt,
+  updatedAt}`.
+- Test cases: `GET /test-cases?suite=&automation=&critical=true|false&q=`,
+  `POST /test-cases`, `GET|PATCH /test-cases/{id}` → `{id, suiteId,
+  suiteName, externalKey, title, steps:[{action, expected}], expected,
+  priority, isCritical, automationStatus
+  (manual_only|automation_candidate|automated|obsolete), ownerId, links?,
+  requirements?, createdAt, updatedAt}` — `links`/`requirements` only on a
+  single case. Steps are text; render with interpolation only.
+- Automation link (§6.8.1): `POST /test-cases/{id}/links` `{stableTestId,
+  linkType?}` → `201 {id, testCaseId, stableTestId, linkType, createdBy,
+  createdAt}`; `409` for a merged/retired identity, `404` for an identity
+  of another project. `DELETE /test-cases/{id}/links/{linkId}` → 204.
+- Coverage: `POST|DELETE /test-cases/{id}/requirements/{requirementId}` → 204.
+- Import: `POST /test-cases/import` with `text/csv` or JSON `{csv}` →
+  `{created, updated, skipped, suites, requirements, errors:[string]}`.
+- Plans: `GET|POST /test-plans`, `GET /test-plans/{id}` (with
+  `executions`: latest per case), `PATCH /test-plans/{id}` `{status}`,
+  `POST /test-plans/{id}/executions` `{testCaseId, status
+  (passed|failed|blocked|skipped), note?, executedAt?}` → 201; `409` on a
+  closed plan.
+- Releases: `GET|POST /releases`, `GET /releases/{id}`,
+  `POST /releases/{id}/evaluate` → release with `gate: {verdict
+  (approved|warn|blocked|no_evidence), evaluatedAt, runId, branch,
+  rules:[{id, level (blocked|warn), passed, applies, summary, details}],
+  p0Coverage}`; `POST /releases/{id}/decision` `{status
+  (blocked|approved|shipped), note?}` → release with `decidedBy` (the
+  session user). `status` is the human decision and is independent of
+  `gate.verdict`; an `approved` next to a `blocked` gate is an override to
+  show as such. `shipped` is terminal (`409` afterwards).
+- CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
+  token holding `project:read`.
+
 ## Handoff And Verification
 
 Backend owner must confirm session bootstrap semantics, list limits, query

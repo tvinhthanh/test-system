@@ -543,3 +543,61 @@ func mapErr(err error) error {
 	}
 	return err
 }
+
+// ---- Release gate evidence (§6.8.4, consumed by testmgmt through cmd/api) ----
+
+func (s *service) GateEvidence(ctx context.Context, projectID, branch string) (GateRun, bool, error) {
+	if !isUUID(projectID) {
+		return GateRun{}, false, ErrNotFound
+	}
+	var run GateRun
+	var finished *time.Time
+	var br *string
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		SELECT id, branch, finished_at
+		  FROM runs
+		 WHERE project_id = $1 AND finished_at IS NOT NULL AND status IN ('passed', 'failed')
+		   AND ($2 = '' OR branch = $2)
+		 ORDER BY finished_at DESC, id DESC LIMIT 1`, projectID, branch).Scan(&run.RunID, &br, &finished)
+	if err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return GateRun{}, false, nil
+		}
+		return GateRun{}, false, err
+	}
+	if br != nil {
+		run.Branch = *br
+	}
+	if finished != nil {
+		run.FinishedAt = finished.UTC()
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT t.id, t.stable_test_id, t.final_status,
+		       EXISTS (SELECT 1 FROM triage_events e
+		                WHERE e.test_result_id = t.id
+		                  AND e.type IN ('HYPOTHESIS_ACCEPTED', 'MARKED_FLAKY', 'MARKED_KNOWN_ISSUE', 'RESOLVED'))
+		  FROM test_results t
+		 WHERE t.run_id = $1
+		 ORDER BY t.id`, run.RunID)
+	if err != nil {
+		return GateRun{}, false, err
+	}
+	defer rows.Close()
+	run.Results = []GateResult{}
+	for rows.Next() {
+		var r GateResult
+		var stable *string
+		if err := rows.Scan(&r.ResultID, &stable, &r.FinalStatus, &r.Triaged); err != nil {
+			return GateRun{}, false, err
+		}
+		if stable != nil {
+			r.StableTestID = *stable
+		}
+		run.Results = append(run.Results, r)
+		run.Total++
+		if r.FinalStatus == "flaky_pass" {
+			run.FlakyPass++
+		}
+	}
+	return run, true, rows.Err()
+}

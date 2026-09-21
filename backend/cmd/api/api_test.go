@@ -529,6 +529,104 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Errorf("identity_audit rows: %d, want 4", audits)
 	}
 
+	// ---- Test Management (P2, §6.8) ----
+	// alice (member) writes; carol (admin) decides; bob (viewer of search)
+	// reads his own project and is refused writes; checkout is 404 for him.
+	reqR := web.post(base+"/requirements", map[string]any{"externalKey": "PAY-1", "title": "Card payments", "priority": "p0"})
+	if reqR.code != 201 || reqR.body["coveredBy"] != 0.0 {
+		t.Fatalf("create requirement: %d %s", reqR.code, reqR.raw)
+	}
+	reqID := reqR.body["id"].(string)
+	caseR := web.post(base+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true, "steps": []map[string]string{{"action": "open cart", "expected": "cart shown"}}})
+	if caseR.code != 201 || caseR.body["automationStatus"] != "manual_only" {
+		t.Fatalf("create case: %d %s", caseR.code, caseR.raw)
+	}
+	caseID := caseR.body["id"].(string)
+	if r := web.post(base+"/test-cases", map[string]any{"title": "x", "priority": "urgent"}); r.code != 400 {
+		t.Errorf("bad priority: %d %s", r.code, r.raw)
+	}
+	// Links target TestIdentity.id only (§6.8.1): the retired one is a
+	// conflict, an unknown id a 404, the active one links and flips status.
+	if r := web.post(base+"/test-cases/"+caseID+"/links", map[string]any{"stableTestId": cartID}); r.code != 409 {
+		t.Errorf("link to retired identity: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/test-cases/"+caseID+"/links", map[string]any{"stableTestId": "0198c3e1-7b1a-7c3d-9e4f-00000000dead"}); r.code != 404 {
+		t.Errorf("link to unknown identity: %d %s", r.code, r.raw)
+	}
+	linkR := web.post(base+"/test-cases/"+caseID+"/links", map[string]any{"stableTestId": payID, "linkType": "exact"})
+	if linkR.code != 201 || linkR.body["createdBy"] != "alice@example.com" {
+		t.Fatalf("link: %d %s", linkR.code, linkR.raw)
+	}
+	if r := web.get(base + "/test-cases/" + caseID); r.body["automationStatus"] != "automated" || len(r.body["links"].([]any)) != 1 {
+		t.Errorf("case after link: %s", r.raw)
+	}
+	if r := web.do("POST", base+"/test-cases/"+caseID+"/requirements/"+reqID, map[string]any{}, nil); r.code != 204 {
+		t.Errorf("cover: %d %s", r.code, r.raw)
+	}
+	if r := web.get(base + "/requirements"); len(r.items()) != 1 || r.items()[0].(map[string]any)["coveredBy"] != 1.0 {
+		t.Errorf("requirement coverage: %s", r.raw)
+	}
+	imp := web.do("POST", base+"/test-cases/import", map[string]any{"csv": "key,title,suite,priority\nTC-1,Apply discount,Checkout,p2\nTC-2,Refund,Checkout,p1"}, nil)
+	if imp.code != 200 || imp.body["created"] != 2.0 || imp.body["suites"] != 1.0 {
+		t.Errorf("import: %d %s", imp.code, imp.raw)
+	}
+	if r := web.get(base + "/test-cases?q=refund"); len(r.items()) != 1 {
+		t.Errorf("case search: %s", r.raw)
+	}
+	planR := web.post(base+"/test-plans", map[string]any{"name": "Sprint 12"})
+	if planR.code != 201 {
+		t.Fatalf("plan: %d %s", planR.code, planR.raw)
+	}
+	planID := planR.body["id"].(string)
+	if r := web.post(base+"/test-plans/"+planID+"/executions", map[string]any{"testCaseId": caseID, "status": "passed", "note": "ok on staging"}); r.code != 201 || r.body["executedBy"] != "alice@example.com" {
+		t.Errorf("execution: %d %s", r.code, r.raw)
+	}
+	if r := web.get(base + "/test-plans/" + planID); r.body["status"] != "active" || len(r.body["executions"].([]any)) != 1 {
+		t.Errorf("plan after execution: %s", r.raw)
+	}
+	relR := web.post(base+"/releases", map[string]any{"version": "2026.09.21"})
+	if relR.code != 201 || relR.body["status"] != "open" || relR.body["gate"] != nil {
+		t.Fatalf("release: %d %s", relR.code, relR.raw)
+	}
+	relID := relR.body["id"].(string)
+	if r := web.post(base+"/releases", map[string]any{"version": "2026.09.21"}); r.code != 409 {
+		t.Errorf("duplicate version: %d %s", r.code, r.raw)
+	}
+	evr := web.post(base+"/releases/"+relID+"/evaluate", map[string]any{})
+	gate, _ := evr.body["gate"].(map[string]any)
+	if evr.code != 200 || gate == nil || gate["verdict"] == "no_evidence" || len(gate["rules"].([]any)) != 5 || evr.body["status"] != "open" {
+		t.Fatalf("evaluate: %d %s", evr.code, evr.raw)
+	}
+	if r := web.post(base+"/releases/"+relID+"/decision", map[string]any{"status": "approved"}); r.code != 403 {
+		t.Errorf("member deciding a release: %d %s", r.code, r.raw)
+	}
+	dec := carolc.post(base+"/releases/"+relID+"/decision", map[string]any{"status": "approved", "note": "go"})
+	if dec.code != 200 || dec.body["decidedBy"] != "carol@example.com" || dec.body["status"] != "approved" || dec.body["gate"] == nil {
+		t.Errorf("decision: %d %s", dec.code, dec.raw)
+	}
+	if r := bobc.get(base + "/releases/" + relID); r.code != 404 {
+		t.Errorf("bob reading checkout's release: %d", r.code)
+	}
+	if r := bobc.get("/v1/projects/" + string(search.ID) + "/test-cases"); r.code != 200 || len(r.items()) != 0 {
+		t.Errorf("viewer listing his own project's cases: %d %s", r.code, r.raw)
+	}
+	if r := bobc.post("/v1/projects/"+string(search.ID)+"/test-cases", map[string]any{"title": "nope"}); r.code != 403 {
+		t.Errorf("viewer writing a case: %d %s", r.code, r.raw)
+	}
+	// CI reads the gate with a project:read token (§6.8.4 #2); the ingest
+	// token, a foreign token and no token are all refused.
+	readTok, _ := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, Permissions: []authz.Permission{authz.PermProjectRead}, Name: "deploy"})
+	ci := newClient(t, srv)
+	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" {
+		t.Errorf("CI gate: %d %s", r.code, r.raw)
+	}
+	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + tok.Plaintext}); r.code != 404 {
+		t.Errorf("CI gate with ingest-only token: %d %s", r.code, r.raw)
+	}
+	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, nil); r.code != 401 {
+		t.Errorf("CI gate without token: %d", r.code)
+	}
+
 	// ---- Logout ----
 	if r := web.post("/v1/session/logout", map[string]any{}); r.code != 204 {
 		t.Errorf("logout: %d %s", r.code, r.raw)

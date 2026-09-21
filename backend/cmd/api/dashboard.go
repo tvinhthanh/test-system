@@ -21,6 +21,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
 )
 
@@ -50,6 +51,7 @@ type dashboard struct {
 	query    query.Service
 	triage   triage.Service
 	idents   identity.Service
+	tm       testmgmt.Service
 	artifact artifact.Service
 	store    objstore.Store
 	logger   *slog.Logger
@@ -85,6 +87,9 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	handle("GET /v1/projects/{projectId}/metrics/triage", d.triageMetrics)
 	handle("GET /v1/projects/{projectId}/metrics/trend", d.trend)
 	d.identityOpsRoutes(handle)
+	d.testmgmtRoutes(handle)
+	// CI reads a release gate with an ingest-style bearer token (project:read).
+	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
 }
 
 type page struct {

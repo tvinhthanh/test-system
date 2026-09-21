@@ -8,9 +8,9 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.18** — 11 ADR đã chốt (QĐ-9 sửa lần hai 14-09: client Vue 3; giao diện Tailwind + shadcn-vue 21-09), ba plane đã đặc tả, 61 phát hiện N đã xử lý; tiến độ build ở §0.5 |
+| Spec | **v3.19** — 12 ADR đã chốt (QĐ-9 sửa lần hai 14-09: client Vue 3; giao diện Tailwind + shadcn-vue 21-09; **QĐ-12 21-09: P2 Test Management khởi công**), ba plane đã đặc tả, 63 phát hiện N đã xử lý; tiến độ build ở §0.5 |
 | Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
-| Code sản phẩm | **P1-min đã đủ** theo QĐ-11 (11-09 → 18-09): `backend/` (Go, mọi module §6.9.11 trừ billing), `reporter/playwright/`, `frontend/` (Vue), `backend/deploy/` (image + compose staging + CI). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅, T5 harness 2 h sạch — xem [`backend/GATES.md`](backend/GATES.md); còn cần hạ tầng cho soak 24 h, ingest trên server, pentest |
+| Code sản phẩm | **P1-min đã đủ** theo QĐ-11 (11-09 → 18-09): `backend/` (Go, mọi module §6.9.11 trừ billing), `reporter/playwright/`, `frontend/` (Vue), `backend/deploy/` (image + compose staging + CI). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅, T5 harness 2 h sạch — xem [`backend/GATES.md`](backend/GATES.md); còn cần hạ tầng cho soak 24 h, ingest trên server, pentest. **P2 Test Management** (QĐ-12, từ 21-09): backend `internal/testmgmt` xong — case/suite/requirement/plan/execution, link tới `TestIdentity`, importer CSV, release gate 5 rule + API cho CI; UI chưa |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
 
 ## Đọc từ đâu
@@ -23,7 +23,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 | Tài liệu gửi ra ngoài | [`docs/external/`](docs/external/) — chạy `verify.sh` trước khi gửi |
 | Học Go qua chính codebase này | [`docs/go/README.md`](docs/go/README.md) |
 
-`SPEC.md` dài, nhưng §0.2 (nhật ký 61 phát hiện), §0.5 (tiến độ build) và §4.10 (bức tranh tổng) là ba chỗ vào nhanh nhất.
+`SPEC.md` dài, nhưng §0.2 (nhật ký 63 phát hiện), §0.5 (tiến độ build) và §4.10 (bức tranh tổng) là ba chỗ vào nhanh nhất.
 
 ## Chạy thử
 

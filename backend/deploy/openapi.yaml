@@ -36,6 +36,8 @@ tags:
     description: "Browser sign-in. Session cookie `atp_session` (HttpOnly, Secure, SameSite=Lax; its opaque value starts with `atp_sess_`) plus the CSRF double-submit cookie `atp_csrf`, echoed in `X-CSRF-Token` on every state-changing request."
   - name: dashboard
     description: Browser reads and triage writes, always inside one project the session may view. 600 requests/minute/user.
+  - name: testmgmt
+    description: "Test Management Plane (§6.8, P2): requirements, manual test cases linked to TestIdentity, plans with manual executions, releases with the server-side quality gate. Session for people; the gate is also readable by a project:read token for CI."
   - name: ops
     description: Liveness.
 
@@ -683,6 +685,575 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  # ---- Test Management Plane (§6.8, P2, QĐ-12) ------------------------------
+  /v1/projects/{projectId}/suites:
+    get:
+      operationId: listSuites
+      tags: [testmgmt]
+      summary: Test suites of the project with their case counts
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Suites, by name.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Suite" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createSuite
+      tags: [testmgmt]
+      summary: Create a suite (optionally under a parent of the same project)
+      description: Needs `testmgmt.write` (member).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                parentId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Suite" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/requirements:
+    get:
+      operationId: listRequirements
+      tags: [testmgmt]
+      summary: Requirements with how many test cases cover each
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200":
+          description: Requirements, p0 first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Requirement" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createRequirement
+      tags: [testmgmt]
+      summary: Create a requirement
+      description: "`externalKey` (JIRA-123, a Linear id) is unique per project when given. Needs `testmgmt.write`."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 500 }
+                externalKey: { type: string, maxLength: 100 }
+                priority: { $ref: "#/components/schemas/Priority" }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Requirement" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/requirements/{requirementId}:
+    patch:
+      operationId: updateRequirement
+      tags: [testmgmt]
+      summary: Change title, priority or status
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/RequirementId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, minLength: 1, maxLength: 500 }
+                priority: { $ref: "#/components/schemas/Priority" }
+                status: { type: string, enum: [draft, active, done, dropped] }
+      responses:
+        "200":
+          description: Updated.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Requirement" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-cases:
+    get:
+      operationId: listTestCases
+      tags: [testmgmt]
+      summary: Test cases, filterable by suite, automation status, criticality and text
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: suite, in: query, schema: { type: string, format: uuid } }
+        - { name: automation, in: query, schema: { $ref: "#/components/schemas/AutomationStatus" } }
+        - { name: critical, in: query, schema: { type: string, enum: ["true", "false"] } }
+        - { name: q, in: query, schema: { type: string }, description: "Substring of title or external key." }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200":
+          description: Cases, priority then age. Lists carry no links or requirements; fetch one for those.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/TestCase" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createTestCase
+      tags: [testmgmt]
+      summary: Create a manual test case
+      description: Steps and expectations are stored and rendered as text (QĐ-9 #3). Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TestCaseInput" }
+      responses:
+        "201":
+          description: "Created, `automationStatus: manual_only`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestCase" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/test-cases/import:
+    post:
+      operationId: importTestCases
+      tags: [testmgmt]
+      summary: Import test cases from a CSV sheet (§6.8.5, the first and only built-in importer)
+      description: |
+        Upsert by `key` (external key) or, without one, by exact title. Header
+        names are case-insensitive: `key, title, suite, steps, expected,
+        priority, critical, requirement`. Steps: one per line or `|`-separated,
+        `action => expected`. Unknown suites and requirements are created.
+        Body is `text/csv`, or JSON `{csv}` for clients that cannot post raw
+        text. ≤ 8 MiB, ≤ 5 000 rows. Rows with a bad priority are reported in
+        `errors` and skipped; the rest commit. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string } }
+          application/json:
+            schema:
+              type: object
+              required: [csv]
+              properties: { csv: { type: string } }
+      responses:
+        "200":
+          description: What the import did.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ImportReport" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413":
+          description: "`PAYLOAD_TOO_LARGE` — the sheet is over 8 MiB."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/test-cases/{testCaseId}:
+    get:
+      operationId: getTestCase
+      tags: [testmgmt]
+      summary: One test case with its automation links and covered requirements
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      responses:
+        "200":
+          description: The case.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestCase" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateTestCase
+      tags: [testmgmt]
+      summary: Change any field of a test case
+      description: "Absent fields keep their value; `suiteId: \"\"` or `ownerId: \"\"` clears. Needs `testmgmt.write`."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TestCaseInput" }
+      responses:
+        "200":
+          description: Updated.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestCase" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-cases/{testCaseId}/links:
+    post:
+      operationId: linkTestCaseAutomation
+      tags: [testmgmt]
+      summary: "Tie the case to a TestIdentity — the link that makes the plane worth building (§6.8.1)"
+      description: |
+        `stableTestId` must be an **active** identity of the same project:
+        a merged or retired one is `409 CONFLICT`, one of another project is
+        `404`. The case becomes `automated` on its first link. Never a run,
+        a result or a clientTestId. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stableTestId]
+              properties:
+                stableTestId: { type: string, format: uuid }
+                linkType: { type: string, enum: [exact, partial, superset], default: exact }
+      responses:
+        "201":
+          description: Linked.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutomationLink" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/test-cases/{testCaseId}/links/{linkId}:
+    delete:
+      operationId: unlinkTestCaseAutomation
+      tags: [testmgmt]
+      summary: Remove an automation link
+      description: A case left with no link goes back to `automation_candidate`. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+        - { name: linkId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-cases/{testCaseId}/requirements/{requirementId}:
+    post:
+      operationId: coverRequirement
+      tags: [testmgmt]
+      summary: Mark the case as covering the requirement (idempotent)
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+        - { $ref: "#/components/parameters/RequirementId" }
+      responses:
+        "204": { description: Covered. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: uncoverRequirement
+      tags: [testmgmt]
+      summary: Remove the coverage link
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+        - { $ref: "#/components/parameters/RequirementId" }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-plans:
+    get:
+      operationId: listTestPlans
+      tags: [testmgmt]
+      summary: Test plans, newest first
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Plans without their executions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/TestPlan" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createTestPlan
+      tags: [testmgmt]
+      summary: Create a plan (a round of manual testing)
+      description: Manual execution is not a Run (§6.8.6); it lives in plans. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                environmentId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Created as `draft`.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestPlan" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-plans/{planId}:
+    get:
+      operationId: getTestPlan
+      tags: [testmgmt]
+      summary: One plan with the latest verdict per test case
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/PlanId" }
+      responses:
+        "200":
+          description: The plan.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestPlan" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateTestPlan
+      tags: [testmgmt]
+      summary: Change the plan status
+      description: A `closed` plan refuses new executions. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/PlanId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [draft, active, closed] }
+      responses:
+        "200":
+          description: Updated.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestPlan" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-plans/{planId}/executions:
+    post:
+      operationId: recordManualExecution
+      tags: [testmgmt]
+      summary: Record one manual run of one case (append-only; the latest row per case is the verdict)
+      description: The executor is the session user. A `draft` plan becomes `active`. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/PlanId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [testCaseId, status]
+              properties:
+                testCaseId: { type: string, format: uuid }
+                status: { type: string, enum: [passed, failed, blocked, skipped] }
+                note: { type: string, maxLength: 4000 }
+                executedAt: { type: string, format: date-time, description: Defaults to now. }
+      responses:
+        "201":
+          description: Recorded.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ManualExecution" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/releases:
+    get:
+      operationId: listReleases
+      tags: [testmgmt]
+      summary: Releases, newest first, each with its last gate result
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Releases.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Release" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createRelease
+      tags: [testmgmt]
+      summary: Open a release the gate will speak about
+      description: "`version` is unique per project. `branch` narrows which run the gate judges (newest finished run on that branch); empty means any branch. Needs `testmgmt.write`."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: string, minLength: 1, maxLength: 100 }
+                branch: { type: string, maxLength: 200 }
+      responses:
+        "201":
+          description: Created as `open`, not yet evaluated.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/releases/{releaseId}:
+    get:
+      operationId: getRelease
+      tags: [testmgmt]
+      summary: One release with its last gate result and decision
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ReleaseId" }
+      responses:
+        "200":
+          description: The release.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/releases/{releaseId}/evaluate:
+    post:
+      operationId: evaluateRelease
+      tags: [testmgmt]
+      summary: Run the §6.8.4 quality gate against the newest finished run and store the result
+      description: |
+        Five declared rules, each with its own level: `critical_regression`
+        (blocked), `untriaged_failures` (blocked), `flaky_rate` > 3 % (warn),
+        `p0_coverage` below the previous release (warn), `prod_smoke_approved`
+        (not applicable before P3). The verdict folds them — a failed warn
+        rule never becomes blocked (#3). Evaluating never changes the release
+        status: the gate advises, a named person decides. Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ReleaseId" }
+      responses:
+        "200":
+          description: The release with `gate` filled.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/releases/{releaseId}/decision:
+    post:
+      operationId: decideRelease
+      tags: [testmgmt]
+      summary: A named person approves, blocks or ships the release — overriding the gate if they choose
+      description: "`release.decide` (admin). The gate's verdict is kept beside the decision, so an override is visible as one (#1). `shipped` is terminal."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ReleaseId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [blocked, approved, shipped] }
+                note: { type: string, maxLength: 4000 }
+      responses:
+        "200":
+          description: Decided.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/releases/{releaseId}/gate:
+    get:
+      operationId: getReleaseGateForCI
+      tags: [testmgmt]
+      summary: "The release and its gate for CI (§6.8.4 #2): a bearer token with `project:read` on the release's project"
+      description: |
+        The URL names no project, so the release is looked up first and the
+        token authorized against that project; a token of another tenant, an
+        ingest-only token, or an unknown id all answer `404`. A deploy job
+        polls this and stops on `gate.verdict == "blocked"` unless
+        `status` shows a named override.
+      security: [{ ingestToken: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ReleaseId" }
+      responses:
+        "200":
+          description: The release with its last gate result and decision.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:
@@ -718,6 +1289,10 @@ components:
     RunId: { name: runId, in: path, required: true, schema: { type: string, format: uuid }, description: "The server's run id, not localRunId." }
     ResultId: { name: resultId, in: path, required: true, schema: { type: string, format: uuid } }
     IdentityId: { name: identityId, in: path, required: true, schema: { type: string, format: uuid } }
+    RequirementId: { name: requirementId, in: path, required: true, schema: { type: string, format: uuid } }
+    TestCaseId: { name: testCaseId, in: path, required: true, schema: { type: string, format: uuid } }
+    PlanId: { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+    ReleaseId: { name: releaseId, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 }, description: Page size; the server caps at 100 (§7.10). }
     Cursor: { name: cursor, in: query, schema: { type: string }, description: "Opaque; bound to project, filter and sort. `400 INVALID_CURSOR` when reused elsewhere." }
 
@@ -739,6 +1314,9 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: "`NOT_FOUND`, `PROJECT_NOT_FOUND`, `RUN_NOT_FOUND`, `RESULT_NOT_FOUND` or `ARTIFACT_NOT_FOUND` — absent, or belonging to another tenant; the two are indistinguishable by design (§11.3.3)."
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: "`CONFLICT` — the write contradicts current state: a duplicate key or version, a link to a merged/retired identity, an execution in a closed plan, a decision on a shipped release."
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     RateLimited:
       description: "`RATE_LIMITED` with `Retry-After` seconds (§7.4)."
@@ -1049,3 +1627,143 @@ components:
         recentStatuses: { type: array, maxItems: 30, items: { type: string }, description: Newest first. }
         status: { type: string, enum: [active, merged, retired], description: "§9.4 operations change it; merged and retired identities keep their history and stay readable by id but leave the active list." }
         mergedIntoId: { type: [string, "null"], format: uuid, description: The survivor while merged; the UI offers undo and links to it. }
+    # ---- Test Management Plane (§6.8) ------------------------------------------
+    Priority: { type: string, enum: [p0, p1, p2, p3], default: p2 }
+    AutomationStatus: { type: string, enum: [manual_only, automation_candidate, automated, obsolete] }
+    Suite:
+      type: object
+      required: [id, parentId, name, cases, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        parentId: { type: string, description: Empty at the root. }
+        name: { type: string }
+        cases: { type: integer }
+        createdAt: { type: string, format: date-time }
+    Requirement:
+      type: object
+      required: [id, externalKey, title, priority, status, coveredBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        externalKey: { type: string, description: "JIRA-123, Linear id; empty when none." }
+        title: { type: string }
+        priority: { $ref: "#/components/schemas/Priority" }
+        status: { type: string, enum: [draft, active, done, dropped] }
+        coveredBy: { type: integer, description: Test cases linked through coverage. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Step:
+      type: object
+      required: [action, expected]
+      properties:
+        action: { type: string, maxLength: 2000 }
+        expected: { type: string, maxLength: 2000 }
+    TestCaseInput:
+      type: object
+      description: Create requires `title`; on PATCH every field is optional and absent means unchanged.
+      properties:
+        suiteId: { type: string, description: A suite of the same project; empty clears. }
+        externalKey: { type: string, maxLength: 100, description: Create only; the import upsert key. }
+        title: { type: string, minLength: 1, maxLength: 500 }
+        steps: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Step" } }
+        expected: { type: string }
+        priority: { $ref: "#/components/schemas/Priority" }
+        isCritical: { type: boolean, description: Feeds the release gate's regression rule (§6.8.4). }
+        automationStatus: { $ref: "#/components/schemas/AutomationStatus" }
+        ownerId: { type: string, description: A user id; empty clears. }
+    AutomationLink:
+      type: object
+      required: [id, testCaseId, stableTestId, linkType, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        testCaseId: { type: string, format: uuid }
+        stableTestId: { type: string, format: uuid, description: "TestIdentity.id — never a run, result or clientTestId (§6.8.1)." }
+        linkType: { type: string, enum: [exact, partial, superset] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    TestCase:
+      type: object
+      required: [id, suiteId, suiteName, externalKey, title, steps, expected, priority, isCritical, automationStatus, ownerId, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        suiteId: { type: string }
+        suiteName: { type: string }
+        externalKey: { type: string }
+        title: { type: string }
+        steps: { type: array, items: { $ref: "#/components/schemas/Step" } }
+        expected: { type: string }
+        priority: { $ref: "#/components/schemas/Priority" }
+        isCritical: { type: boolean }
+        automationStatus: { $ref: "#/components/schemas/AutomationStatus" }
+        ownerId: { type: string }
+        links: { type: array, items: { $ref: "#/components/schemas/AutomationLink" }, description: "Present on a single case, absent in lists." }
+        requirements: { type: array, items: { type: string, format: uuid }, description: "Requirement ids this case covers; present on a single case." }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ImportReport:
+      type: object
+      required: [created, updated, skipped, suites, requirements, errors]
+      properties:
+        created: { type: integer }
+        updated: { type: integer }
+        skipped: { type: integer, description: Rows without a title. }
+        suites: { type: integer, description: Suites created on the way. }
+        requirements: { type: integer, description: Requirements created from the `requirement` column. }
+        errors: { type: array, items: { type: string }, description: "`row N: …` for rows that were skipped for a bad value." }
+    ManualExecution:
+      type: object
+      required: [id, planId, testCaseId, caseTitle, executedBy, status, note, executedAt]
+      properties:
+        id: { type: string, format: uuid }
+        planId: { type: string, format: uuid }
+        testCaseId: { type: string, format: uuid }
+        caseTitle: { type: string }
+        executedBy: { type: string }
+        status: { type: string, enum: [passed, failed, blocked, skipped] }
+        note: { type: string }
+        executedAt: { type: string, format: date-time }
+    TestPlan:
+      type: object
+      required: [id, name, environmentId, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        environmentId: { type: string }
+        status: { type: string, enum: [draft, active, closed] }
+        executions: { type: array, items: { $ref: "#/components/schemas/ManualExecution" }, description: "Latest row per case; present on a single plan." }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    GateRule:
+      type: object
+      required: [id, level, passed, summary, applies]
+      properties:
+        id: { type: string, enum: [critical_regression, untriaged_failures, flaky_rate, p0_coverage, prod_smoke_approved] }
+        level: { type: string, enum: [blocked, warn], description: "Declared per rule (§6.8.4 #3); a failed warn rule never becomes blocked." }
+        passed: { type: boolean }
+        applies: { type: boolean, description: "False when the rule has no meaning yet (prod smoke before P3) or no data (first release has no previous coverage); such rules are reported, never counted." }
+        summary: { type: string }
+        details: { type: object, additionalProperties: true }
+    GateResult:
+      type: object
+      required: [verdict, evaluatedAt, rules]
+      properties:
+        verdict: { type: string, enum: [approved, warn, blocked, no_evidence], description: "`no_evidence` when the project has no finished run to judge." }
+        evaluatedAt: { type: string, format: date-time }
+        runId: { type: string, format: uuid, description: The judged run. }
+        branch: { type: string }
+        rules: { type: array, items: { $ref: "#/components/schemas/GateRule" } }
+        p0Coverage: { type: number, minimum: 0, maximum: 1, description: "Kept so the next release can compare." }
+    Release:
+      type: object
+      required: [id, version, branch, status, decidedBy, decidedAt, decisionNote, gate, evaluatedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: string }
+        branch: { type: string, description: "Empty = newest finished run on any branch." }
+        status: { type: string, enum: [open, blocked, approved, shipped], description: "The human decision; independent of `gate.verdict`. An `approved` beside a `blocked` gate is an override, and `decidedBy` names who." }
+        decidedBy: { type: string }
+        decidedAt: { type: [string, "null"], format: date-time }
+        decisionNote: { type: string }
+        gate: { oneOf: [{ $ref: "#/components/schemas/GateResult" }, { type: "null" }], description: "Null until evaluated." }
+        evaluatedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

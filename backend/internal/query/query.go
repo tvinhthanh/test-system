@@ -168,4 +168,31 @@ type Service interface {
 
 	Triage(ctx context.Context, projectID string, since time.Time) (TriageMetrics, error)
 	CategoryTrend(ctx context.Context, projectID string, since time.Time) ([]TrendBucket, error)
+
+	// GateEvidence is what the §6.8.4 release gate judges: the newest
+	// finished run of the project (on branch when set) with every result's
+	// identity, verdict and whether a person decided on it. ok=false when
+	// the project has no finished run yet. The gate never recomputes flaky
+	// or triage (§6.8.6); this is the one place it reads them from.
+	GateEvidence(ctx context.Context, projectID, branch string) (run GateRun, ok bool, err error)
+}
+
+// GateRun is one finished run as the release gate sees it.
+type GateRun struct {
+	RunID      string
+	Branch     string
+	FinishedAt time.Time
+	Total      int
+	FlakyPass  int
+	Results    []GateResult
+}
+
+// GateResult: a result's identity (may be "" while tier 2 is pending),
+// final status, and Triaged = a decisive triage event exists
+// (HYPOTHESIS_ACCEPTED, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED).
+type GateResult struct {
+	ResultID     string
+	StableTestID string
+	FinalStatus  string
+	Triaged      bool
 }

@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.18 · **Ngày:** 21-09-2026 · **Trạng thái:** 11 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 61 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59) và hai phát hiện từ chính việc build P1-min (N60–N61)
+> **Phiên bản:** v3.19 · **Ngày:** 21-09-2026 · **Trạng thái:** 12 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 63 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và hai từ việc build P2 (N62–N63)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -20,7 +20,7 @@ Việc tách `docs/v3.0/` và `docs/v3.1/` cũng xử lý luôn vụ va chạm �
 
 ### 0.2 Nhật ký sửa lỗi qua các vòng review
 
-Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N55 từ vòng soát nhất quán nội bộ 08-09 → 09-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. **N56–N58 từ vòng soát harness ↔ tài liệu 10-09-2026** — vòng trước gỡ hết bản sao của một con số nhưng bỏ sót chính harness đang sinh ra nó, và quy tắc chống trôi của N51 mới chỉ được thi hành bên trong `SPEC.md`; **N59 ngày 11-09** — lần đầu chủ dự án tự chạy `-diag`, và nó in hai kết quả mâu thuẫn trên cùng màn hình; **N60–N61 từ chính việc build P1-min, 16-09 → 18-09** — hai chỗ SPEC nói một đằng mà code chạy thật buộc phải làm một nẻo: §6.9.11 bảo P1-min không có Review Queue trong khi §9.3 và §6.4 buộc phải có, và `ON CONFLICT` một mình không cứu được transaction chạm nhiều key. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
+Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ngày 24-08-2026; N20–N23 từ review v3.3; N24–N28 từ vòng kiến trúc execution; N29–N31 từ vòng hoàn thiện ba plane; **N32–N48 từ prototype test identity chạy thật, 26-08 → 28-08-2026** (`prototype/identity/`) — N32/N33 đã rút lại sau khi phát hiện lỗi harness; **N49–N50 từ vòng đối chiếu prototype ↔ Postgres, 29-08 → 30-08-2026**; **N51–N55 từ vòng soát nhất quán nội bộ 08-09 → 09-09-2026** — số đo bị sao chép rồi trôi, và một blocker đã đóng nhưng vẫn còn trong văn bản — hai trong ba hàm similarity mà §9.3 dựa vào không tính giống thứ Postgres thật sự chạy. **N56–N58 từ vòng soát harness ↔ tài liệu 10-09-2026** — vòng trước gỡ hết bản sao của một con số nhưng bỏ sót chính harness đang sinh ra nó, và quy tắc chống trôi của N51 mới chỉ được thi hành bên trong `SPEC.md`; **N59 ngày 11-09** — lần đầu chủ dự án tự chạy `-diag`, và nó in hai kết quả mâu thuẫn trên cùng màn hình; **N60–N61 từ chính việc build P1-min, 16-09 → 18-09** — hai chỗ SPEC nói một đằng mà code chạy thật buộc phải làm một nẻo: §6.9.11 bảo P1-min không có Review Queue trong khi §9.3 và §6.4 buộc phải có, và `ON CONFLICT` một mình không cứu được transaction chạm nhiều key; **N62–N63 từ việc build §6.8, 21-09** — bảng entity thiếu hai thứ mà chính rule gate cần, và một rule gate đọc theo nghĩa đen sẽ chặn vĩnh viễn. Mục đã đánh ✅ là nội dung đã được sửa ngay trong SPEC này.
 
 | # | Lỗi / rủi ro | Cách sửa | Xem mục |
 |---|---|---|---|
@@ -85,6 +85,8 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N59 | **`-diag` vẫn mang đúng lỗi harness đã khiến N32/N33 bị rút lại.** `Evaluate` được sửa ngày 26-08 để mô hình đúng thực tế — mọi test khác **vẫn có mặt** trong run, chỉ test bị rename là vắng — nhưng `Diagnose`, công cụ giải thích *vì sao* auto-match không nổ, chưa bao giờ được sửa theo: `PresentInRun` để `false` cho **mọi** ứng viên, tức cả 500 test biến mất cùng lúc. Phát hiện 11-09 khi chủ dự án chạy `-diag` lần đầu: nửa trên in **248 auto / 2 review**, nửa dưới in **215 "blocked by gap" `<-- HERE`** — hai con số không thể cùng đúng, in ngay cạnh nhau. Nặng hơn con số là **cách sửa bị chỉ sai**: tool đổ 2 ca review cho `MinGap` (→ hạ gap), thực tế chúng nằm ở dải điểm 0,60–0,85 và hạ gap không đổi được gì | ✅ `Diagnose` mô hình presence y hệt `Evaluate`. Sau sửa: 248 đủ điểm / **0** bị gap chặn / 2 ở dải review — khớp nửa trên; gap p50 nhảy `0,027 → 0,704`, đúng cơ chế N34. `diag_test.go` khóa hai chiều: số của `Diagnose` phải khớp `Evaluate` trên 3 seed (test này **fail** trên code cũ, đúng bằng 33 ≠ 248), và một test tái lập 215/250 để con số đó không thành huyền thoại. **Bài học N32 chưa học hết:** sửa một harness thì phải sửa **mọi** harness chung giả định — `grep PresentInRun` mất 5 giây, còn bug này sống 16 ngày | §9.3, §9.6, `prototype/identity/diag.go` |
 | N60 | **§6.9.11 khẳng định P1-min "không có Review Queue service" — nhưng hai mục khác của chính SPEC buộc phải có nó từ P1.** §9.3 tầng 2 đẩy mọi ứng viên ở dải 0,60–0,85 vào review (2/250 ca trên prototype, §9.6) — không có bảng thì resolver không có chỗ đặt ca mờ; §6.4 đặt alert khi queue > 50 — không có gauge thì alert đo vào khoảng không. Cái §4.4 cắt là **giao diện** và thao tác Merge/Split, không phải service. Câu "chốt scope trước, tạo thư mục sau" đúng cho `testmgmt`/`execution`, sai cho review queue | ✅ Tách "service" (P1-min, bắt buộc: bảng `review_queue_items`, gauge `review_queue_pending`, có từ T0 16-09) khỏi "UI" (cắt được). Thực tế 18-09: merge/undo/split/decide đi qua HTTP admin-only, ghi `identity_audit`; UI làm sớm theo yêu cầu chủ dự án — ghi ở §4.4 | §4.4, §6.9.11 |
 | N61 | **§9.7 chốt "`UNIQUE` + `ON CONFLICT` → chỉ một identity" cho ca hai run cùng gửi *một* fingerprint lạ — đúng, nhưng resolve thật chạm *hàng chục* key trong một transaction.** T1 (`backend/test/failure`, 16-09): 4 worker resolve song song các run cùng bộ test — ca thường nhất, CI của một project chạy đi chạy lại cùng suite — **deadlock 40P01**: mỗi transaction insert cùng bộ unique key theo thứ tự map ngẫu nhiên của Go. Queue retry che lỗi (job vẫn xong) nhưng mỗi lần là backoff 5 s — vượt p99 < 5 s của §14.2 ngay ở tải nhỏ; test race của §9.7 (N46) không thấy vì nó chỉ đua trên **một** key | ✅ Ghi thành bất biến ở §9.7: transaction ghi nhiều identity/alias/flaky phải sắp key theo **một thứ tự toàn cục** (fingerprint cho identity, identity id cho flaky) trước khi ghi — cùng thứ tự thì transaction sau chỉ xếp hàng rồi đi đường `ON CONFLICT`. Harness khẳng định `last_error IS NULL` cho mọi job: re-run chỉ được đến từ lease hết hạn | §9.7, `backend/GATES.md` §T1 |
+| N62 | **§6.8.2 thiếu hai thứ mà §6.8.4 và §4.9.2 của chính nó dùng.** Rule 4 của gate nói "coverage của requirement `p0`" nhưng entity `Requirement` không có `priority`; §4.9.2 ước lượng "TestCase / **Suite** / Plan CRUD" và `TestCase.suiteId FK` trỏ vào một `Suite` chưa được định nghĩa ở đâu. Viết migration là lộ ngay: không có cột thì rule không tính được, không có bảng thì FK không có đích | ✅ Thêm `Requirement.priority` (p0..p3, mặc định p2) và entity `TestSuite` (tên, cha tuỳ chọn, unique theo project + cha) vào §6.8.2; migration `0013_testmgmt.sql` là bản chạy được | §6.8.2, §6.8.4 |
+| N63 | **Rule 3 của §6.8.4 — "còn failure chưa có `HYPOTHESIS_ACCEPTED`" — đọc theo nghĩa đen thì một failure đã `MARKED_KNOWN_ISSUE` chặn release mãi mãi.** §8.3 có bốn quyết định kết thúc triage (accept, flaky, known issue, resolved); `query.Triage` cũng chỉ đếm `HYPOTHESIS_ACCEPTED` là "đã triage" cho TTRC — đúng cho TTRC (chỉ có hypothesis mới có root cause), sai cho gate (known issue là quyết định ship có ý thức). Hai định nghĩa "đã triage" cho hai mục đích khác nhau, phải nói rõ | ✅ Gate đọc *decisive event* = `HYPOTHESIS_ACCEPTED \| MARKED_FLAKY \| MARKED_KNOWN_ISSUE \| RESOLVED`; TTRC/coverage §8.3 giữ định nghĩa hẹp. Ghi cả hai ở §6.8.4 | §6.8.4, §8.3 |
 
 ### 0.3 Những gì vẫn CẦN người chịu trách nhiệm quyết
 
@@ -117,7 +119,7 @@ README của bộ v3.1 đánh dấu F12 và F16 là "✅ Đóng". **Sai** — qu
 
 **Cấm gửi ba file đó ra ngoài cho đến khi regenerate theo §4.7.**
 
-### 0.5 Tiến độ thi hành QĐ-11 — cập nhật 18-09-2026
+### 0.5 Tiến độ thi hành QĐ-11 và QĐ-12 — cập nhật 21-09-2026
 
 Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập nằm ở file bằng chứng; bảng này chỉ **trích** (quy tắc N51/N58). Cập nhật cùng mỗi lần merge vào `main`.
 
@@ -131,7 +133,22 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 | Gate kỹ thuật | §14 | T0 T1 T3 T4 ✅ · T2 một phần · T5 một phần — cột "Trạng thái" §14.1 | `backend/GATES.md` |
 | Gate sản phẩm | §4.5, §5.8 | Không đổi: Gate-0 **26-10-2026**. Code không được nhắc tới ở đó (QĐ-11 #2) | §5.8 |
 
-**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA (P2, đúng kế hoạch); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
+**P2 — Test Management Plane (QĐ-12, khởi công 21-09-2026):**
+
+| Khối §4.9.2 | Trạng thái 21-09 | Bằng chứng |
+|---|---|---|
+| TestCase / Suite / Plan CRUD | ✅ backend: `internal/testmgmt` (migration 0013), 24 route dashboard + 1 route CI, hợp đồng trong `openapi.yaml` (52 operation); **UI chưa có** | `backend/README.md`, `internal/testmgmt/testmgmt_test.go` |
+| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối); **evidence artifact chưa** (`manual_evidence` chưa thêm vào enum §8.4 — làm khi có UI upload) | cùng trên |
+| Automation mapping `TestCaseAutomationLink` | ✅ trỏ `TestIdentity.id`, kiểm qua contract của identity: khác project → 404, merged/retired → 409; case thành `automated` ở link đầu | test module + `cmd/api/api_test.go` |
+| Requirement mapping v0 + coverage | ✅ `requirement_coverage`, `coveredBy` trên requirement, p0 coverage tính cho gate | cùng trên |
+| Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; JUnit backfill **chưa** | `internal/testmgmt/csv.go` |
+| Importer TestRail | — đúng luật §6.8.5: chỉ khi có khách nêu tên | |
+| Release + quality gate + API cho CI | ✅ 5 rule khai báo, mức riêng từng rule, verdict máy đọc, override ghi tên, `GET /v1/releases/{id}/gate` cho token `project:read`; ngưỡng 3 % là `[ASSUMPTION]` trong `testmgmt.DefaultPolicy` | `internal/testmgmt/gate.go` |
+| ROI dashboard | — cần baseline TTRC đo được (§6.8.3 #3); không có baseline thì không có màn hình | |
+
+Cross-tenant walk (§14.3) nay đi 52 route với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
+
+**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA và RBAC 6 role (P2 theo §4.4, chưa tới); UI của Test Management (lát kế tiếp); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
 
 ---
 
@@ -330,7 +347,25 @@ Biên triển khai     Caddy (TLS, phục vụ `frontend/dist`, proxy `/v1`) tr�
 
 **Hệ quả tới văn bản:** §5.7 mục 1, §6.9 câu mở đầu, §13 mục 6, §0.3, `phase0/README.md` mục cấm #1, `README.md` luật #2 — tất cả trỏ về đây.
 
-### 1.12 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
+### 1.12 QĐ-12 — Khởi công P2 Test Management song song, trước Gate-1.5 ✅ CHỐT *(chủ dự án quyết 21-09-2026)*
+
+**Quyết định:** lật điều kiện vào của §4.1 dòng P2 ("Gate-1.5 pass **và** dữ liệu khách ủng hộ") cho phần **code**: `internal/testmgmt` (§6.8) xây ngay, cùng cách QĐ-11 đã làm với P1-min. Phạm vi là **đúng §6.8 như đã thiết kế**, theo thứ tự §4.9.2, không thêm hạng mục nào của §4.9.1 (Jira/Linear linking, ROI) khi chưa có bằng chứng mở khoá của riêng nó.
+
+**Lý do:** P1-min đã xong phần code và các gate còn lại cần hạ tầng, không cần người viết code (§0.5). Thời gian rảnh đó hoặc đi vào P2, hoặc không đi đâu. §6.8 đã được thiết kế trước chính vì lý do này ("viết trước để P1 không đóng băng schema theo cách chặn đường P2") — xây nó bây giờ là kiểm chứng thiết kế ấy bằng migration và test, sớm hơn lúc có khách.
+
+**Rủi ro nhận:** xây thứ chưa ai trả tiền (như QĐ-11 #2); và §6.8 là **3,9–7,5 người-tháng** (§4.9.2, N29) — P2 không nhỏ, và không có gì ở đây nói nó nhỏ hơn.
+
+**Điều kiện ràng buộc:**
+
+1. **Gate sản phẩm không đổi.** Gate-0 (26-10), Gate-1, Gate-1.5 giữ nguyên sáu, bốn, bốn điều kiện. Code P2 không phải bằng chứng ở gate nào — QĐ-11 #2 áp nguyên văn.
+2. **Ba luật §6.8.6 cưỡng chế từ commit đầu:** link chỉ trỏ `TestIdentity.id`; manual execution không tạo `Run`; gate **đọc** Intelligence Plane, không tính lại flaky/TTRC. Cái thứ ba thi hành bằng interface `Evidence` phía người dùng (§6.9.4) — `testmgmt` không import `results`/`flaky`/`triage`, và `test/arch` giữ số domain import ≤ 3.
+3. **Importer thứ hai chỉ khi có khách nêu tên** (§6.8.5). CSV là importer duy nhất được build sẵn.
+4. **ROI không hiện khi không có baseline đo được** (§6.8.3 #3). Không có màn hình ROI trước khi có số Phase 0.
+5. **Ngưỡng gate là `[ASSUMPTION]`** (§6.8.4): 3 % flaky, p0 coverage giảm — giữ ở một chỗ (`testmgmt.DefaultPolicy`), hiệu chỉnh bằng dữ liệu partner, không bằng cảm giác.
+
+**Hệ quả tới văn bản:** §4.1 dòng P2, §6.8 câu mở đầu, §6.9.2, §6.9.5, §6.9.11, §11.3.2 (hành động P2), §0.5.
+
+### 1.13 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
 
 | **Câu hỏi** | **Quyết định** | **Ghi chú** |
 | ------------------------------------ | ------------------------ | ------------------------------------------------------- |
@@ -452,7 +487,7 @@ Câu cuối quan trọng: người phỏng vấn **không được tranh cãi** 
 | **P0**                                           | Validate          | 15 phỏng vấn, 3 design partner, baseline TTRC                                                     | Bắt đầu ngay                              | 0 code (trừ prototype identity) |
 | **P1**                                           | Report Center v0  | Ingestion API, Reporter SDK, test identity v1, artifact, dashboard v0, trace viewer, authN + RBAC | **Gate-0 pass**                           | **6,5–11,5** (§4.2)             |
 | **P1.5**                                         | AI Triage v0      | Hypothesis + accept/reject + TriageEvent + đo TTRC                                                | **Gate-1 pass**, schema đứng yên ≥ 2 tuần | 0,5–1                           |
-| **P2**                                           | Test Management   | Manual test, automation mapping, requirement, ROI, release gate, import (§6.8)                    | Gate-1.5 pass **và** dữ liệu khách ủng hộ | **3,9–7,5** (§4.9.2)            |
+| **P2**                                           | Test Management   | Manual test, automation mapping, requirement, ROI, release gate, import (§6.8)                    | Gate-1.5 pass **và** dữ liệu khách ủng hộ — **code lật bởi QĐ-12 (21-09): backend §6.8 xây trước, gate giữ nguyên** | **3,9–7,5** (§4.9.2)            |
 | **P3**                                           | Scheduler & Agent | Local agent (pull-only), scheduler, CI ingestion, notification, **Safety Guard (QĐ-8)**           | Khách trả tiền yêu cầu scheduling         | 3–5                             |
 | **P4**                                           | AI nâng cao       | Smart triage, phân cụm failure, gợi ý fix                                                         | `acceptance_rate` v0 ≥ 60% ổn định        | 2–3                             |
 | **P5**                                           | Mở rộng           | Visual regression, performance, security, distributed runner                                      | Chỉ khi có cầu trả tiền                   | —                               |
@@ -1108,7 +1143,7 @@ Lưu ý: **Kafka không phải công cụ điều phối job.** Nó là event lo
 
 ### 6.8 Test Management Plane — thiết kế P2
 
-> **Chưa build.** Cùng vai trò với §6.7: viết trước để P1 không đóng băng schema theo cách chặn đường P2. Điều kiện vào P2 vẫn theo §4.1 (Gate-1.5 pass **và** dữ liệu khách ủng hộ).
+> **Backend đang build từ 21-09-2026 theo QĐ-12** (`backend/internal/testmgmt`, migration 0013, tiến độ ở §0.5); UI chưa có. Mục này vẫn là bản thiết kế; chỗ code buộc phải khác đi được ghi thành N62–N63 và sửa ngay dưới. Điều kiện vào P2 của §4.1 vẫn là cổng **sản phẩm**; QĐ-12 chỉ lật phần code.
 
 #### 6.8.1 Chuỗi truy vết — lý do tồn tại của plane này
 
@@ -1133,8 +1168,13 @@ Giá trị không nằm ở việc lưu test case — TestRail làm việc đó 
 ```
 Requirement
   id uuid PK; projectId uuid FK
-  externalKey text NULL        -- JIRA-123, Linear ID…
+  externalKey text NULL        -- JIRA-123, Linear ID…; unique theo project khi có
   title text; status enum: draft|active|done|dropped
+  priority enum: p0|p1|p2|p3 DEFAULT p2   -- N62: rule 4 của §6.8.4 cần nó
+
+TestSuite                          -- N62: §4.9.2 và TestCase.suiteId đã dùng, chưa từng định nghĩa
+  id uuid PK; projectId uuid FK; parentId uuid FK NULL
+  name text; UNIQUE(projectId, parentId, name)
 
 TestCase
   id uuid PK; projectId uuid FK; suiteId uuid FK NULL
@@ -1142,6 +1182,8 @@ TestCase
   priority enum: p0|p1|p2|p3
   isCritical bool DEFAULT false     -- dùng cho release gate §6.8.4
   automationStatus enum: manual_only|automation_candidate|automated|obsolete
+                                    -- link đầu → automated; hết link → automation_candidate (server làm, không phải người)
+  externalKey text NULL             -- khóa upsert của importer (TC-42, TestRail C123); unique theo project khi có
   ownerId uuid NULL
 
 TestCaseAutomationLink            -- mắt xích quan trọng nhất
@@ -1212,7 +1254,7 @@ Policy khai báo được, chạy ở server, trả kết quả máy đọc đư
 |---|---|
 | Có regression ở test case `isCritical` | `blocked` |
 | `flakyRate` của suite > 3% | `warn` |
-| Còn failure chưa có `HYPOTHESIS_ACCEPTED` | `blocked` |
+| Còn failure chưa có **quyết định triage** — `HYPOTHESIS_ACCEPTED` \| `MARKED_FLAKY` \| `MARKED_KNOWN_ISSUE` \| `RESOLVED` (N63; TTRC §8.3 vẫn chỉ đếm accepted) | `blocked` |
 | Coverage của requirement `p0` giảm so với release trước | `warn` |
 | Prod smoke chưa được approve | `blocked` — **chỉ có nghĩa từ P3** (QĐ-8) |
 
@@ -1221,6 +1263,8 @@ Ba ràng buộc thiết kế:
 1. **Gate phải override được, và override phải ghi tên người.** Gate không override được sẽ bị team vô hiệu hoá bằng cách ngừng dùng. `Release.decidedBy` tồn tại chính vì việc này.
 2. **Kết quả gate là API máy đọc được**, để CI của khách gọi và tự chặn deploy. Nếu chỉ hiện trên UI thì nó là báo cáo, không phải gate.
 3. **`warn` không được âm thầm thành `blocked`.** Mỗi rule khai báo rõ mức, không suy diễn.
+
+**Như đã cài (21-09):** `POST …/releases/{id}/evaluate` đọc run **đã kết thúc mới nhất** của project (thu hẹp theo `Release.branch` nếu đặt) qua `query.GateEvidence`, chấm 5 rule, ghi kết quả vào `Release.lastGate` và **không đổi** `Release.status` — gate khuyên, người quyết (`POST …/decision`, admin, ghi `decidedBy`). Rule không có nghĩa (prod smoke trước P3, p0 coverage ở release đầu, không có run) trả `applies: false` — được báo, không được đếm. CI đọc `GET /v1/releases/{id}/gate` bằng token `project:read`. Verdict `no_evidence` khi chưa có run nào kết thúc.
 
 #### 6.8.5 Import — đường vào, và cái đuôi dài phải nhìn thẳng
 
@@ -1287,13 +1331,14 @@ backend/
     triage/         # §8.3 TriageEvent, §8.7 taxonomy, §1.4 AI (P1.5)
     query/          # read model cho dashboard (§6.9.5)
     billing/        # §10.6 shadow meter — đọc, không charge trước Gate-1.5
+    testmgmt/       # §6.8 Test Management Plane — từ 21-09-2026 (QĐ-12)
   api/              # OpenAPI spec; type sinh ra từ đây, không viết tay
   test/
     arch/           # test cưỡng chế luật phụ thuộc (§6.9.7)
     integration/    # §14.3 failure injection
 ```
 
-Hai thư mục **đặt chỗ sẵn, chưa tạo**: `internal/execution/` (§6.7, P3) và `internal/testmgmt/` (§6.8, P2). Ghi ra đây để P1 không thiết kế thứ chặn đường chúng — đúng tinh thần câu mở đầu §6.7.
+Một thư mục **đặt chỗ sẵn, chưa tạo**: `internal/execution/` (§6.7, P3). `internal/testmgmt/` đã tạo 21-09-2026 theo QĐ-12 — đúng như dự tính, không phải sửa gì ở P1 để nó vào được.
 
 #### 6.9.3 Luật phụ thuộc — bất biến quan trọng nhất của mục này
 
@@ -1363,6 +1408,7 @@ Cùng một Postgres, nhưng **mỗi bảng có đúng một module sở hữu**
 | `artifact` | `Artifact` |
 | `flaky` | `FlakySignal` |
 | `triage` | `TriageEvent`, `AiHypothesis` |
+| `testmgmt` | `TestSuite`, `Requirement`, `TestCase`, `TestCaseAutomationLink`, `RequirementCoverage`, `TestPlan`, `ManualExecution`, `Release` (P2) |
 
 **Cấm cross-module JOIN trong code ghi.** Cần dữ liệu của module khác thì gọi interface của nó. Đây là thứ đắt nhất phải giữ, và cũng là thứ duy nhất làm §6.7.8 khả thi — ngày cần tách `ingest` ra service, nếu đã có 40 câu SQL join xuyên 6 bảng của 5 module thì không tách được nữa.
 
@@ -1471,10 +1517,10 @@ Chuyển sang `backend/internal/identity/` là **port có kèm test**, không ph
 | `query` | ✅ dashboard v0. *Thực tế 18-09: có thêm lát đầu màn hình EM* | ✅ + màn hình EM (§2.5) | | | |
 | `triage` | ✅ ghi `TriageEvent` thủ công | ghi `TriageEvent` thủ công | ✅ AI hypothesis | | |
 | `billing` | — | shadow meter (§10.6) | | | |
-| `testmgmt` | — | — | — | ✅ §6.8 | |
+| `testmgmt` | — | — | — | ✅ §6.8 — *backend trên `main` từ 21-09 (QĐ-12), UI chưa* | |
 | `execution` | — | — | — | — | ✅ §6.7 |
 
-§4.3 Track A ghi P1-min làm *"identity operations dạng script/CSV"* — đọc đúng là **không cần giao diện** cho merge/split ở P1-min. Nó **không** có nghĩa là không có Review Queue service: §9.3 tầng 2 và alert §6.4 đòi bảng và gauge từ ngày đầu (N60). Nguyên tắc **chốt scope trước, tạo thư mục sau** vẫn đúng cho `testmgmt` và `execution` — hai module chưa có một dòng nào trong `backend/`.
+§4.3 Track A ghi P1-min làm *"identity operations dạng script/CSV"* — đọc đúng là **không cần giao diện** cho merge/split ở P1-min. Nó **không** có nghĩa là không có Review Queue service: §9.3 tầng 2 và alert §6.4 đòi bảng và gauge từ ngày đầu (N60). Nguyên tắc **chốt scope trước, tạo thư mục sau** vẫn đúng cho `execution` — module chưa có một dòng nào trong `backend/`; `testmgmt` được tạo khi chủ dự án chốt QĐ-12.
 
 #### 6.9.12 Sáu thứ giết modular monolith
 
@@ -2242,6 +2288,8 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 | Quản lý member (tầng tương ứng)                        | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Billing, xóa org                                       | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Xóa dữ liệu run/artifact thủ công                      | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
+| *(P2)* Test case / requirement / plan / execution / import | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| *(P2)* Quyết định release (approve / block / ship, ghi tên) | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 **Quy tắc UI:** hành động không có quyền → **ẩn nút**. Gọi thẳng API/URL → `403` (resource nhìn thấy được) hoặc `404` (resource ngoài tenant — không lộ tồn tại). **Cả hai nhánh có integration test.**
 
@@ -2318,9 +2366,9 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 
 **15 đóng · 1 mở theo thiết kế (F03).** F12 và F16 — hai mục treo từ bản thẩm định đầu tiên — nay đã đóng thật: bản `.docx` sinh bằng pipeline `docs/external/build.mjs` và qua đủ 11/11 mục checklist §4.7 do `verify.sh` kiểm. README của bộ v3.1 từng đánh dấu chúng đóng khi hiện vật chưa sửa; lần này có script chứng minh.
 
-### 12.2 Phát hiện khi review hợp nhất (N01–N61)
+### 12.2 Phát hiện khi review hợp nhất (N01–N63)
 
-Danh sách đầy đủ 61 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
+Danh sách đầy đủ 63 phát hiện nằm ở **§0.2**. Một bảng, một chỗ sửa.
 
 Trước đây mục này giữ một bản tóm tắt song song của đúng 50 dòng đó. Hai bảng cho cùng một danh sách nghĩa là mỗi phát hiện phải sửa hai lần — và chúng **đã** lệch nhau thật: khi sửa số đo của N47 ngày 30-08, bản thứ ba nằm trong §8.9 bị bỏ sót vì không ai nhớ nó tồn tại. Trùng lặp không làm tài liệu đầy đủ hơn, nó chỉ làm tài liệu sai ở nhiều chỗ hơn.
 
