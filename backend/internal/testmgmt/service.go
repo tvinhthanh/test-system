@@ -755,6 +755,28 @@ func (s *service) RecordExecution(ctx context.Context, projectID, planID string,
 	return out, nil
 }
 
+func (s *service) ExecutionForEvidence(ctx context.Context, projectID, planID, id string) (Execution, error) {
+	if !isUUID(projectID) || !isUUID(planID) || !isUUID(id) {
+		return Execution{}, ErrNotFound
+	}
+	var e Execution
+	var planStatus string
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		SELECT e.id, e.test_plan_id, e.test_case_id, c.title, e.executed_by, e.status, e.note, e.executed_at, p.status
+		  FROM manual_executions e
+		  JOIN test_cases c ON c.id = e.test_case_id
+		  JOIN test_plans p ON p.id = e.test_plan_id
+		 WHERE e.id = $1 AND e.test_plan_id = $2 AND e.project_id = $3`, id, planID, projectID).
+		Scan(&e.ID, &e.PlanID, &e.TestCaseID, &e.CaseTitle, &e.ExecutedBy, &e.Status, &e.Note, &e.ExecutedAt, &planStatus)
+	if err != nil {
+		return Execution{}, mapErr(err)
+	}
+	if planStatus == string(PlanClosed) {
+		return Execution{}, fmt.Errorf("%w: plan is closed", ErrConflict)
+	}
+	return e, nil
+}
+
 // --------------------------------------------------------------- releases
 
 const releaseColumns = `id, project_id, version, branch, status, decided_by, decided_at, decision_note, last_gate, evaluated_at, created_at, updated_at`

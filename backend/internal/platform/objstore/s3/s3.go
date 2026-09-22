@@ -183,6 +183,13 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return err
 }
 
+// Put is a header-signed PUT of the whole body (SigV4 signs its SHA-256, so
+// the payload is in memory anyway; the caller capped it per §10.4).
+func (s *Store) Put(ctx context.Context, key, contentType string, body []byte) error {
+	_, err := s.do(ctx, "PUT", s.objectPath(key), nil, map[string]string{"content-type": contentType}, body)
+	return err
+}
+
 // ---- HTTP with header auth ----------------------------------------------
 
 // do sends a signed request and returns the body; 2xx only. 404 maps to

@@ -381,6 +381,12 @@ type Service interface {
 	GetPlan(ctx context.Context, projectID, id string) (Plan, error)
 	SetPlanStatus(ctx context.Context, projectID, id string, status PlanStatus) (Plan, error)
 	RecordExecution(ctx context.Context, projectID, planID string, in NewExecution, actor string) (Execution, error)
+	// ExecutionForEvidence resolves one execution of one plan for an
+	// evidence upload (§6.8.2 "Artifact dùng lại"): the artifact row is
+	// artifact's, so this is the only place the ownership and the closed-plan
+	// rule are checked. ErrNotFound for a foreign id, ErrConflict when the
+	// plan is closed — the same rule as recording.
+	ExecutionForEvidence(ctx context.Context, projectID, planID, id string) (Execution, error)
 
 	// Releases and the gate
 	CreateRelease(ctx context.Context, projectID string, in NewRelease) (Release, error)

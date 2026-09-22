@@ -15,10 +15,14 @@ export type Transport = (
 ) => Promise<Response>;
 // method defaults to POST when a body is given, GET otherwise; PATCH and
 // DELETE (Test Management) are state-changing and carry the CSRF token too.
+// A FormData body goes as multipart/form-data (the browser sets the
+// boundary); anything else is JSON. timeoutMs overrides the client default
+// for a request that moves a file rather than a few kilobytes.
 export type RequestOptions = {
   signal?: AbortSignal;
   body?: unknown;
   method?: "GET" | "POST" | "PATCH" | "DELETE";
+  timeoutMs?: number;
 };
 
 const statusMessage = (status: number) =>
@@ -27,6 +31,7 @@ const statusMessage = (status: number) =>
     403: "You do not have permission to access this resource.",
     404: "This resource is unavailable or no longer exists.",
     409: "This resource changed. Refresh and try again.",
+    413: "This file is larger than the server accepts.",
     429: "Too many requests. Wait a moment and try again.",
   })[status] ?? "The request could not be completed. Please try again.";
 
@@ -68,8 +73,10 @@ export class ApiClient {
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, this.timeoutMs);
+    }, options.timeoutMs ?? this.timeoutMs);
     this.pending.add(controller);
+    const multipart =
+      typeof FormData !== "undefined" && options.body instanceof FormData;
     try {
       const response = await this.transport(path, {
         method,
@@ -78,12 +85,16 @@ export class ApiClient {
         headers: {
           Accept: "application/json",
           ...(mutation ? { "X-CSRF-Token": this.csrfToken! } : {}),
-          ...(options.body !== undefined
+          ...(options.body !== undefined && !multipart
             ? { "Content-Type": "application/json" }
             : {}),
         },
         ...(options.body !== undefined
-          ? { body: JSON.stringify(options.body) }
+          ? {
+              body: multipart
+                ? (options.body as FormData)
+                : JSON.stringify(options.body),
+            }
           : {}),
       });
       if (epoch !== this.epoch || controller.signal.aborted)

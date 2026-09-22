@@ -213,3 +213,100 @@ it("imports CSV as JSON {csv} and decodes the report", async () => {
   expect(rep.created).toBe(1);
   expect(rep.errors).toEqual([]);
 });
+
+it("attaches evidence as multipart with CSRF, no JSON content type, and decodes it on the plan", async () => {
+  const transport = vi.fn<Transport>(async (path, init) => {
+    if (String(path).endsWith("/evidence")) {
+      // FormData goes as-is: the browser sets the multipart boundary, so the
+      // client must not force application/json.
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBeInstanceOf(FormData);
+      const file = (init!.body as FormData).get("file") as File;
+      expect(file.name).toBe("checkout.png");
+      const headers = init?.headers as Record<string, string>;
+      expect(headers["X-CSRF-Token"]).toBe("csrf-1");
+      expect(headers["Content-Type"]).toBeUndefined();
+      return json(
+        {
+          id: "a1",
+          name: "checkout.png",
+          kind: "manual_evidence",
+          contentType: "image/png",
+          sizeBytes: 1234,
+          expiresAt: at,
+        },
+        201,
+      );
+    }
+    return json({
+      id: "plan-1",
+      name: "Sprint 12",
+      environmentId: "",
+      status: "active",
+      executions: [
+        {
+          id: "e1",
+          planId: "plan-1",
+          testCaseId: "c1",
+          caseTitle: "Pay with saved card",
+          executedBy: "alice@example.com",
+          status: "passed",
+          note: "",
+          executedAt: at,
+          evidence: [
+            {
+              id: "a1",
+              name: "checkout.png",
+              kind: "manual_evidence",
+              contentType: "image/png",
+              sizeBytes: 1234,
+              expiresAt: at,
+            },
+          ],
+        },
+      ],
+      createdAt: at,
+      updatedAt: at,
+    });
+  });
+  const r = repo(transport);
+  const file = new File([new Uint8Array([137, 80, 78, 71])], "checkout.png", {
+    type: "image/png",
+  });
+  const stored = await r.attachEvidence("p", "plan-1", "e1", file, signal());
+  expect(stored).toEqual({
+    id: "a1",
+    name: "checkout.png",
+    kind: "manual_evidence",
+    contentType: "image/png",
+    sizeBytes: 1234,
+  });
+  expect(transport.mock.calls[0]![0]).toBe(
+    "/v1/projects/p/test-plans/plan-1/executions/e1/evidence",
+  );
+  const plan = await r.plan("p", "plan-1", signal());
+  expect(plan.executions[0]!.evidence).toEqual([stored]);
+  expect(r.evidenceContentUrl("p", "a1")).toBe(
+    "/v1/projects/p/artifacts/a1/content",
+  );
+  // An execution without the field (older server) decodes to no evidence.
+  const bare = repo(async () =>
+    json({
+      id: "e2",
+      planId: "plan-1",
+      testCaseId: "c1",
+      caseTitle: "x",
+      executedBy: "a",
+      status: "failed",
+      note: "",
+      executedAt: at,
+    }),
+  );
+  const exec = await bare.recordExecution(
+    "p",
+    "plan-1",
+    { testCaseId: "c1", status: "failed" },
+    signal(),
+  );
+  expect(exec.evidence).toEqual([]);
+});

@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
@@ -28,6 +30,7 @@ import (
 //	POST|DELETE /v1/projects/{p}/test-cases/{testCaseId}/requirements/{requirementId}
 //	GET|POST   /v1/projects/{p}/test-plans              GET|PATCH /test-plans/{planId}
 //	POST       /v1/projects/{p}/test-plans/{planId}/executions {testCaseId, status, note}
+//	POST       /v1/projects/{p}/test-plans/{planId}/executions/{executionId}/evidence   multipart `file` → ArtifactRef (§6.8.2)
 //	GET|POST   /v1/projects/{p}/releases                GET /releases/{releaseId}
 //	POST       /v1/projects/{p}/releases/{releaseId}/evaluate   → release with gate
 //	POST       /v1/projects/{p}/releases/{releaseId}/decision   {status, note}
@@ -53,6 +56,7 @@ func (d *dashboard) testmgmtRoutes(handle func(pattern string, fn http.HandlerFu
 	handle("GET /v1/projects/{projectId}/test-plans/{planId}", d.tmPlan)
 	handle("PATCH /v1/projects/{projectId}/test-plans/{planId}", d.tmPatchPlan)
 	handle("POST /v1/projects/{projectId}/test-plans/{planId}/executions", d.tmExecute)
+	handle("POST /v1/projects/{projectId}/test-plans/{planId}/executions/{executionId}/evidence", d.tmEvidence)
 	handle("GET /v1/projects/{projectId}/releases", d.tmReleases)
 	handle("POST /v1/projects/{projectId}/releases", d.tmCreateRelease)
 	handle("GET /v1/projects/{projectId}/releases/{releaseId}", d.tmRelease)
@@ -109,14 +113,30 @@ type testCaseDTO struct {
 }
 
 type executionDTO struct {
-	ID         string    `json:"id"`
-	PlanID     string    `json:"planId"`
-	TestCaseID string    `json:"testCaseId"`
-	CaseTitle  string    `json:"caseTitle"`
-	ExecutedBy string    `json:"executedBy"`
-	Status     string    `json:"status"`
-	Note       string    `json:"note"`
-	ExecutedAt time.Time `json:"executedAt"`
+	ID         string        `json:"id"`
+	PlanID     string        `json:"planId"`
+	TestCaseID string        `json:"testCaseId"`
+	CaseTitle  string        `json:"caseTitle"`
+	ExecutedBy string        `json:"executedBy"`
+	Status     string        `json:"status"`
+	Note       string        `json:"note"`
+	ExecutedAt time.Time     `json:"executedAt"`
+	Evidence   []evidenceDTO `json:"evidence"`
+}
+
+// evidenceDTO is the ArtifactRef of the contract, as the failure detail
+// lists it (query.ArtifactRef), for a manual_evidence artifact.
+type evidenceDTO struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
+	ContentType string    `json:"contentType"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+}
+
+func evidenceOut(a artifact.Artifact) evidenceDTO {
+	return evidenceDTO{ID: a.ID, Name: a.Name, Kind: string(a.Kind), ContentType: a.ContentType, SizeBytes: a.ActualBytes, ExpiresAt: a.ExpiresAt.UTC()}
 }
 
 type planDTO struct {
@@ -181,16 +201,24 @@ func caseOut(c testmgmt.TestCase) testCaseDTO {
 	return out
 }
 
-func executionOut(e testmgmt.Execution) executionDTO {
-	return executionDTO{ID: e.ID, PlanID: e.PlanID, TestCaseID: e.TestCaseID, CaseTitle: e.CaseTitle, ExecutedBy: e.ExecutedBy, Status: string(e.Status), Note: e.Note, ExecutedAt: e.ExecutedAt.UTC()}
+func executionOut(e testmgmt.Execution, evidence []artifact.Artifact) executionDTO {
+	out := executionDTO{ID: e.ID, PlanID: e.PlanID, TestCaseID: e.TestCaseID, CaseTitle: e.CaseTitle, ExecutedBy: e.ExecutedBy, Status: string(e.Status), Note: e.Note, ExecutedAt: e.ExecutedAt.UTC(),
+		Evidence: make([]evidenceDTO, 0, len(evidence))}
+	for _, a := range evidence {
+		out.Evidence = append(out.Evidence, evidenceOut(a))
+	}
+	return out
 }
 
-func planOut(p testmgmt.Plan) planDTO {
+// planOut renders a plan; evidence is the artifact module's answer for the
+// plan's executions (cmd/api joins the two modules, testmgmt never imports
+// artifact — §6.8.6, test/arch).
+func planOut(p testmgmt.Plan, evidence map[string][]artifact.Artifact) planDTO {
 	out := planDTO{ID: p.ID, Name: p.Name, EnvironmentID: p.EnvironmentID, Status: string(p.Status), CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC()}
 	if p.Executions != nil {
 		out.Executions = make([]executionDTO, 0, len(p.Executions))
 		for _, e := range p.Executions {
-			out.Executions = append(out.Executions, executionOut(e))
+			out.Executions = append(out.Executions, executionOut(e, evidence[e.ID]))
 		}
 	}
 	return out
@@ -560,7 +588,7 @@ func (d *dashboard) tmPlans(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, listOut(items, planOut))
+	writeJSON(w, http.StatusOK, listOut(items, func(p testmgmt.Plan) planDTO { return planOut(p, nil) }))
 }
 
 func (d *dashboard) tmCreatePlan(w http.ResponseWriter, r *http.Request) {
@@ -580,7 +608,7 @@ func (d *dashboard) tmCreatePlan(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, planOut(out))
+	writeJSON(w, http.StatusCreated, planOut(out, nil))
 }
 
 func (d *dashboard) tmPlan(w http.ResponseWriter, r *http.Request) {
@@ -593,7 +621,16 @@ func (d *dashboard) tmPlan(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, planOut(out))
+	ids := make([]string, 0, len(out.Executions))
+	for _, e := range out.Executions {
+		ids = append(ids, e.ID)
+	}
+	evidence, err := d.artifact.ListEvidence(r.Context(), string(scope.ProjectID), ids)
+	if err != nil {
+		d.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, planOut(out, evidence))
 }
 
 func (d *dashboard) tmPatchPlan(w http.ResponseWriter, r *http.Request) {
@@ -612,7 +649,7 @@ func (d *dashboard) tmPatchPlan(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, planOut(out))
+	writeJSON(w, http.StatusOK, planOut(out, nil))
 }
 
 func (d *dashboard) tmExecute(w http.ResponseWriter, r *http.Request) {
@@ -638,7 +675,110 @@ func (d *dashboard) tmExecute(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, executionOut(out))
+	writeJSON(w, http.StatusCreated, executionOut(out, nil))
+}
+
+// evidenceMaxBytes bounds the whole multipart body: the kind's cap plus
+// room for the part headers. Anything past it is a 413 before a byte is
+// parsed, so a client cannot make the api buffer more than §10.4 allows.
+var evidenceMaxBytes = artifact.Caps[artifact.KindManualEvidence] + 64<<10
+
+// tmEvidence attaches one file to one manual execution (§6.8.2 "Artifact
+// dùng lại"): `multipart/form-data` with a single `file` part. Ownership and
+// the closed-plan rule are testmgmt's (ExecutionForEvidence); the bytes,
+// the cap, the content-type policy and the sniff are artifact's
+// (PutEvidence). The tenant check comes before the body is read.
+func (d *dashboard) tmEvidence(w http.ResponseWriter, r *http.Request) {
+	p, ok := d.user(w, r)
+	if !ok {
+		return
+	}
+	scope, ok := d.project(w, r, p, authz.ActionTestmgmtWrite)
+	if !ok {
+		return
+	}
+	project := string(scope.ProjectID)
+	exec, err := d.tm.ExecutionForEvidence(r.Context(), project, r.PathValue("planId"), r.PathValue("executionId"))
+	if err != nil {
+		d.tmErr(w, r, err)
+		return
+	}
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "multipart/form-data" {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "send multipart/form-data with one `file` part", map[string]any{"field": "file"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, evidenceMaxBytes)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "malformed multipart body", nil)
+		return
+	}
+	var (
+		name, contentType string
+		body              []byte
+	)
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				httpx.WriteError(w, http.StatusRequestEntityTooLarge, "ARTIFACT_TOO_LARGE", "file exceeds the manual_evidence cap", map[string]any{"kind": artifact.KindManualEvidence, "limit": artifact.Caps[artifact.KindManualEvidence]})
+				return
+			}
+			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "malformed multipart body", nil)
+			return
+		}
+		if part.FormName() != "file" {
+			_, _ = io.Copy(io.Discard, part)
+			continue
+		}
+		name, contentType = part.FileName(), part.Header.Get("Content-Type")
+		body, err = io.ReadAll(part)
+		part.Close()
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				httpx.WriteError(w, http.StatusRequestEntityTooLarge, "ARTIFACT_TOO_LARGE", "file exceeds the manual_evidence cap", map[string]any{"kind": artifact.KindManualEvidence, "limit": artifact.Caps[artifact.KindManualEvidence]})
+				return
+			}
+			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "malformed multipart body", nil)
+			return
+		}
+		break
+	}
+	if body == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "a `file` part is required", map[string]any{"field": "file"})
+		return
+	}
+	// The browser's File.type; parameters (charset) are not part of the policy.
+	contentType, _, _ = mime.ParseMediaType(contentType)
+	// Retention follows the organization's plan, as on declare (§10.4).
+	plan := "free"
+	if org, err := d.tenancy.GetOrganization(r.Context(), scope.OrgID); err == nil {
+		plan = org.PlanID
+	}
+	a, err := d.artifact.PutEvidence(r.Context(), artifact.Evidence{ProjectID: project, ExecutionID: exec.ID, Plan: plan, Name: name, ContentType: contentType}, body)
+	if err != nil {
+		var tooLarge *artifact.TooLargeError
+		switch {
+		case errors.As(err, &tooLarge):
+			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "ARTIFACT_TOO_LARGE", err.Error(), map[string]any{"kind": tooLarge.Kind, "limit": tooLarge.Limit, "sizeBytes": tooLarge.Got})
+		case errors.Is(err, artifact.ErrInvalid):
+			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", strings.TrimPrefix(err.Error(), "artifact: invalid input: "), map[string]any{"field": "file"})
+		case errors.Is(err, artifact.ErrNotFound):
+			httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "not found", nil)
+		case errors.Is(err, artifact.ErrStore):
+			httpx.Cause(r.Context(), err)
+			httpx.WriteError(w, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", "object store unavailable; retry", nil)
+		default:
+			d.internal(w, r, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, evidenceOut(a))
 }
 
 // ---- releases ------------------------------------------------------------------

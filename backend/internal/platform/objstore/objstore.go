@@ -1,6 +1,7 @@
 // Package objstore is the object storage boundary of §7.7: presigned
 // uploads (single PUT or multipart), HEAD to verify what actually landed,
-// GET to hash it, DELETE for rejects and retention. Keys are opaque strings
+// GET to hash it, DELETE for rejects and retention, and one direct PUT for
+// bytes the api relays itself. Keys are opaque strings
 // the caller generates — the client never chooses a path or bucket.
 //
 // Two implementations: s3 (S3 and Cloudflare R2, SigV4 over net/http, no
@@ -52,4 +53,10 @@ type Store interface {
 	Head(ctx context.Context, key string) (Info, error)
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
+
+	// Put writes one whole object from the api itself — the server-side
+	// path for bytes that arrive over a session (manual evidence, §6.8.2),
+	// where a presigned URL would need bucket CORS for every dashboard
+	// origin. The caller has already bounded body by the kind's cap (§10.4).
+	Put(ctx context.Context, key, contentType string, body []byte) error
 }

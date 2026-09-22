@@ -225,6 +225,17 @@ func (s *Store) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (s *Store) Put(_ context.Context, key, contentType string, body []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Fail != nil {
+		return s.Fail
+	}
+	data := append([]byte(nil), body...)
+	s.objects[key] = &object{data: data, contentType: contentType, etag: etag(data)}
+	return nil
+}
+
 // Exists reports whether key is stored — for assertions.
 func (s *Store) Exists(key string) bool {
 	s.mu.Lock()

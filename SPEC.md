@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.19 · **Ngày:** 21-09-2026 · **Trạng thái:** 12 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 63 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và hai từ việc build P2 (N62–N63)
+> **Phiên bản:** v3.20 · **Ngày:** 22-09-2026 · **Trạng thái:** 12 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` từ 22-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -87,6 +87,7 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N61 | **§9.7 chốt "`UNIQUE` + `ON CONFLICT` → chỉ một identity" cho ca hai run cùng gửi *một* fingerprint lạ — đúng, nhưng resolve thật chạm *hàng chục* key trong một transaction.** T1 (`backend/test/failure`, 16-09): 4 worker resolve song song các run cùng bộ test — ca thường nhất, CI của một project chạy đi chạy lại cùng suite — **deadlock 40P01**: mỗi transaction insert cùng bộ unique key theo thứ tự map ngẫu nhiên của Go. Queue retry che lỗi (job vẫn xong) nhưng mỗi lần là backoff 5 s — vượt p99 < 5 s của §14.2 ngay ở tải nhỏ; test race của §9.7 (N46) không thấy vì nó chỉ đua trên **một** key | ✅ Ghi thành bất biến ở §9.7: transaction ghi nhiều identity/alias/flaky phải sắp key theo **một thứ tự toàn cục** (fingerprint cho identity, identity id cho flaky) trước khi ghi — cùng thứ tự thì transaction sau chỉ xếp hàng rồi đi đường `ON CONFLICT`. Harness khẳng định `last_error IS NULL` cho mọi job: re-run chỉ được đến từ lease hết hạn | §9.7, `backend/GATES.md` §T1 |
 | N62 | **§6.8.2 thiếu hai thứ mà §6.8.4 và §4.9.2 của chính nó dùng.** Rule 4 của gate nói "coverage của requirement `p0`" nhưng entity `Requirement` không có `priority`; §4.9.2 ước lượng "TestCase / **Suite** / Plan CRUD" và `TestCase.suiteId FK` trỏ vào một `Suite` chưa được định nghĩa ở đâu. Viết migration là lộ ngay: không có cột thì rule không tính được, không có bảng thì FK không có đích | ✅ Thêm `Requirement.priority` (p0..p3, mặc định p2) và entity `TestSuite` (tên, cha tuỳ chọn, unique theo project + cha) vào §6.8.2; migration `0013_testmgmt.sql` là bản chạy được | §6.8.2, §6.8.4 |
 | N63 | **Rule 3 của §6.8.4 — "còn failure chưa có `HYPOTHESIS_ACCEPTED`" — đọc theo nghĩa đen thì một failure đã `MARKED_KNOWN_ISSUE` chặn release mãi mãi.** §8.3 có bốn quyết định kết thúc triage (accept, flaky, known issue, resolved); `query.Triage` cũng chỉ đếm `HYPOTHESIS_ACCEPTED` là "đã triage" cho TTRC — đúng cho TTRC (chỉ có hypothesis mới có root cause), sai cho gate (known issue là quyết định ship có ý thức). Hai định nghĩa "đã triage" cho hai mục đích khác nhau, phải nói rõ | ✅ Gate đọc *decisive event* = `HYPOTHESIS_ACCEPTED \| MARKED_FLAKY \| MARKED_KNOWN_ISSUE \| RESOLVED`; TTRC/coverage §8.3 giữ định nghĩa hẹp. Ghi cả hai ở §6.8.4 | §6.8.4, §8.3 |
+| N64 | **§6.8.2 nói "Artifact dùng lại, không tạo bảng mới" cho bằng chứng thủ công, nhưng §8.4 định nghĩa `Artifact.runId` là `FK NOT NULL` với khóa tự nhiên `(runId, clientTestId, occurrenceIndex, attempt, name)` — trong khi §6.8.6 cấm manual execution tạo `Run`.** Hai mục đúng riêng, ghép lại thì không có chỗ đặt hàng: hoặc bịa một Run giả (vi phạm §6.8.6, làm bẩn flaky/TTRC), hoặc tạo bảng mới (vi phạm §6.8.2). Thêm nữa, sweep "unlinked > 1 h" của §6.4 sẽ báo động mãi mãi cho một artifact không bao giờ có attempt | ✅ Migration 0014: `runId`/`clientTestId`/`attempt` nullable, thêm `manualExecutionId`, CHECK buộc theo `kind` (`manual_evidence` ⇔ có execution, không run; kind khác ⇔ ngược lại); sweep và index unlinked chỉ xét `runId IS NOT NULL`. Upload đi **qua api** (`POST …/executions/{id}/evidence`, multipart, api sniff nội dung theo §11.5) chứ không presigned — trình duyệt PUT thẳng lên bucket cần CORS cho từng origin dashboard. Ghi ở §6.8.2, §8.4, §10.4 | §6.8.2, §8.4, §10.4, §6.4 |
 
 ### 0.3 Những gì vẫn CẦN người chịu trách nhiệm quyết
 
@@ -119,7 +120,7 @@ README của bộ v3.1 đánh dấu F12 và F16 là "✅ Đóng". **Sai** — qu
 
 **Cấm gửi ba file đó ra ngoài cho đến khi regenerate theo §4.7.**
 
-### 0.5 Tiến độ thi hành QĐ-11 và QĐ-12 — cập nhật 21-09-2026
+### 0.5 Tiến độ thi hành QĐ-11 và QĐ-12 — cập nhật 22-09-2026
 
 Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập nằm ở file bằng chứng; bảng này chỉ **trích** (quy tắc N51/N58). Cập nhật cùng mỗi lần merge vào `main`.
 
@@ -137,8 +138,8 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 
 | Khối §4.9.2 | Trạng thái 21-09 | Bằng chứng |
 |---|---|---|
-| TestCase / Suite / Plan CRUD | ✅ backend: `internal/testmgmt` (migration 0013), 24 route dashboard + 1 route CI, hợp đồng trong `openapi.yaml` (52 operation); ✅ UI: `frontend/src/features/testmgmt/` — 4 màn hình chính + 3 màn chi tiết, live-check bước 13 chạy trên api thật | `backend/README.md`, `frontend/PLAN.md` |
-| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối) + UI một nút mỗi verdict, ghi chú; **evidence artifact chưa** (`manual_evidence` chưa thêm vào enum §8.4 — làm khi có upload từ trình duyệt) | cùng trên |
+| TestCase / Suite / Plan CRUD | ✅ backend: `internal/testmgmt` (migration 0013), 25 route dashboard + 1 route CI, hợp đồng trong `openapi.yaml` (53 operation); ✅ UI: `frontend/src/features/testmgmt/` — 4 màn hình chính + 3 màn chi tiết, live-check bước 13 chạy trên api thật | `backend/README.md`, `frontend/PLAN.md` |
+| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối) + UI một nút mỗi verdict, ghi chú; ✅ **evidence 22-09**: `manual_evidence` vào enum §8.4 (migration 0014, N64), upload multipart qua api `POST …/executions/{id}/evidence` (cap 20 MB, sniff nội dung, plan closed → 409), đọc lại qua `GET …/artifacts/{id}/content`; UI: kẹp giấy trên hàng đã có verdict, ảnh hiện thumbnail, file khác là link; live-check bước 14 upload thật và kiểm thumbnail decode | `internal/artifact` (`PutEvidence`), `cmd/api/testmgmt.go`, `frontend/…/PlanDetailPage.vue` |
 | Automation mapping `TestCaseAutomationLink` | ✅ trỏ `TestIdentity.id`, kiểm qua contract của identity: khác project → 404, merged/retired → 409; case thành `automated` ở link đầu | test module + `cmd/api/api_test.go` |
 | Requirement mapping v0 + coverage | ✅ `requirement_coverage`, `coveredBy` trên requirement, p0 coverage tính cho gate | cùng trên |
 | Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; JUnit backfill **chưa** | `internal/testmgmt/csv.go` |
@@ -146,9 +147,9 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 | Release + quality gate + API cho CI | ✅ 5 rule khai báo, mức riêng từng rule, verdict máy đọc, override ghi tên, `GET /v1/releases/{id}/gate` cho token `project:read`; ngưỡng 3 % là `[ASSUMPTION]` trong `testmgmt.DefaultPolicy`. UI: trang release hiện 5 rule (mức, áp dụng, chi tiết), nút Evaluate, quyết định Approve/Block/Ship kèm ghi chú, cảnh báo override có tên người, snippet curl cho CI | `internal/testmgmt/gate.go`, `frontend/…/ReleaseDetailPage.vue` |
 | ROI dashboard | — cần baseline TTRC đo được (§6.8.3 #3); không có baseline thì không có màn hình | |
 
-Cross-tenant walk (§14.3) nay đi 52 route với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
+Cross-tenant walk (§14.3) nay đi 53 route với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
 
-**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA và RBAC 6 role (P2 theo §4.4, chưa tới); evidence artifact cho manual execution; JUnit backfill; ROI (chờ baseline); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
+**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA và RBAC 6 role (P2 theo §4.4, chưa tới); JUnit backfill; ROI (chờ baseline); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
 
 ---
 
@@ -1215,6 +1216,8 @@ Release
 
 **Artifact dùng lại, không tạo bảng mới:** bằng chứng thủ công (ảnh chụp, video quay tay) đi qua đúng `Artifact` của §8.4. Cần thêm giá trị `manual_evidence` vào enum `kind` — theo §8.10, đó là **migration có review**, và nó phải nằm trong P2 chứ không lén thêm ở P1.
 
+**Như đã cài (22-09, migration 0014 — N64):** `Artifact.kind = manual_evidence`, `manualExecutionId` trỏ `ManualExecution.id` (uuid thường, không FK chéo module), `runId`/`clientTestId`/`attempt` NULL và CHECK buộc theo `kind`. Upload **qua api**: `POST /v1/projects/{p}/test-plans/{planId}/executions/{id}/evidence`, `multipart/form-data` một part `file`, quyền `testmgmt.write`, plan `closed` → 409 (cùng luật với ghi verdict). Api tự đặt object vào store (`objstore.Put`) rồi ghi hàng đã `verified` — không presigned, vì trình duyệt PUT thẳng lên bucket cần CORS cho từng origin dashboard và mất lớp kiểm nội dung. Chính sách nội dung (§11.5): `image/png|webp|jpeg`, `video/webm|mp4`, `application/pdf`, `text/plain`, **và** kiểu khai phải trùng kiểu sniff từ byte — file HTML đổi tên `.png` bị 400. Cap 20 MB, retention 90 / 365 / 365 ngày (§10.4, `[ASSUMPTION]`). Đọc lại qua đúng `GET …/artifacts/{id}/content`; `TestPlan.executions[].evidence[]` liệt kê `ArtifactRef`. Sweep "unlinked" (§6.4) và `LinkPending` chỉ xét artifact có `runId`. Reporter **không** declare được kind này (`ValidKind` từ chối).
+
 #### 6.8.3 ROI — biến TTRC thành con số người duyệt ngân sách hiểu được
 
 §2.5 nói người giữ ngân sách là EM, không phải ICP. Màn hình EM (§4.2) hiện mới có trend; P2 thêm phép quy đổi ra giờ và tiền, **tính thẳng từ `TriageEvent` (§8.3)** chứ không phải số ước lượng bịa:
@@ -1819,9 +1822,10 @@ TestResultAttempt               -- attempt là entity, không phải cột đế
 Artifact
   id                  uuid PK
   testResultAttemptId uuid FK NULL   -- NULL khi unlinked (§7.6), job nền nối
-  runId               uuid FK NOT NULL
+  runId               uuid FK NULL       -- NOT NULL cho mọi kind trừ manual_evidence (0014, N64)
+  manualExecutionId   uuid NULL          -- chỉ manual_evidence: ManualExecution.id (§6.8.2), CHECK buộc theo kind
   clientTestId        text;  occurrenceIndex int;  attempt int   -- khóa nối từ giao thức
-  kind        enum: screenshot|video|trace|har|log|attachment
+  kind        enum: screenshot|video|trace|har|log|attachment|manual_evidence   -- manual_evidence: §6.8.2, chỉ api ghi
   name text;  contentType text;  sizeBytes bigint;  sha256 text
   storageKey  text
   status      enum: pending|uploaded|verified|expired|deleted
@@ -2200,7 +2204,9 @@ Với retention §10.4: **storage thường trực ≈ 12–15 GB/team chuẩn**
 | `trace`                                                                | 50 MB     | Vượt cap: strip snapshot ảnh, giữ action + network                                  | 7 / 14 / 30       |
 | `har`                                                                  | 20 MB     | Strip response body > 100 KB **và** strip `Authorization`/`Cookie` (§11.1)          | 7 / 14 / 30       |
 | `log` / `attachment`                                                   | 10 MB     | gzip                                                                                | 14 / 30 / 90      |
+| `manual_evidence` `[ASSUMPTION]`                                       | 20 MB     | Không có — api nhận thẳng, sniff nội dung (§6.8.2)                                  | 90 / 365 / 365    |
 
+- `manual_evidence` giữ lâu hơn artifact của run vì nó đỡ cho quyết định release (§6.8.4) và câu hỏi "trước khi ship đã kiểm gì" đến sau nhiều tháng; con số là giả định, chốt khi có khách.
 - Vượt cap sau xử lý → artifact bị từ chối `413`, **run vẫn hợp lệ**, dashboard hiện "video exceeded limit" kèm hướng dẫn cấu hình. **Không bao giờ** làm fail run của khách vì artifact.
 - Quota tổng theo gói (§10.5): chạm 80% → email + banner; chạm 100% → artifact mới bị từ chối, **metadata + kết quả test vẫn nhận**. Suy giảm có kiểm soát, không chết.
 - Kịch bản 400 MB/video của v3.0 không thể xảy ra nữa vì cap chặn ở tầng sản phẩm.

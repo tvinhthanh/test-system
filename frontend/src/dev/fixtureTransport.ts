@@ -564,6 +564,7 @@ const tmPlan = {
       status: "passed",
       note: "",
       executedAt: iso(120),
+      evidence: [],
     },
     {
       id: "exec-2",
@@ -574,6 +575,15 @@ const tmPlan = {
       status: "failed",
       note: "Refund button disabled for gift cards",
       executedAt: iso(90),
+      evidence: [
+        {
+          id: "evidence-1",
+          name: "refund-gift-card.txt",
+          kind: "manual_evidence",
+          contentType: "text/plain",
+          sizeBytes: 812,
+        },
+      ],
     },
   ],
   createdAt: iso(700),
@@ -585,10 +595,10 @@ function fixtureTestmgmt(
 ): { body: unknown; status?: number } | null {
   const path = url.pathname;
   const m = path.match(
-    /^\/v1\/projects\/(commerce|platform)\/(suites|requirements|test-cases|test-plans|releases)(?:\/([^/]+))?(?:\/([^/]+))?(?:\/([^/]+))?$/,
+    /^\/v1\/projects\/(commerce|platform)\/(suites|requirements|test-cases|test-plans|releases)(?:\/([^/]+))?(?:\/([^/]+))?(?:\/([^/]+))?(?:\/([^/]+))?$/,
   );
   if (!m) return null;
-  const [, , kind, id, sub, subId] = m;
+  const [, , kind, id, sub, subId, leaf] = m;
   const method = init?.method ?? "GET";
   const body =
     typeof init?.body === "string"
@@ -737,6 +747,17 @@ function fixtureTestmgmt(
               status: 201,
             }
           : { body: { items: [{ ...tmPlan, executions: undefined }] } };
+      if (sub === "executions" && subId && leaf === "evidence")
+        return {
+          body: {
+            id: "evidence-new",
+            name: "screenshot.png",
+            kind: "manual_evidence",
+            contentType: "image/png",
+            sizeBytes: 48211,
+          },
+          status: 201,
+        };
       if (sub === "executions")
         return {
           body: {
@@ -748,6 +769,7 @@ function fixtureTestmgmt(
             status: body.status,
             note: body.note ?? "",
             executedAt: iso(0),
+            evidence: [],
           },
           status: 201,
         };

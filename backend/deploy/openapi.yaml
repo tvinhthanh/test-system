@@ -1121,6 +1121,47 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/test-plans/{planId}/executions/{executionId}/evidence:
+    post:
+      operationId: attachManualEvidence
+      tags: [testmgmt]
+      summary: Attach a file to a manual execution (an Artifact of kind manual_evidence, §6.8.2)
+      description: |
+        `multipart/form-data` with one `file` part. The api stores the bytes
+        itself (no presigned URL): the browser's `Content-Type` of the part
+        must be one of `image/png|webp|jpeg`, `video/webm|mp4`,
+        `application/pdf`, `text/plain` **and** agree with what the bytes
+        sniff as (§11.5) — an HTML file renamed `.png` is `400`. Cap 20 MiB
+        (§10.4, `[ASSUMPTION]`). Read the bytes back through
+        `getArtifactContent`. A closed plan refuses (`409`), like recording.
+        Needs `testmgmt.write`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/PlanId" }
+        - { $ref: "#/components/parameters/ExecutionId" }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Stored and verified.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ArtifactRef" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413":
+          description: "`ARTIFACT_TOO_LARGE` with `details.kind`, `details.limit`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "503": { $ref: "#/components/responses/StoreUnavailable" }
   /v1/projects/{projectId}/releases:
     get:
       operationId: listReleases
@@ -1292,6 +1333,7 @@ components:
     RequirementId: { name: requirementId, in: path, required: true, schema: { type: string, format: uuid } }
     TestCaseId: { name: testCaseId, in: path, required: true, schema: { type: string, format: uuid } }
     PlanId: { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+    ExecutionId: { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
     ReleaseId: { name: releaseId, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 }, description: Page size; the server caps at 100 (§7.10). }
     Cursor: { name: cursor, in: query, schema: { type: string }, description: "Opaque; bound to project, filter and sort. `400 INVALID_CURSOR` when reused elsewhere." }
@@ -1432,7 +1474,10 @@ components:
         finishedAt: { type: string, format: date-time }
 
     # artifacts
-    ArtifactKind: { type: string, enum: [screenshot, video, trace, har, log, attachment] }
+    ArtifactKind:
+      type: string
+      enum: [screenshot, video, trace, har, log, attachment, manual_evidence]
+      description: "`manual_evidence` (§6.8.2) is never declared by a reporter; it enters only through `attachManualEvidence`."
     DeclareArtifact:
       type: object
       required: [localRunId, clientTestId, attempt, name, kind, contentType, sizeBytes, sha256]
@@ -1711,7 +1756,7 @@ components:
         errors: { type: array, items: { type: string }, description: "`row N: …` for rows that were skipped for a bad value." }
     ManualExecution:
       type: object
-      required: [id, planId, testCaseId, caseTitle, executedBy, status, note, executedAt]
+      required: [id, planId, testCaseId, caseTitle, executedBy, status, note, executedAt, evidence]
       properties:
         id: { type: string, format: uuid }
         planId: { type: string, format: uuid }
@@ -1721,6 +1766,7 @@ components:
         status: { type: string, enum: [passed, failed, blocked, skipped] }
         note: { type: string }
         executedAt: { type: string, format: date-time }
+        evidence: { type: array, items: { $ref: "#/components/schemas/ArtifactRef" }, description: "Verified `manual_evidence` artifacts, oldest first; read each through `getArtifactContent`." }
     TestPlan:
       type: object
       required: [id, name, environmentId, status, createdAt, updatedAt]

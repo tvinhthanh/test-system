@@ -48,6 +48,7 @@ POST /v1/projects/{projectId}/test-plans
 GET /v1/projects/{projectId}/test-plans/{planId}
 PATCH /v1/projects/{projectId}/test-plans/{planId}
 POST /v1/projects/{projectId}/test-plans/{planId}/executions
+POST /v1/projects/{projectId}/test-plans/{planId}/executions/{executionId}/evidence
 GET /v1/projects/{projectId}/releases
 POST /v1/projects/{projectId}/releases
 GET /v1/projects/{projectId}/releases/{releaseId}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -37,20 +38,26 @@ var (
 
 func isUUID(s string) bool { return uuidRe.MatchString(s) }
 
-const columns = `id, project_id, run_id, test_result_attempt_id, client_test_id, occurrence_index, attempt, kind, name, content_type,
+const columns = `id, project_id, run_id, manual_execution_id, test_result_attempt_id, client_test_id, occurrence_index, attempt, kind, name, content_type,
 	declared_bytes, actual_bytes, sha256, storage_key, upload_id, status, failure_reason, expires_at, created_at, verified_at, linked_at`
 
 func scan(row interface{ Scan(dest ...any) error }) (Artifact, error) {
 	var a Artifact
-	var attemptID, uploadID, reason *string
+	// run_id, client_test_id and attempt are NULL on manual_evidence (0014).
+	var runID, executionID, attemptID, clientTestID, uploadID, reason *string
+	var attempt *int
 	var actual *int64
 	var verified, linked *time.Time
-	err := row.Scan(&a.ID, &a.ProjectID, &a.RunID, &attemptID, &a.ClientTestID, &a.OccurrenceIndex, &a.Attempt, &a.Kind, &a.Name, &a.ContentType,
+	err := row.Scan(&a.ID, &a.ProjectID, &runID, &executionID, &attemptID, &clientTestID, &a.OccurrenceIndex, &attempt, &a.Kind, &a.Name, &a.ContentType,
 		&a.DeclaredBytes, &actual, &a.SHA256, &a.StorageKey, &uploadID, &a.Status, &reason, &a.ExpiresAt, &a.CreatedAt, &verified, &linked)
 	if err != nil {
 		return Artifact{}, err
 	}
-	a.AttemptID, a.UploadID, a.FailureReason = deref(attemptID), deref(uploadID), deref(reason)
+	a.RunID, a.ExecutionID, a.AttemptID, a.ClientTestID = deref(runID), deref(executionID), deref(attemptID), deref(clientTestID)
+	a.UploadID, a.FailureReason = deref(uploadID), deref(reason)
+	if attempt != nil {
+		a.Attempt = *attempt
+	}
 	if actual != nil {
 		a.ActualBytes = *actual
 	}
@@ -406,12 +413,94 @@ func (s *service) ListByRun(ctx context.Context, projectID, runID string) ([]Art
 	return out, rows.Err()
 }
 
+// ---- Manual evidence (§6.8.2) --------------------------------------------
+
+func (s *service) PutEvidence(ctx context.Context, in Evidence, body []byte) (Artifact, error) {
+	switch {
+	case !isUUID(in.ProjectID) || !isUUID(in.ExecutionID):
+		return Artifact{}, ErrNotFound
+	case in.Name == "" || len(in.Name) > 200 || strings.ContainsAny(in.Name, "/\\\x00"):
+		return Artifact{}, fmt.Errorf("%w: name", ErrInvalid)
+	case !AllowedContentType(KindManualEvidence, in.ContentType):
+		return Artifact{}, fmt.Errorf("%w: contentType %q is not allowed for %s", ErrInvalid, in.ContentType, KindManualEvidence)
+	case len(body) == 0:
+		return Artifact{}, fmt.Errorf("%w: empty file", ErrInvalid)
+	}
+	if cap := Caps[KindManualEvidence]; int64(len(body)) > cap {
+		return Artifact{}, &TooLargeError{Kind: KindManualEvidence, Limit: cap, Got: int64(len(body))}
+	}
+	// The declared type must be what the bytes are (§11.5): a browser sets
+	// File.type from the extension, and an HTML file renamed .png must not
+	// become an inline image. Text is the one type sniffing cannot pin down
+	// beyond "text", so it passes as long as it does not sniff as markup.
+	sniffed, _, _ := strings.Cut(http.DetectContentType(body), ";")
+	if sniffed != in.ContentType && !(in.ContentType == "text/plain" && strings.HasPrefix(sniffed, "text/") && sniffed != "text/html" && sniffed != "text/xml") {
+		return Artifact{}, fmt.Errorf("%w: file content is %s, not %s", ErrInvalid, sniffed, in.ContentType)
+	}
+	sum := sha256.Sum256(body)
+	now := s.now().UTC()
+	plan := RetentionDays[in.Plan]
+	if plan == nil {
+		plan = RetentionDays["free"]
+	}
+	expires := now.Add(time.Duration(plan[KindManualEvidence]) * 24 * time.Hour)
+	// Tenant, execution, random id — the key is ours, as for every kind.
+	key := fmt.Sprintf("%s/manual/%s/%s", in.ProjectID, in.ExecutionID, newID())
+	// Object first, row second: a crash between the two leaves an orphan
+	// object with no row (invisible; bucket lifecycle reclaims it), never a
+	// verified row with no bytes.
+	if err := s.store.Put(ctx, key, in.ContentType, body); err != nil {
+		return Artifact{}, fmt.Errorf("%w: %v", ErrStore, err)
+	}
+	a, err := scan(s.db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO artifacts (project_id, manual_execution_id, kind, name, content_type, declared_bytes, actual_bytes, sha256, storage_key, status, expires_at, verified_at)
+		VALUES ($1, $2, 'manual_evidence', $3, $4, $5, $5, $6, $7, 'verified', $8, $9)
+		RETURNING `+columns,
+		in.ProjectID, in.ExecutionID, in.Name, in.ContentType, len(body), hex.EncodeToString(sum[:]), key, expires, now))
+	if err != nil {
+		_ = s.store.Delete(ctx, key)
+		return Artifact{}, mapErr(err)
+	}
+	return a, nil
+}
+
+func (s *service) ListEvidence(ctx context.Context, projectID string, executionIDs []string) (map[string][]Artifact, error) {
+	if !isUUID(projectID) {
+		return nil, ErrNotFound
+	}
+	out := map[string][]Artifact{}
+	if len(executionIDs) == 0 {
+		return out, nil
+	}
+	for _, id := range executionIDs {
+		if !isUUID(id) {
+			return nil, ErrNotFound
+		}
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT `+columns+` FROM artifacts
+		 WHERE project_id = $1 AND manual_execution_id = ANY($2::uuid[]) AND status = 'verified'
+		 ORDER BY created_at, id`, projectID, executionIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[a.ExecutionID] = append(out[a.ExecutionID], a)
+	}
+	return out, rows.Err()
+}
+
 // ---- Sweeps -------------------------------------------------------------
 
 func (s *service) LinkPending(ctx context.Context) (int, int, error) {
 	rows, err := s.db.Q(ctx).Query(ctx, `
 		SELECT `+columns+` FROM artifacts
-		 WHERE test_result_attempt_id IS NULL AND status IN ('pending', 'uploaded', 'verified')
+		 WHERE test_result_attempt_id IS NULL AND run_id IS NOT NULL AND status IN ('pending', 'uploaded', 'verified')
 		 ORDER BY created_at LIMIT 1000`)
 	if err != nil {
 		return 0, 0, err

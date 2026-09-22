@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { Lock, RefreshCw, Search, Unlock } from "@lucide/vue";
+import {
+  FileText,
+  Lock,
+  Paperclip,
+  RefreshCw,
+  Search,
+  Unlock,
+  Video,
+} from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useServices } from "../../app/providers/services";
+import { ApiError } from "../../core/api/client";
 import { useResource } from "../../core/state/useResource";
 import { executionStatuses, type ExecutionStatus } from "./enums";
-import type { Execution, Plan, TestCase } from "./testmgmtRepository";
+import type { Evidence, Execution, Plan, TestCase } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
-import { time } from "../../shared/format";
+import { bytes, time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
 import EmptyState from "../../shared/EmptyState.vue";
@@ -92,6 +101,63 @@ async function setStatus(status: Plan["status"]) {
   );
   if (updated) plan.data.value = updated;
 }
+
+// Evidence (§6.8.2): a file attached to the case's latest execution, stored
+// as an Artifact. The accept list mirrors the server's policy for the kind
+// (§11.5); the server still sniffs, so this is convenience, not the check.
+const evidenceAccept =
+  "image/png,image/jpeg,image/webp,video/webm,video/mp4,application/pdf,text/plain";
+const evidenceCap = 20 * 1024 * 1024;
+const pickers = ref<Record<string, HTMLInputElement | null>>({});
+function pickEvidence(c: TestCase) {
+  pickers.value[c.id]?.click();
+}
+async function attach(c: TestCase, event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ""; // the same file may be chosen again after an error
+  const exec = verdicts.value.get(c.id);
+  if (!file || !exec) return;
+  if (file.size > evidenceCap) {
+    mutation.error.value = {
+      key: c.id,
+      error: new ApiError(
+        413,
+        "ARTIFACT_TOO_LARGE",
+        `${file.name} is over the 20 MB evidence limit.`,
+      ),
+    };
+    return;
+  }
+  const stored = await mutation.run(c.id, (signal) =>
+    testmgmt.attachEvidence(project.value, planId.value, exec.id, file, signal),
+  );
+  const failure = mutation.error.value?.error;
+  if (failure instanceof ApiError && failure.status === 400) {
+    // The one 400 this route gives a person: the bytes are not what the
+    // file says it is, or the type is outside the evidence policy.
+    mutation.error.value = {
+      key: c.id,
+      error: new ApiError(
+        400,
+        failure.code,
+        `${file.name} was refused: evidence must be an image, video, PDF or text file whose content matches its type.`,
+        failure.requestId,
+      ),
+    };
+  }
+  if (stored) {
+    // The plan is the source of truth; refetch rather than splice, so the
+    // list matches what a second viewer would load.
+    void plan.load((signal) =>
+      testmgmt.plan(project.value, planId.value, signal),
+    );
+  }
+}
+const evidenceUrl = (e: Evidence) =>
+  testmgmt.evidenceContentUrl(project.value, e.id);
+const isImage = (e: Evidence) => e.contentType.startsWith("image/");
+const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
 </script>
 <template>
   <BackLink :to="`${base()}/plans`">Test plans</BackLink>
@@ -209,6 +275,46 @@ async function setStatus(status: Plan["status"]) {
             </template>
             <span v-else>not executed in this plan</span>
           </span>
+          <!-- Evidence of the latest execution: images inline as thumbnails,
+               everything else a link. Same content route as the failure
+               detail; the server picks inline vs download (§11.5). -->
+          <ul
+            v-if="verdicts.get(c.id)?.evidence.length"
+            class="evidence-list mt-2 flex flex-wrap gap-2"
+            :aria-label="`Evidence for ${c.title}`"
+          >
+            <li
+              v-for="e in verdicts.get(c.id)!.evidence"
+              :key="e.id"
+              class="min-w-0"
+            >
+              <a
+                :href="evidenceUrl(e)"
+                target="_blank"
+                rel="noopener"
+                class="bg-muted hover:bg-accent inline-flex max-w-56 items-center gap-1.5 overflow-hidden rounded-md border text-xs"
+                :title="`${e.name} · ${bytes(e.sizeBytes)}`"
+              >
+                <img
+                  v-if="isImage(e)"
+                  class="evidence-thumb block h-12 w-16 shrink-0 object-cover"
+                  :src="evidenceUrl(e)"
+                  :alt="e.name"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span
+                  v-else
+                  class="text-muted-foreground flex h-12 w-10 shrink-0 items-center justify-center"
+                  aria-hidden="true"
+                >
+                  <Video v-if="isVideo(e)" :size="16" />
+                  <FileText v-else :size="16" />
+                </span>
+                <span class="truncate pr-2">{{ e.name }}</span>
+              </a>
+            </li>
+          </ul>
           <ErrorNote
             v-if="mutation.error.value?.key === c.id"
             class="mt-2"
@@ -236,6 +342,33 @@ async function setStatus(status: Plan["status"]) {
             @click="record(c, s)"
             >{{ s }}</Button
           >
+          <!-- Only a recorded execution can carry evidence: the file is an
+               Artifact of that execution, not of the case. -->
+          <Button
+            variant="ghost"
+            size="xs"
+            class="evidence-attach"
+            :disabled="
+              closed || mutation.busy.value !== null || !verdicts.get(c.id)
+            "
+            :title="
+              verdicts.get(c.id)
+                ? 'Attach evidence to the latest execution'
+                : 'Record a verdict first'
+            "
+            :aria-label="`Attach evidence for ${c.title}`"
+            @click="pickEvidence(c)"
+            ><Paperclip
+          /></Button>
+          <input
+            :ref="(el) => (pickers[c.id] = el as HTMLInputElement | null)"
+            type="file"
+            class="sr-only"
+            tabindex="-1"
+            :accept="evidenceAccept"
+            :aria-label="`Evidence file for ${c.title}`"
+            @change="attach(c, $event)"
+          />
         </div>
       </li>
     </ul>

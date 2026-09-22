@@ -64,6 +64,13 @@ page.on("console", (m) => {
 
 const emailField =
   "input[type=email], input[name=email], input[autocomplete=username]";
+// A valid 1×1 PNG (the server sniffs evidence bytes, so a bare header is
+// refused; the browser must also decode it for the thumbnail check).
+const tinyPng = () =>
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64",
+  );
 const v1 =
   (re, status = 200) =>
   (r) =>
@@ -380,6 +387,65 @@ await step(
       throw new Error("gate verdict " + verdict + " (a finished run exists)");
     await page.screenshot({
       path: "test-results/live-release.png",
+      fullPage: true,
+    });
+  },
+);
+
+await step(
+  "test plan: record a verdict, attach evidence (multipart → Artifact), thumbnail served by the content route (§6.8.2)",
+  async () => {
+    const stamp = Date.now().toString(36);
+    await page.goto(base + "/p/" + project + "/plans");
+    await page.getByRole("button", { name: "New plan" }).first().click();
+    await page.fill("#plan-name", "Live check plan " + stamp);
+    await Promise.all([
+      page.waitForResponse(v1(/\/test-plans$/, 201), { timeout: 10000 }),
+      page.getByRole("button", { name: "Create", exact: true }).click(),
+    ]);
+    await page.waitForURL(/\/plans\//, { timeout: 10000 });
+    // The case created in the previous step is the newest row; the verdict
+    // is one click, then the hidden picker takes a real PNG.
+    const row = page
+      .locator(".execution-list li", { hasText: "Live check case " })
+      .first();
+    await row.waitFor({ timeout: 10000 });
+    await Promise.all([
+      page.waitForResponse(v1(/\/executions$/, 201), { timeout: 10000 }),
+      row.getByRole("button", { name: "failed", exact: true }).click(),
+    ]);
+    await row.locator(".evidence-attach:not([disabled])").waitFor({
+      timeout: 10000,
+    });
+    const [upload] = await Promise.all([
+      page.waitForResponse(v1(/\/evidence$/, 201), { timeout: 20000 }),
+      row.locator("input[type=file]").setInputFiles({
+        name: "live-evidence.png",
+        mimeType: "image/png",
+        buffer: tinyPng(),
+      }),
+    ]);
+    const ct = upload.request().headers()["content-type"] || "";
+    if (!ct.startsWith("multipart/form-data"))
+      throw new Error("evidence was not sent as multipart: " + ct);
+    const thumb = row.locator(".evidence-thumb").first();
+    await thumb.waitFor({ timeout: 10000 });
+    const width = await thumb.evaluate(
+      (img) =>
+        new Promise((ok) => {
+          if (img.complete) ok(img.naturalWidth);
+          else {
+            img.onload = () => ok(img.naturalWidth);
+            img.onerror = () => ok(-1);
+          }
+        }),
+    );
+    if (width !== 1)
+      throw new Error(
+        "evidence thumbnail did not decode (naturalWidth " + width + ")",
+      );
+    await page.screenshot({
+      path: "test-results/live-plan-evidence.png",
       fullPage: true,
     });
   },

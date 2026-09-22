@@ -73,6 +73,16 @@ export interface TestCase {
   createdAt: string;
   updatedAt: string;
 }
+// A manual_evidence artifact (SPEC §6.8.2 "Artifact dùng lại") attached to
+// an execution; bytes come from evidenceContentUrl, the same content route
+// the failure detail uses (§11.5: the server decides inline vs download).
+export interface Evidence {
+  id: string;
+  name: string;
+  kind: string;
+  contentType: string;
+  sizeBytes: number;
+}
 export interface Execution {
   id: string;
   planId: string;
@@ -82,6 +92,7 @@ export interface Execution {
   status: ExecutionStatus;
   note: string;
   executedAt: string;
+  evidence: Evidence[];
 }
 export interface Plan {
   id: string;
@@ -197,6 +208,16 @@ function testCase(value: unknown): TestCase {
     updatedAt: d.date(x.updatedAt),
   };
 }
+function evidence(value: unknown): Evidence {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    name: d.string(x.name),
+    kind: d.string(x.kind),
+    contentType: d.string(x.contentType),
+    sizeBytes: d.integer(x.sizeBytes),
+  };
+}
 function execution(value: unknown): Execution {
   const x = d.record(value);
   return {
@@ -208,6 +229,7 @@ function execution(value: unknown): Execution {
     status: oneOf(x.status, executionStatuses),
     note: d.string(x.note),
     executedAt: d.date(x.executedAt),
+    evidence: d.array(x.evidence ?? [], evidence, 50),
   };
 }
 function plan(value: unknown): Plan {
@@ -515,6 +537,30 @@ export class TestmgmtRepository {
         { body: input, signal },
       ),
     );
+  }
+  // One file per call, as multipart; the server sniffs the bytes against
+  // the File.type it is told, so a mislabelled file is a 400, not a stored
+  // lie. A file has its own timeout: 20 MiB on a slow link is not 15 s.
+  async attachEvidence(
+    projectId: string,
+    planId: string,
+    executionId: string,
+    file: File,
+    signal: AbortSignal,
+  ) {
+    const body = new FormData();
+    body.append("file", file, file.name);
+    return evidence(
+      await this.api.request(
+        `${scope(projectId)}/test-plans/${enc(planId)}/executions/${enc(executionId)}/evidence`,
+        { body, signal, timeoutMs: 120000 },
+      ),
+    );
+  }
+  // Same-origin URL of an evidence file's bytes (the content route of the
+  // reports repository; one route serves every artifact kind).
+  evidenceContentUrl(projectId: string, artifactId: string) {
+    return `${scope(projectId)}/artifacts/${enc(artifactId)}/content`;
   }
 
   // ---- releases ----

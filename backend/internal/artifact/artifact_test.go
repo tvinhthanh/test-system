@@ -445,3 +445,98 @@ func (e *env) backdate(id, column string, by time.Duration) {
 }
 
 func pgInterval(d time.Duration) string { return strconv.Itoa(int(d.Seconds())) + " seconds" }
+
+// pngBytes is a minimal PNG header — enough for http.DetectContentType to
+// call it image/png, which is the sniff PutEvidence relies on (§11.5).
+var pngBytes = append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 64)...)
+
+// §6.8.2 "Artifact dùng lại": manual evidence is an Artifact of a new kind,
+// written by the api itself — no run, no attempt, never declared, never
+// linked, invisible to the unlinked sweep, expired by retention like any other.
+func TestManualEvidence(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	const execID = "0198c3e1-7b1a-7c3d-9e4f-00000000e0e0"
+	in := artifact.Evidence{ProjectID: e.projectA, ExecutionID: execID, Plan: "team", Name: "checkout.png", ContentType: "image/png"}
+
+	a, err := e.svc.PutEvidence(ctx, in, pngBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(pngBytes)
+	if a.Kind != artifact.KindManualEvidence || a.Status != artifact.StatusVerified || a.ExecutionID != execID || a.RunID != "" || a.AttemptID != "" ||
+		a.ActualBytes != int64(len(pngBytes)) || a.SHA256 != hex.EncodeToString(sum[:]) || !e.store.Exists(a.StorageKey) {
+		t.Errorf("evidence: %+v exists=%v", a, e.store.Exists(a.StorageKey))
+	}
+	if days := int(a.ExpiresAt.Sub(a.CreatedAt).Round(time.Hour).Hours() / 24); days != 365 {
+		t.Errorf("team retention = %d days, want 365", days)
+	}
+	if got, err := e.svc.Get(ctx, e.projectA, a.ID); err != nil || got.ExecutionID != execID {
+		t.Errorf("Get: %+v %v", got, err)
+	}
+	// Wrong content: the declared type must be what the bytes are.
+	if _, err := e.svc.PutEvidence(ctx, in, []byte("<html><script>alert(1)</script></html>")); !errors.Is(err, artifact.ErrInvalid) {
+		t.Errorf("html as png: %v", err)
+	}
+	txt := in
+	txt.Name, txt.ContentType = "notes.txt", "text/plain"
+	if _, err := e.svc.PutEvidence(ctx, txt, []byte("<html><body>x</body></html>")); !errors.Is(err, artifact.ErrInvalid) {
+		t.Errorf("html as text: %v", err)
+	}
+	if _, err := e.svc.PutEvidence(ctx, txt, []byte("step 3: the total was wrong\n")); err != nil {
+		t.Errorf("plain text: %v", err)
+	}
+	// Policy: a reporter kind's type is not evidence; a reporter cannot declare the kind.
+	bad := in
+	bad.ContentType = "application/zip"
+	if _, err := e.svc.PutEvidence(ctx, bad, pngBytes); !errors.Is(err, artifact.ErrInvalid) {
+		t.Errorf("zip evidence: %v", err)
+	}
+	if artifact.ValidKind(artifact.KindManualEvidence) {
+		t.Error("manual_evidence must not be declarable by a reporter")
+	}
+	if r := e.post(e.tokenA, "/v1/artifacts", declareBody(e.runA.LocalRunID, "ct_m", 0, "m.png", "manual_evidence", "image/png", pngBytes)); r.code != 400 {
+		t.Errorf("declare manual_evidence: %d %s", r.code, r.raw)
+	}
+	// Cap: one byte over is refused before the store is touched.
+	var tooLarge *artifact.TooLargeError
+	if _, err := e.svc.PutEvidence(ctx, in, append(append([]byte(nil), pngBytes...), bytes.Repeat([]byte{0}, 20<<20)...)); !errors.As(err, &tooLarge) || tooLarge.Limit != 20<<20 {
+		t.Errorf("over cap: %v", err)
+	}
+	// Store outage: nothing is left behind, the error is retryable.
+	e.store.Fail = errors.New("timeout")
+	if _, err := e.svc.PutEvidence(ctx, in, pngBytes); !errors.Is(err, artifact.ErrStore) {
+		t.Errorf("store down: %v", err)
+	}
+	e.store.Fail = nil
+	var n int
+	_ = e.db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM artifacts WHERE manual_execution_id = $1`, execID).Scan(&n)
+	if n != 2 {
+		t.Errorf("rows for the execution = %d, want 2 (png + txt)", n)
+	}
+
+	// Listing: keyed by execution, verified only, oldest first; a foreign
+	// project sees nothing.
+	byExec, err := e.svc.ListEvidence(ctx, e.projectA, []string{execID, "0198c3e1-7b1a-7c3d-9e4f-00000000e0e1"})
+	if err != nil || len(byExec) != 1 || len(byExec[execID]) != 2 || byExec[execID][0].Name != "checkout.png" || byExec[execID][1].Name != "notes.txt" {
+		t.Errorf("ListEvidence: %+v %v", byExec, err)
+	}
+	if other, _ := e.svc.ListEvidence(ctx, "00000000-0000-4000-8000-000000000000", []string{execID}); len(other) != 0 {
+		t.Errorf("foreign project lists evidence: %+v", other)
+	}
+	// Sweeps: never "unlinked" (§6.4 would page for it otherwise); expired by retention.
+	e.backdate(a.ID, "created_at", -2*time.Hour)
+	if linked, overdue, err := e.svc.LinkPending(ctx); err != nil || linked != 0 || overdue != 0 {
+		t.Errorf("LinkPending saw evidence: linked=%d overdue=%d err=%v", linked, overdue, err)
+	}
+	e.backdate(a.ID, "expires_at", -400*24*time.Hour)
+	if n, err := e.svc.ExpireRetention(ctx); err != nil || n != 1 {
+		t.Errorf("ExpireRetention: %d %v", n, err)
+	}
+	if got, _ := e.svc.Get(ctx, e.projectA, a.ID); got.Status != artifact.StatusExpired || e.store.Exists(a.StorageKey) {
+		t.Errorf("after retention: %+v exists=%v", got, e.store.Exists(a.StorageKey))
+	}
+	if byExec, _ := e.svc.ListEvidence(ctx, e.projectA, []string{execID}); len(byExec[execID]) != 1 {
+		t.Errorf("expired evidence still listed: %+v", byExec)
+	}
+}

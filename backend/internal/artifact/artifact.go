@@ -30,6 +30,11 @@ const (
 	KindHAR        Kind = "har"
 	KindLog        Kind = "log"
 	KindAttachment Kind = "attachment"
+	// KindManualEvidence is §6.8.2's addition (migration 0014): what a
+	// person attaches to a manual execution. It has no run, clientTestId or
+	// attempt, and it is written by the api itself (PutEvidence), never
+	// declared by a reporter.
+	KindManualEvidence Kind = "manual_evidence"
 )
 
 // Caps is §10.4, bytes per kind, enforced at declare and again at
@@ -41,13 +46,19 @@ var Caps = map[Kind]int64{
 	KindHAR:        20 << 20,
 	KindLog:        10 << 20,
 	KindAttachment: 10 << 20,
+	// [ASSUMPTION] same cap as video: a hand-recorded clip is the largest
+	// thing a tester attaches; §10.4 has no row for this kind yet.
+	KindManualEvidence: 20 << 20,
 }
 
-// RetentionDays is §10.4 by plan. An unknown plan gets free.
+// RetentionDays is §10.4 by plan. An unknown plan gets free. Manual
+// evidence outlives run artifacts [ASSUMPTION]: it backs a release decision
+// (§6.8.4) and the question "what did you check before shipping" comes
+// months later, not days.
 var RetentionDays = map[string]map[Kind]int{
-	"free":     {KindScreenshot: 14, KindVideo: 7, KindTrace: 7, KindHAR: 7, KindLog: 14, KindAttachment: 14},
-	"team":     {KindScreenshot: 30, KindVideo: 14, KindTrace: 14, KindHAR: 14, KindLog: 30, KindAttachment: 30},
-	"business": {KindScreenshot: 90, KindVideo: 30, KindTrace: 30, KindHAR: 30, KindLog: 90, KindAttachment: 90},
+	"free":     {KindScreenshot: 14, KindVideo: 7, KindTrace: 7, KindHAR: 7, KindLog: 14, KindAttachment: 14, KindManualEvidence: 90},
+	"team":     {KindScreenshot: 30, KindVideo: 14, KindTrace: 14, KindHAR: 14, KindLog: 30, KindAttachment: 30, KindManualEvidence: 365},
+	"business": {KindScreenshot: 90, KindVideo: 30, KindTrace: 30, KindHAR: 30, KindLog: 90, KindAttachment: 90, KindManualEvidence: 365},
 }
 
 // Protocol constants (§7.7).
@@ -77,6 +88,7 @@ type Artifact struct {
 	ProjectID       string
 	RunID           string
 	AttemptID       string // "" until linked
+	ExecutionID     string // manual_evidence only: the ManualExecution it belongs to
 	ClientTestID    string
 	OccurrenceIndex int
 	Attempt         int
@@ -110,6 +122,18 @@ type Declare struct {
 	ContentType     string
 	SizeBytes       int64
 	SHA256          string
+}
+
+// Evidence is the api-side counterpart of Declare for manual_evidence
+// (§6.8.2): the bytes come with the metadata, over the session, and the
+// service hashes and stores them itself. ExecutionID was resolved through
+// testmgmt's contract by the caller — this module never reads that table.
+type Evidence struct {
+	ProjectID   string
+	ExecutionID string
+	Plan        string // organization plan id, for retention
+	Name        string
+	ContentType string
 }
 
 // Upload is what the reporter needs to move bytes. Exactly one of Put or
@@ -204,6 +228,16 @@ type Service interface {
 	Get(ctx context.Context, projectID, artifactID string) (Artifact, error)
 	ListByRun(ctx context.Context, projectID, runID string) ([]Artifact, error)
 
+	// PutEvidence stores body as a verified manual_evidence artifact in one
+	// call: cap and content-type policy first (the declared type must agree
+	// with what the bytes sniff as, §11.5), then the object, then the row.
+	// Over the cap is *TooLargeError; a store failure is ErrStore and
+	// leaves nothing behind.
+	PutEvidence(ctx context.Context, in Evidence, body []byte) (Artifact, error)
+	// ListEvidence returns the verified evidence of each execution, oldest
+	// first, keyed by execution id; executions without any are absent.
+	ListEvidence(ctx context.Context, projectID string, executionIDs []string) (map[string][]Artifact, error)
+
 	// LinkPending attaches unlinked artifacts to attempts that have since
 	// arrived; returns how many it linked and how many remain unlinked
 	// longer than UnlinkedAlertAfter (§6.4).
@@ -214,8 +248,10 @@ type Service interface {
 	AbortAbandoned(ctx context.Context) (int, error)
 }
 
-// ValidKind reports whether k is in the §7.7 enum.
-func ValidKind(k Kind) bool { _, ok := Caps[k]; return ok }
+// ValidKind reports whether k is in the §7.7 enum — what a reporter may
+// declare. manual_evidence is in Caps but not here: it only enters through
+// PutEvidence.
+func ValidKind(k Kind) bool { _, ok := Caps[k]; return ok && k != KindManualEvidence }
 
 // AllowedContentType is the content-type policy (§7.7, §11.5): what a
 // kind may be stored as. Attachments are open except for types a browser
@@ -232,6 +268,14 @@ func AllowedContentType(k Kind, ct string) bool {
 		return ct == "application/json"
 	case KindLog:
 		return ct == "text/plain" || ct == "application/gzip"
+	case KindManualEvidence:
+		// What a tester captures: an image, a clip, a PDF export, a note.
+		// Every one of these is a type the api sniffs before storing.
+		switch ct {
+		case "image/png", "image/webp", "image/jpeg", "video/webm", "video/mp4", "application/pdf", "text/plain":
+			return true
+		}
+		return false
 	case KindAttachment:
 		return ct != "" && ct != "text/html" && ct != "image/svg+xml" && ct != "application/javascript" && ct != "text/javascript"
 	}

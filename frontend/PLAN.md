@@ -50,9 +50,11 @@ draft was removed on 2026-09-18.
   executions, releases with the server-side quality gate and the human
   decision. Routes under `p/:project/{cases,requirements,plans,releases}`,
   repository `features/testmgmt/testmgmtRepository.ts`, vocabularies in
-  `features/testmgmt/enums.ts`.
-- Last reviewed: 2026-09-21.
-- Latest verification: typecheck, 32 unit tests, production build + bundle gate
+  `features/testmgmt/enums.ts`. Since 2026-09-22 a manual execution can carry
+  evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
+  `manual_evidence` artifacts, shown as thumbnails/links per row.
+- Last reviewed: 2026-09-22.
+- Latest verification: typecheck, 33 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -253,6 +255,30 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-22 (P2 — manual evidence on test plans, §6.8.2)
+
+- `ApiClient.request`: a `FormData` body is sent as-is (multipart; the browser
+  sets the boundary and the client sets no `Content-Type`), CSRF header as
+  for any mutation; `timeoutMs` per request (an upload gets 120 s, not the
+  15 s default); 413 has a user message.
+- Repository: `Execution.evidence: Evidence[]` (tolerates its absence),
+  `attachEvidence(project, plan, execution, File)` → one `FormData` with a
+  `file` part, `evidenceContentUrl` (the shared artifact content route).
+- `PlanDetailPage`: per row with a verdict, an evidence strip (images as
+  48 px thumbnails from the content route, video/other as icon + name links,
+  all `target=_blank`), a paperclip that opens a hidden `<input type=file>`
+  bound to the server's accept list; disabled on a closed plan or a row
+  without a verdict. Client-side 20 MB guard; a server 400 (sniff mismatch /
+  type outside the policy) is reworded inline for the person; after a
+  successful upload the plan is refetched, not spliced.
+- Fixture: exec-2 carries one text evidence; `POST …/evidence` answers a PNG
+  ref, so `dev:fixture` renders both chip kinds.
+- `scripts/live-check.mjs`: new step 14 — new plan, verdict `failed`, a real
+  1×1 PNG through the hidden picker, asserts the request was multipart and
+  the thumbnail decoded (`naturalWidth`), screenshot `live-plan-evidence.png`.
+- Tests: `tests/testmgmt.test.ts` + 1 (FormData body, no JSON content type,
+  CSRF, decode on the plan, absence of `evidence` decodes to `[]`).
+
 ### 2026-09-21 (P2 — Test Management screens, §6.8)
 
 - `ApiClient.request` gained `method: PATCH | DELETE`; every non-GET carries
@@ -451,10 +477,10 @@ All commands below ran from `frontend/`; dates per row.
 
 | Check | Result |
 | --- | --- |
-| `npm run build` (includes typecheck + bundle gate) | PASS 2026-09-21 with the Test Management screens; initial JS 46.6 KiB gzip, 18 lazy modules, no fixture markers |
-| `npm run test:unit` | PASS; 32 tests in 10 files (2026-09-21: + `tests/testmgmt.test.ts` — decoders, PATCH/DELETE with CSRF, 403/409/404 mapping, CI URL, CSV import) |
-| `npx prettier --check "src/**/*.{vue,ts,css}"` | PASS (2026-09-21) |
-| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, `npm run example` runs | PASS 2026-09-21; **13 steps** (the new one creates a case, links it to a real identity, opens a release and evaluates the gate — verdict `blocked` on the seed data, five rules rendered), 58 `/v1` calls all 2xx except the deliberate 401, console clean |
+| `npm run build` (includes typecheck + bundle gate) | PASS 2026-09-22 with manual evidence on the plan page; initial JS 46.8 KiB gzip, 18 lazy modules, no fixture markers |
+| `npm run test:unit` | PASS; 33 tests in 10 files (2026-09-22: + evidence upload as FormData and its decoding; 2026-09-21: `tests/testmgmt.test.ts` — decoders, PATCH/DELETE with CSRF, 403/409/404 mapping, CI URL, CSV import) |
+| `npx prettier --check "src/**/*.{vue,ts,css}"` | PASS (2026-09-22) |
+| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, `npm run example` runs | PASS 2026-09-22; **14 steps** (step 14: plan → verdict → PNG evidence uploaded as multipart → thumbnail decoded from `…/artifacts/{id}/content`; 68 `/v1` calls all 2xx except the deliberate 401). Earlier: PASS 2026-09-21; 13 steps (the new one creates a case, links it to a real identity, opens a release and evaluates the gate — verdict `blocked` on the seed data, five rules rendered), 58 `/v1` calls all 2xx except the deliberate 401, console clean |
 | `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
 | `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
 | `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |

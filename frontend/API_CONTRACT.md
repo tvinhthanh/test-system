@@ -180,7 +180,17 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
   `executions`: latest per case), `PATCH /test-plans/{id}` `{status}`,
   `POST /test-plans/{id}/executions` `{testCaseId, status
   (passed|failed|blocked|skipped), note?, executedAt?}` → 201; `409` on a
-  closed plan.
+  closed plan. Every execution carries `evidence: [{id, name, kind
+  ("manual_evidence"), contentType, sizeBytes, expiresAt}]`.
+- Evidence (§6.8.2): `POST /test-plans/{id}/executions/{executionId}/evidence`
+  as `multipart/form-data` with one `file` part (the only non-JSON body in
+  the contract; the client sends `FormData` and no `Content-Type` of its
+  own) → `201` with the evidence ref. Accepted: `image/png|webp|jpeg`,
+  `video/webm|mp4`, `application/pdf`, `text/plain`; the server sniffs the
+  bytes and answers `400 INVALID_PAYLOAD` when they do not match the
+  declared type, `413 ARTIFACT_TOO_LARGE` over 20 MiB, `409` on a closed
+  plan. Bytes come back through `GET /artifacts/{id}/content` like any
+  artifact (`inline` for images/video/text).
 - Releases: `GET|POST /releases`, `GET /releases/{id}`,
   `POST /releases/{id}/evaluate` → release with `gate: {verdict
   (approved|warn|blocked|no_evidence), evaluatedAt, runId, branch,

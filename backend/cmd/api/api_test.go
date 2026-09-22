@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"testing"
@@ -73,6 +75,37 @@ func (c *client) do(method, path string, body any, headers map[string]string) re
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	out := resp{code: res.StatusCode, raw: string(raw)}
+	_ = json.Unmarshal(raw, &out.body)
+	return out
+}
+
+// upload posts one file as multipart/form-data, the way a browser submits
+// a FormData with a File: Origin + CSRF as for any mutation, the part's
+// Content-Type set from File.type.
+func (c *client) upload(path, field, filename, contentType string, data []byte) resp {
+	c.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, field, filename))
+	h.Set("Content-Type", contentType)
+	part, _ := mw.CreatePart(h)
+	_, _ = part.Write(data)
+	_ = mw.Close()
+	req, _ := http.NewRequest("POST", c.srv.URL+path, &buf)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Origin", origin)
+	if c.csrf != "" {
+		req.Header.Set(authz.CSRFHeader, c.csrf)
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -591,11 +624,67 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Fatalf("plan: %d %s", planR.code, planR.raw)
 	}
 	planID := planR.body["id"].(string)
-	if r := web.post(base+"/test-plans/"+planID+"/executions", map[string]any{"testCaseId": caseID, "status": "passed", "note": "ok on staging"}); r.code != 201 || r.body["executedBy"] != "alice@example.com" {
-		t.Errorf("execution: %d %s", r.code, r.raw)
+	execR := web.post(base+"/test-plans/"+planID+"/executions", map[string]any{"testCaseId": caseID, "status": "passed", "note": "ok on staging"})
+	if execR.code != 201 || execR.body["executedBy"] != "alice@example.com" || len(execR.body["evidence"].([]any)) != 0 {
+		t.Errorf("execution: %d %s", execR.code, execR.raw)
 	}
+	execID := execR.body["id"].(string)
 	if r := web.get(base + "/test-plans/" + planID); r.body["status"] != "active" || len(r.body["executions"].([]any)) != 1 {
 		t.Errorf("plan after execution: %s", r.raw)
+	}
+	// Evidence (§6.8.2): a member attaches a screenshot to the execution; it
+	// is an Artifact, listed on the plan and served by the content route with
+	// the §11.5 headers. The wrong bytes, a viewer and a closed plan are refused.
+	shot := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{7}, 100)...)
+	evPath := base + "/test-plans/" + planID + "/executions/" + execID + "/evidence"
+	evidence := web.upload(evPath, "file", "checkout.png", "image/png", shot)
+	if evidence.code != 201 || evidence.body["kind"] != "manual_evidence" || evidence.body["contentType"] != "image/png" || evidence.body["sizeBytes"] != float64(len(shot)) || evidence.body["name"] != "checkout.png" {
+		t.Fatalf("evidence: %d %s", evidence.code, evidence.raw)
+	}
+	if r := web.upload(evPath, "file", "page.png", "image/png", []byte("<html><script>1</script></html>")); r.code != 400 || r.errCode() != "INVALID_PAYLOAD" {
+		t.Errorf("html as png: %d %s", r.code, r.raw)
+	}
+	if r := web.upload(evPath, "notes", "n.txt", "text/plain", []byte("no file part")); r.code != 400 {
+		t.Errorf("missing file part: %d %s", r.code, r.raw)
+	}
+	if r := web.post(evPath, map[string]any{}); r.code != 400 {
+		t.Errorf("json instead of multipart: %d %s", r.code, r.raw)
+	}
+	if r := bobc.upload(evPath, "file", "b.png", "image/png", shot); r.code != 404 {
+		t.Errorf("bob attaching to checkout's plan: %d", r.code)
+	}
+	if r := web.get(base + "/test-plans/" + planID); r.code != 200 {
+		t.Errorf("plan with evidence: %d", r.code)
+	} else {
+		evs := r.body["executions"].([]any)[0].(map[string]any)["evidence"].([]any)
+		if len(evs) != 1 || evs[0].(map[string]any)["id"] != evidence.body["id"] {
+			t.Errorf("plan evidence: %s", r.raw)
+		}
+	}
+	{
+		req, _ := http.NewRequest("GET", srv.URL+base+"/artifacts/"+evidence.body["id"].(string)+"/content", nil)
+		res, err := web.http.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 200 || !bytes.Equal(got, shot) || res.Header.Get("Content-Type") != "image/png" ||
+			!strings.HasPrefix(res.Header.Get("Content-Disposition"), "inline;") || res.Header.Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("evidence content: %d %v", res.StatusCode, res.Header)
+		}
+		if r := bobc.get(base + "/artifacts/" + evidence.body["id"].(string) + "/content"); r.code != 404 {
+			t.Errorf("bob reading checkout's evidence: %d", r.code)
+		}
+	}
+	if r := web.do("PATCH", base+"/test-plans/"+planID, map[string]any{"status": "closed"}, nil); r.code != 200 {
+		t.Fatalf("close plan: %d %s", r.code, r.raw)
+	}
+	if r := web.upload(evPath, "file", "late.png", "image/png", shot); r.code != 409 {
+		t.Errorf("evidence on a closed plan: %d %s", r.code, r.raw)
+	}
+	if r := web.do("PATCH", base+"/test-plans/"+planID, map[string]any{"status": "active"}, nil); r.code != 200 {
+		t.Fatalf("reopen plan: %d %s", r.code, r.raw)
 	}
 	relR := web.post(base+"/releases", map[string]any{"version": "2026.09.21"})
 	if relR.code != 201 || relR.body["status"] != "open" || relR.body["gate"] != nil {

@@ -129,9 +129,10 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	caseA := a.user.post(baseA+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true}).body["id"].(string)
 	linkA := a.user.post(baseA+"/test-cases/"+caseA+"/links", map[string]any{"stableTestId": identityA}).body["id"].(string)
 	planA := a.user.post(baseA+"/test-plans", map[string]any{"name": "Sprint 12"}).body["id"].(string)
+	execA := a.user.post(baseA+"/test-plans/"+planA+"/executions", map[string]any{"testCaseId": caseA, "status": "passed"}).body["id"].(string)
 	releaseA := a.user.post(baseA+"/releases", map[string]any{"version": "2026.09.21"}).body["id"].(string)
-	if reqA == "" || caseA == "" || linkA == "" || planA == "" || releaseA == "" {
-		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q", reqA, caseA, linkA, planA, releaseA)
+	if reqA == "" || caseA == "" || linkA == "" || planA == "" || execA == "" || releaseA == "" {
+		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q %q", reqA, caseA, linkA, planA, execA, releaseA)
 	}
 
 	// Org A's ids by path parameter name. A parameter this map does not
@@ -139,7 +140,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	foreign := map[string]string{
 		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
 		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
-		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "releaseId": releaseA,
+		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -163,9 +164,12 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/test-plans":                     map[string]any{"name": "Walk"},
 		"PATCH /v1/projects/{projectId}/test-plans/{planId}":           map[string]any{"status": "active"},
 		"POST /v1/projects/{projectId}/test-plans/{planId}/executions": map[string]any{"testCaseId": caseA, "status": "passed"},
-		"POST /v1/projects/{projectId}/releases":                       map[string]any{"version": "walk"},
-		"POST /v1/projects/{projectId}/releases/{releaseId}/evaluate":  map[string]any{},
-		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":  map[string]any{"status": "approved"},
+		// Evidence is multipart; the tenant check runs before the body is
+		// read, so a JSON body is enough to prove the refusal is not a 400.
+		"POST /v1/projects/{projectId}/test-plans/{planId}/executions/{executionId}/evidence": map[string]any{},
+		"POST /v1/projects/{projectId}/releases":                                              map[string]any{"version": "walk"},
+		"POST /v1/projects/{projectId}/releases/{releaseId}/evaluate":                         map[string]any{},
+		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":                         map[string]any{"status": "approved"},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.
