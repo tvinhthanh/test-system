@@ -125,7 +125,7 @@ func main() {
 		err = az.VerifyEmail(ctx, *id)
 		out = map[string]string{"user": *id, "email": "verified"}
 	case "role grant":
-		user, level, scope, role := fs.String("user", "", "user id"), fs.String("level", "project", "organization|workspace|project"), fs.String("scope", "", "scope id"), fs.String("role", "", "admin|member|viewer")
+		user, level, scope, role := fs.String("user", "", "user id"), fs.String("level", "project", "organization|workspace|project"), fs.String("scope", "", "scope id"), fs.String("role", "", "org_owner|org_admin (organization) · workspace_admin (workspace) · maintainer|member|viewer (project) — §11.3.1")
 		parse(fs)
 		out, err = az.GrantRole(ctx, *user, authz.ScopeRef{Level: authz.Level(*level), ID: *scope}, authz.Role(*role))
 	case "token issue":

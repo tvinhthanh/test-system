@@ -164,6 +164,9 @@ type projectDTO struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	WorkspaceName string `json:"workspaceName"`
+	// Actions the caller may perform here (§11.3.2 matrix), so the UI hides
+	// what it must not offer; the server still checks every call.
+	Actions []authz.Action `json:"actions"`
 }
 
 // projects: the projects a user may read, via memberships at any level,
@@ -179,7 +182,11 @@ func (d *dashboard) projects(w http.ResponseWriter, r *http.Request) {
 		d.internal(w, r, err)
 		return
 	}
-	seen := map[tenancy.ProjectID]bool{}
+	// Each membership reaches the projects under its node, so the roles a
+	// project is reached through are exactly the chain Authorize walks —
+	// no second query per project.
+	index := map[tenancy.ProjectID]int{}
+	roles := map[tenancy.ProjectID][]authz.Role{}
 	var all []projectDTO
 	for _, m := range ms {
 		projects, err := d.tenancy.ListProjects(r.Context(), string(m.Scope.Level), m.Scope.ID)
@@ -188,12 +195,15 @@ func (d *dashboard) projects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, pr := range projects {
-			if seen[pr.ID] {
-				continue
+			if _, ok := index[pr.ID]; !ok {
+				index[pr.ID] = len(all)
+				all = append(all, projectDTO{ID: string(pr.ID), Name: pr.Name, WorkspaceName: pr.WorkspaceName})
 			}
-			seen[pr.ID] = true
-			all = append(all, projectDTO{ID: string(pr.ID), Name: pr.Name, WorkspaceName: pr.WorkspaceName})
+			roles[pr.ID] = append(roles[pr.ID], m.Role)
 		}
+	}
+	for id, i := range index {
+		all[i].Actions = authz.ActionsFor(roles[id])
 	}
 	sort.Slice(all, func(i, j int) bool {
 		if all[i].Name != all[j].Name {

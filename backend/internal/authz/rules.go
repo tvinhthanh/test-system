@@ -1,38 +1,93 @@
 package authz
 
-// The matrix §11.3.2 with the six columns folded to three (§4.4). One place,
-// data not code, so a reviewer can diff it against the SPEC table.
+// The matrix §11.3.2, six columns, one row per action. Data, not code, so a
+// reviewer can diff it against the SPEC table line by line. Rows are not a
+// ladder: "delete run/artifact data" is owner/admin/maintainer but not
+// workspace_admin, so a role rank would misstate the table — each row lists
+// exactly who may.
 
-// minRole is the weakest role that may perform an action. Actions absent
-// here are not for humans at all (ingest).
-var minRole = map[Action]Role{
-	ActionView:             RoleViewer,
-	ActionTriage:           RoleMember,
-	ActionIdentityMerge:    RoleAdmin,
-	ActionTokenManage:      RoleAdmin,
-	ActionProjectConfigure: RoleAdmin,
-	ActionProjectManage:    RoleAdmin,
-	ActionMemberManage:     RoleAdmin,
-	ActionOrgManage:        RoleAdmin,
-	ActionDataDelete:       RoleAdmin,
-	ActionTestmgmtWrite:    RoleMember,
-	ActionReleaseDecide:    RoleAdmin,
+var (
+	everyone     = []Role{RoleOrgOwner, RoleOrgAdmin, RoleWorkspaceAdmin, RoleMaintainer, RoleMember, RoleViewer}
+	upToMember   = []Role{RoleOrgOwner, RoleOrgAdmin, RoleWorkspaceAdmin, RoleMaintainer, RoleMember}
+	upToMaint    = []Role{RoleOrgOwner, RoleOrgAdmin, RoleWorkspaceAdmin, RoleMaintainer}
+	adminsOnly   = []Role{RoleOrgOwner, RoleOrgAdmin, RoleWorkspaceAdmin}
+	ownerOnly    = []Role{RoleOrgOwner}
+	dataDeleters = []Role{RoleOrgOwner, RoleOrgAdmin, RoleMaintainer} // ws_admin manages, does not destroy
+)
+
+// matrix is §11.3.2 row by row. Actions absent here are not for humans at
+// all (ingest).
+var matrix = map[Action][]Role{
+	ActionView:             everyone,
+	ActionTriage:           upToMember,
+	ActionIdentityMerge:    upToMaint,
+	ActionTokenManage:      upToMaint,
+	ActionProjectConfigure: upToMaint,
+	ActionProjectManage:    adminsOnly,
+	ActionMemberManage:     adminsOnly,
+	ActionOrgManage:        ownerOnly,
+	ActionDataDelete:       dataDeleters,
+	ActionTestmgmtWrite:    upToMember,
+	ActionReleaseDecide:    upToMaint,
 }
 
-var roleRank = map[Role]int{RoleViewer: 1, RoleMember: 2, RoleAdmin: 3}
-
-// roleAllows reports whether r is at least the role an action needs.
-func roleAllows(r Role, a Action) bool {
-	need, ok := minRole[a]
-	return ok && roleRank[r] >= roleRank[need]
-}
-
-// stronger returns the higher-ranked of two roles; "" ranks below all.
-func stronger(a, b Role) Role {
-	if roleRank[b] > roleRank[a] {
-		return b
+// allowed is matrix as a lookup.
+var allowed = func() map[Action]map[Role]bool {
+	out := map[Action]map[Role]bool{}
+	for a, roles := range matrix {
+		out[a] = map[Role]bool{}
+		for _, r := range roles {
+			out[a][r] = true
+		}
 	}
-	return a
+	return out
+}()
+
+// HumanActions is every action of the matrix, in SPEC order — what
+// ActionsFor enumerates and what the projects list hands the UI.
+var HumanActions = []Action{
+	ActionView, ActionTriage, ActionIdentityMerge, ActionTokenManage, ActionProjectConfigure,
+	ActionProjectManage, ActionMemberManage, ActionOrgManage, ActionDataDelete,
+	ActionTestmgmtWrite, ActionReleaseDecide,
+}
+
+// roleAllows reports whether r may perform a.
+func roleAllows(r Role, a Action) bool { return allowed[a][r] }
+
+// anyAllows reports whether at least one of the roles may perform a — a
+// person holding several memberships on the chain acts with the union.
+func anyAllows(roles []Role, a Action) bool {
+	for _, r := range roles {
+		if roleAllows(r, a) {
+			return true
+		}
+	}
+	return false
+}
+
+// ActionsFor is the actions a set of held roles unlocks, in HumanActions
+// order — the projects list answers this per project so the UI hides what
+// the person may not do (§11.3.2 "hành động không có quyền → ẩn nút").
+func ActionsFor(roles []Role) []Action {
+	out := make([]Action, 0, len(HumanActions))
+	for _, a := range HumanActions {
+		if anyAllows(roles, a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// RoleLevel is §11.3.1 "Gán ở tầng": the one level a role is attached at.
+// Inheritance is downwards only, so an org role covers every project and a
+// project role covers nothing above it.
+var RoleLevel = map[Role]Level{
+	RoleOrgOwner:       LevelOrganization,
+	RoleOrgAdmin:       LevelOrganization,
+	RoleWorkspaceAdmin: LevelWorkspace,
+	RoleMaintainer:     LevelProject,
+	RoleMember:         LevelProject,
+	RoleViewer:         LevelProject,
 }
 
 // permissionActions is what a token permission unlocks (§8.8). Tokens never
@@ -50,8 +105,6 @@ func permissionsAllow(perms []Permission, a Action) bool {
 	}
 	return false
 }
-
-var validRoles = map[Role]bool{RoleAdmin: true, RoleMember: true, RoleViewer: true}
 
 var validPermissions = map[Permission]bool{PermProjectIngest: true, PermProjectRead: true}
 

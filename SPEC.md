@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.20 · **Ngày:** 22-09-2026 · **Trạng thái:** 12 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` từ 22-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
+> **Phiên bản:** v3.21 · **Ngày:** 22-09-2026 · **Trạng thái:** 12 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -131,6 +131,7 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 | Dashboard | §4.4 "dashboard v0" + bảng cắt/dời | ✅ Vue 3 (QĐ-9 sửa lần hai; giao diện Tailwind + shadcn-vue, sáng/tối, từ 21-09): sign-in, projects, runs, failure detail (attempt, error/stack, artifact: ảnh/video inline, `trace.zip` trong trace viewer tự host), triage, identity history, flaky. **Làm sớm hơn kế hoạch theo yêu cầu chủ dự án 18-09:** lát đầu màn hình EM (P1.5), Review Queue UI và Merge/Split/Undo UI (§4.4 xếp P2) — chi tiết ở §4.4 "Thực tế" | `frontend/PLAN.md`, `frontend/API_CONTRACT.md` |
 | Hợp đồng API | §11.6 API9 | ✅ `backend/deploy/openapi.yaml` (27 operation) là nguồn sự thật; test hai chiều route ↔ spec; Redocly lint trong CI | `docs/openapi-contract-reimplementation.md` |
 | Triển khai | §6.4, §11.5 | ✅ image distroless + compose (Postgres 17, migrate một lần, api, worker, Prometheus + alert §6.4, Caddy TLS, backup hằng ngày); CI 4 job: backend, reporter, frontend, e2e trên compose (reporter thật → api thật → UI thật) | `backend/deploy/README.md`, `.github/workflows/ci.yml` |
+| RBAC | §11.3, §4.4 "P2 mở rộng" | ✅ **22-09**: 6 role §11.3.1 (migration 0015 trải hàng P1-min), ma trận §11.3.2 là dữ liệu + test chép sáu cột, `authorize()` lấy hợp membership trên chuỗi, `GET /v1/projects` trả `actions[]` cho UI ẩn nút. Chưa: route quản lý member qua UI | `backend/internal/authz/rules.go`, `authz_test.go`, `cmd/api/api_test.go` |
 | Gate kỹ thuật | §14 | T0 T1 T3 T4 ✅ · T2 một phần · T5 một phần — cột "Trạng thái" §14.1 | `backend/GATES.md` |
 | Gate sản phẩm | §4.5, §5.8 | Không đổi: Gate-0 **26-10-2026**. Code không được nhắc tới ở đó (QĐ-11 #2) | §5.8 |
 
@@ -149,7 +150,7 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 
 Cross-tenant walk (§14.3) nay đi 53 route với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
 
-**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA và RBAC 6 role (P2 theo §4.4, chưa tới); JUnit backfill; ROI (chờ baseline); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
+**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); OAuth/MFA (P2 theo §4.4, chưa tới); JUnit backfill (importer thứ hai — luật §6.8.5: chỉ khi có khách nêu tên); ROI (chờ baseline); export/import CSV cho review (không cần nữa vì UI đã có). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), Postgres TLS cho `APP_ENV=prod`, pentest trước khách trả tiền đầu tiên (§11.6).
 
 ---
 
@@ -569,7 +570,7 @@ Cắt về đúng lõi chứng minh giá trị. Ước lượng sau cắt: **4�
 | --------------------------------- | ------------------------------------------------- | ---------- |
 | OAuth Google/GitHub               | Chỉ email + password                              | P2         |
 | MFA TOTP                          | —                                                 | P2         |
-| RBAC 6 role                       | 3 role: `admin` / `member` / `viewer`             | P2 mở rộng |
+| RBAC 6 role                       | 3 role: `admin` / `member` / `viewer`             | P2 mở rộng — **đã làm 22-09** |
 | Merge/Split **UI**                | Script vận hành maintainer chạy tay, có ghi audit | P2         |
 | Review Queue **UI**               | Export CSV + import quyết định                    | P2         |
 | Màn hình EM                       | —                                                 | P1.5       |
@@ -582,7 +583,7 @@ Cắt về đúng lõi chứng minh giá trị. Ước lượng sau cắt: **4�
 | Dòng | Đã làm | Ghi chú |
 |---|---|---|
 | OAuth, MFA | chưa — đúng kế hoạch P2 | login email + password (argon2id), session cookie + CSRF (§11.2) |
-| RBAC | 3 role `admin` / `member` / `viewer` | một `authorize()` (§11.3.3); `cmd/api/tenant_walk_test.go` gọi mọi route bằng resource của tenant khác |
+| RBAC | **6 role §11.3.1 từ 22-09** (migration 0015: `admin` cũ → `org_owner` ở org / `workspace_admin` ở workspace / `maintainer` ở project; `member`/`viewer` trên project) | một `authorize()` (§11.3.3), ma trận §11.3.2 là bảng dữ liệu trong `authz/rules.go` và test `TestMatrixMatchesSpec` chép nguyên sáu cột; `GET /v1/projects` trả `actions[]` cho UI ẩn nút; `cmd/api/tenant_walk_test.go` gọi mọi route bằng resource của tenant khác |
 | Merge/Split | **làm sớm** — HTTP admin-only (`merge`, `undo-merge`, `split`) + UI trong lịch sử identity, ghi `identity_audit` | không có script/CSV; xem N60 |
 | Review Queue | **service có từ T0** (bắt buộc — N60); UI quyết định `merged` / `kept` làm sớm 18-09 theo yêu cầu chủ dự án | export/import CSV không làm vì UI đã có |
 | Màn hình EM | **lát đầu** 18-09 — KPI triage cửa sổ 30/90 ngày + trend theo tuần theo category §8.7 | phần còn lại của §2.5 vẫn P1.5 |
@@ -2304,6 +2305,8 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 - **Một hàm ****`authorize(principal, resource, action)`**** duy nhất**, gọi ở service layer, walk-up cây tổ chức. Không endpoint nào tự viết if-check riêng — đây là cách duy nhất để "không endpoint nào quên được".
 - Mọi query dữ liệu mang **điều kiện tenant trong chính câu query** (`WHERE project_id IN (accessible)`), không lọc sau ở application. Chống BOLA tận gốc.
 - **Test bắt buộc trong CI:** user A gọi từng endpoint với resource của org B → 100% phải `403`/`404`. Bộ test này là **gate release**, không phải nice-to-have.
+
+**Như đã cài (22-09, migration 0015):** sáu role đúng bảng §11.3.1, mỗi role gắn ở **một** tầng (`RoleLevel`; `GrantRole` và CHECK trong DB cùng từ chối gán sai tầng) và kế thừa xuống. Ma trận §11.3.2 là bảng dữ liệu `authz/rules.go` — **không phải bậc thang**: hàng "xóa dữ liệu run/artifact" cho maintainer mà không cho ws_admin, nên `authorize()` lấy **hợp** của mọi membership trên chuỗi org → workspace → project thay vì "role mạnh nhất". `TestMatrixMatchesSpec` chép nguyên sáu cột. Hàng cũ của P1-min: `admin` ở org → `org_owner` (P1-min org admin có `org.manage`, nay chỉ owner có), ở workspace → `workspace_admin`, ở project → `maintainer`; `member`/`viewer` gán trên org/workspace được **trải** thành một hàng mỗi project bên dưới rồi xóa (chạy thật trên DB có dữ liệu 22-09). "Ẩn nút": `GET /v1/projects` trả `actions[]` tính từ chính các membership đã đi qua để liệt kê project (không thêm query), UI dựa vào đó; server vẫn kiểm mọi call. Chưa có: route quản lý member (mời/thu hồi qua UI — vẫn qua `cmd/admin`), custom role (P6).
 
 ### 11.4 Vòng đời ingest token
 

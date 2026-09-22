@@ -27,16 +27,23 @@ const (
 	LevelEnvironment  Level = "environment" // tokens only; memberships stop at project
 )
 
-// Role is the P1-min set (§4.4): six roles of §11.3.1 collapsed to three.
-// admin absorbs owner/admin/ws_admin/maintainer; member and viewer are as
-// in the matrix §11.3.2.
+// Role is §11.3.1: six flat roles, each attached at exactly one level of
+// the tree (RoleLevel) and inherited downwards. P1-min folded them to
+// admin/member/viewer; migration 0015 unfolded the stored rows (§4.4 "RBAC
+// 6 role — P2 mở rộng"). Custom roles are P6.
 type Role string
 
 const (
-	RoleAdmin  Role = "admin"
-	RoleMember Role = "member"
-	RoleViewer Role = "viewer"
+	RoleOrgOwner       Role = "org_owner"       // organization: billing, delete org, manage owners
+	RoleOrgAdmin       Role = "org_admin"       // organization: workspaces, members, tokens org-wide
+	RoleWorkspaceAdmin Role = "workspace_admin" // workspace: projects + members in it
+	RoleMaintainer     Role = "maintainer"      // project: tokens, retention, identity merge, data delete
+	RoleMember         Role = "member"          // project: triage, test management, everything readable
+	RoleViewer         Role = "viewer"          // project: read only
 )
+
+// Roles lists every role, strongest first — for CLIs and docs.
+var Roles = []Role{RoleOrgOwner, RoleOrgAdmin, RoleWorkspaceAdmin, RoleMaintainer, RoleMember, RoleViewer}
 
 // Permission is what an API token carries (§8.8). Tokens never get roles.
 type Permission string
@@ -211,6 +218,10 @@ type Service interface {
 	// ErrNoAccess. The caller must have validated that the Resource ids are
 	// real and related; authz only asks "may this principal act here".
 	Authorize(ctx context.Context, p Principal, r Resource, a Action) error
+	// Roles returns the roles a user holds on the chain of r (one query,
+	// the same walk-up as Authorize) — for the projects list, which turns
+	// them into the actions the UI may show (§11.3.2 "ẩn nút").
+	Roles(ctx context.Context, p Principal, r Resource) ([]Role, error)
 
 	// Authenticate turns a bearer token into a Principal, or
 	// ErrUnauthenticated. It updates last_used_at at most every 5 minutes.

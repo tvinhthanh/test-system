@@ -95,11 +95,23 @@ func TestRejectsBeforeRoundTrip(t *testing.T) {
 	if _, err := svc.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{authz.LevelProject, p}, Permissions: []authz.Permission{authz.PermProjectIngest}, Name: "ci", ExpiresAt: time.Now().Add(-time.Hour)}); !errors.Is(err, authz.ErrInvalid) {
 		t.Errorf("past expiry: %v", err)
 	}
-	if _, err := svc.GrantRole(ctx, p, authz.ScopeRef{authz.LevelEnvironment, p}, authz.RoleAdmin); !errors.Is(err, authz.ErrInvalid) {
+	if _, err := svc.GrantRole(ctx, p, authz.ScopeRef{authz.LevelEnvironment, p}, authz.RoleMaintainer); !errors.Is(err, authz.ErrInvalid) {
 		t.Errorf("membership on environment: %v", err)
 	}
-	if _, err := svc.GrantRole(ctx, p, authz.ScopeRef{authz.LevelProject, p}, "owner"); !errors.Is(err, authz.ErrInvalid) {
-		t.Errorf("six-role name in a three-role system: %v", err)
+	if _, err := svc.GrantRole(ctx, p, authz.ScopeRef{authz.LevelProject, p}, "admin"); !errors.Is(err, authz.ErrInvalid) {
+		t.Errorf("retired P1-min role name: %v", err)
+	}
+	// §11.3.1 "Gán ở tầng": a role only attaches at its own level.
+	for _, bad := range []struct {
+		level authz.Level
+		role  authz.Role
+	}{
+		{authz.LevelProject, authz.RoleOrgOwner}, {authz.LevelProject, authz.RoleWorkspaceAdmin},
+		{authz.LevelWorkspace, authz.RoleMember}, {authz.LevelOrganization, authz.RoleMaintainer},
+	} {
+		if _, err := svc.GrantRole(ctx, p, authz.ScopeRef{bad.level, p}, bad.role); !errors.Is(err, authz.ErrInvalid) {
+			t.Errorf("%s at %s: %v, want invalid", bad.role, bad.level, err)
+		}
 	}
 	if _, err := svc.CreateUser(ctx, "not-an-email"); !errors.Is(err, authz.ErrInvalid) {
 		t.Errorf("bad email: %v", err)
@@ -255,20 +267,33 @@ func TestMembershipsAgainstPostgres(t *testing.T) {
 		t.Errorf("no membership: %v", err)
 	}
 
-	// Org-level admin inherits down to the project.
-	if _, err := svc.GrantRole(ctx, alice.ID, authz.ScopeRef{authz.LevelOrganization, org}, authz.RoleAdmin); err != nil {
+	// Org owner inherits down to the project and is the only one who may
+	// manage the org itself; an org admin is refused there (§11.3.2 row 8).
+	if _, err := svc.GrantRole(ctx, alice.ID, authz.ScopeRef{authz.LevelOrganization, org}, authz.RoleOrgOwner); err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range []authz.Action{authz.ActionView, authz.ActionTriage, authz.ActionIdentityMerge, authz.ActionTokenManage, authz.ActionProjectManage} {
+	for _, a := range []authz.Action{authz.ActionView, authz.ActionTriage, authz.ActionIdentityMerge, authz.ActionTokenManage, authz.ActionProjectManage, authz.ActionDataDelete, authz.ActionReleaseDecide} {
 		if err := svc.Authorize(ctx, as(alice), res, a); err != nil {
-			t.Errorf("org admin %s on project: %v", a, err)
+			t.Errorf("org owner %s on project: %v", a, err)
 		}
 	}
 	if err := svc.Authorize(ctx, as(alice), orgOnly, authz.ActionOrgManage); err != nil {
-		t.Errorf("org admin on org itself: %v", err)
+		t.Errorf("org owner on org itself: %v", err)
 	}
 	if err := svc.Authorize(ctx, as(alice), res, authz.ActionIngest); !errors.Is(err, authz.ErrForbidden) {
 		t.Errorf("humans never ingest: %v", err)
+	}
+	if _, err := svc.GrantRole(ctx, alice.ID, authz.ScopeRef{authz.LevelOrganization, org}, authz.RoleOrgAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Authorize(ctx, as(alice), orgOnly, authz.ActionOrgManage); !errors.Is(err, authz.ErrForbidden) {
+		t.Errorf("org admin managing the org (billing, delete): %v, want forbidden", err)
+	}
+	if err := svc.Authorize(ctx, as(alice), res, authz.ActionMemberManage); err != nil {
+		t.Errorf("org admin managing members: %v", err)
+	}
+	if roles, err := svc.Roles(ctx, as(alice), res); err != nil || len(roles) != 1 || roles[0] != authz.RoleOrgAdmin {
+		t.Errorf("Roles(alice) = %v, %v", roles, err)
 	}
 
 	// Project viewer: sees, cannot triage; on the org itself has no standing.
@@ -290,22 +315,41 @@ func TestMembershipsAgainstPostgres(t *testing.T) {
 		t.Errorf("viewer on sibling project: %v, want no access", err)
 	}
 
-	// Re-granting changes the role; the strongest membership on the chain wins.
+	// Re-granting changes the role; memberships on the chain act as their union.
 	if _, err := svc.GrantRole(ctx, bob.ID, authz.ScopeRef{authz.LevelProject, proj}, authz.RoleMember); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Authorize(ctx, as(bob), res, authz.ActionTriage); err != nil {
 		t.Errorf("member triage after upgrade: %v", err)
 	}
-	if _, err := svc.GrantRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}, authz.RoleAdmin); err != nil {
+	if _, err := svc.GrantRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}, authz.RoleWorkspaceAdmin); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Authorize(ctx, as(bob), res, authz.ActionTokenManage); err != nil {
 		t.Errorf("workspace admin over project member: %v", err)
 	}
+	// The one non-ladder row: a workspace admin manages, does not destroy.
+	if err := svc.Authorize(ctx, as(bob), res, authz.ActionDataDelete); !errors.Is(err, authz.ErrForbidden) {
+		t.Errorf("workspace admin deleting run data: %v, want forbidden", err)
+	}
+	if _, err := svc.GrantRole(ctx, bob.ID, authz.ScopeRef{authz.LevelProject, proj}, authz.RoleMaintainer); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Authorize(ctx, as(bob), res, authz.ActionDataDelete); err != nil {
+		t.Errorf("maintainer deleting run data: %v", err)
+	}
+	if err := svc.Authorize(ctx, as(bob), res, authz.ActionProjectManage); err != nil {
+		t.Errorf("ws admin + maintainer, union, project.manage: %v", err)
+	}
 	ms, err := svc.ListMemberships(ctx, bob.ID)
 	if err != nil || len(ms) != 2 {
 		t.Errorf("memberships = %+v, %v", ms, err)
+	}
+	if roles, err := svc.Roles(ctx, as(bob), res); err != nil || len(roles) != 2 {
+		t.Errorf("Roles(bob) = %v, %v", roles, err)
+	}
+	if roles, _ := svc.Roles(ctx, as(bob), otherProject); len(roles) != 1 || roles[0] != authz.RoleWorkspaceAdmin {
+		t.Errorf("Roles(bob, sibling project) = %v (only the workspace role reaches it)", roles)
 	}
 
 	// Cross-tenant: the stranger is 404 everywhere (§11.3.3 release gate).
@@ -321,13 +365,13 @@ func TestMembershipsAgainstPostgres(t *testing.T) {
 	if err := svc.RevokeRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}, "ops@gate.example"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Authorize(ctx, as(bob), res, authz.ActionTokenManage); !errors.Is(err, authz.ErrForbidden) {
-		t.Errorf("after revoking workspace admin: %v", err)
+	if err := svc.Authorize(ctx, as(bob), res, authz.ActionProjectManage); !errors.Is(err, authz.ErrForbidden) {
+		t.Errorf("after revoking workspace admin (maintainer stays): %v", err)
 	}
 	if err := svc.RevokeRole(ctx, bob.ID, authz.ScopeRef{authz.LevelWorkspace, ws}, "ops@gate.example"); !errors.Is(err, authz.ErrNotFound) {
 		t.Errorf("revoke twice: %v", err)
 	}
-	if audit, err := svc.ListAudit(ctx, ws, 10); err != nil || len(audit) != 1 || audit[0].Action != "role.revoke" || audit[0].Details["user_id"] != bob.ID || audit[0].Details["role"] != "admin" || audit[0].Actor != "ops@gate.example" {
+	if audit, err := svc.ListAudit(ctx, ws, 10); err != nil || len(audit) != 1 || audit[0].Action != "role.revoke" || audit[0].Details["user_id"] != bob.ID || audit[0].Details["role"] != "workspace_admin" || audit[0].Actor != "ops@gate.example" {
 		t.Errorf("audit after role revoke: %+v %v", audit, err)
 	}
 	if _, err := svc.GrantRole(ctx, "00000000-0000-4000-8000-000000000000", authz.ScopeRef{authz.LevelProject, proj}, authz.RoleViewer); !errors.Is(err, authz.ErrNotFound) {

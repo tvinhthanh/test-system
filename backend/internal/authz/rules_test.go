@@ -6,37 +6,57 @@ import (
 	"testing"
 )
 
-// TestMatrixMatchesSpec is §11.3.2 folded to three roles, row by row, so a
-// change here is a visible diff against the SPEC table.
+// TestMatrixMatchesSpec is §11.3.2 row by row, six columns in the SPEC's
+// order (owner, admin, ws_admin, maintainer, member, viewer), so a change
+// here is a visible diff against the table.
 func TestMatrixMatchesSpec(t *testing.T) {
-	type row struct {
-		action                Action
-		admin, member, viewer bool
+	cols := []Role{RoleOrgOwner, RoleOrgAdmin, RoleWorkspaceAdmin, RoleMaintainer, RoleMember, RoleViewer}
+	rows := map[Action][6]bool{
+		ActionView:             {true, true, true, true, true, true},
+		ActionTriage:           {true, true, true, true, true, false},
+		ActionIdentityMerge:    {true, true, true, true, false, false},
+		ActionTokenManage:      {true, true, true, true, false, false},
+		ActionProjectConfigure: {true, true, true, true, false, false},
+		ActionProjectManage:    {true, true, true, false, false, false},
+		ActionMemberManage:     {true, true, true, false, false, false},
+		ActionOrgManage:        {true, false, false, false, false, false},
+		ActionDataDelete:       {true, true, false, true, false, false}, // not a ladder: ws_admin ❌, maintainer ✅
+		ActionTestmgmtWrite:    {true, true, true, true, true, false},
+		ActionReleaseDecide:    {true, true, true, true, false, false},
+		ActionIngest:           {false, false, false, false, false, false}, // humans never ingest
 	}
-	rows := []row{
-		{ActionView, true, true, true},
-		{ActionTriage, true, true, false},
-		{ActionIdentityMerge, true, false, false},
-		{ActionTokenManage, true, false, false},
-		{ActionProjectConfigure, true, false, false},
-		{ActionProjectManage, true, false, false},
-		{ActionMemberManage, true, false, false},
-		{ActionOrgManage, true, false, false},
-		{ActionDataDelete, true, false, false},
-		{ActionIngest, false, false, false}, // humans never ingest
-	}
-	for _, r := range rows {
-		for role, want := range map[Role]bool{RoleAdmin: r.admin, RoleMember: r.member, RoleViewer: r.viewer} {
-			if got := roleAllows(role, r.action); got != want {
-				t.Errorf("%s / %s = %v, want %v", role, r.action, got, want)
+	for a, want := range rows {
+		for i, role := range cols {
+			if got := roleAllows(role, a); got != want[i] {
+				t.Errorf("%s / %s = %v, want %v", role, a, got, want[i])
 			}
 		}
 	}
-	if roleAllows("superuser", ActionView) {
-		t.Error("unknown role must not be allowed anything")
+	if len(rows) != len(HumanActions)+1 {
+		t.Errorf("the test covers %d actions, HumanActions lists %d — keep them in step with the SPEC table", len(rows)-1, len(HumanActions))
 	}
-	if stronger(RoleViewer, RoleAdmin) != RoleAdmin || stronger("", RoleViewer) != RoleViewer || stronger(RoleMember, RoleViewer) != RoleMember {
-		t.Error("stronger")
+	if roleAllows("superuser", ActionView) || roleAllows("admin", ActionView) {
+		t.Error("unknown or retired role must not be allowed anything")
+	}
+	// A person on the chain with several roles acts with their union.
+	if !anyAllows([]Role{RoleViewer, RoleMaintainer}, ActionDataDelete) || anyAllows([]Role{RoleViewer, RoleWorkspaceAdmin}, ActionDataDelete) {
+		t.Error("anyAllows")
+	}
+	got := ActionsFor([]Role{RoleMember})
+	if len(got) != 3 || got[0] != ActionView || got[1] != ActionTriage || got[2] != ActionTestmgmtWrite {
+		t.Errorf("ActionsFor(member) = %v", got)
+	}
+	if len(ActionsFor(nil)) != 0 || len(ActionsFor([]Role{RoleOrgOwner})) != len(HumanActions) {
+		t.Error("ActionsFor bounds")
+	}
+	// §11.3.1: every role has one level; every level of the tree has a role.
+	for _, r := range Roles {
+		if _, ok := RoleLevel[r]; !ok {
+			t.Errorf("%s has no level", r)
+		}
+	}
+	if RoleLevel[RoleOrgOwner] != LevelOrganization || RoleLevel[RoleWorkspaceAdmin] != LevelWorkspace || RoleLevel[RoleViewer] != LevelProject {
+		t.Error("RoleLevel")
 	}
 }
 

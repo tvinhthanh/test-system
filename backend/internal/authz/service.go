@@ -76,13 +76,39 @@ func authorizeToken(p Principal, r Resource, a Action) error {
 }
 
 // authorizeUser walks up the tree in one query (§11.3.3). The tenant
-// condition is in the WHERE clause, not applied afterwards.
+// condition is in the WHERE clause, not applied afterwards. Several
+// memberships on the chain act as their union (§11.3.2 is not a ladder).
 func (s *service) authorizeUser(ctx context.Context, p Principal, r Resource, a Action) error {
-	if !isUUID(p.UserID) {
+	roles, err := s.rolesOnChain(ctx, p, r)
+	if err != nil {
+		return err
+	}
+	if len(roles) == 0 {
 		return ErrNoAccess
 	}
+	if !anyAllows(roles, a) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+func (s *service) Roles(ctx context.Context, p Principal, r Resource) ([]Role, error) {
+	if p.Kind != PrincipalUser {
+		return nil, fmt.Errorf("%w: roles are for users", ErrInvalid)
+	}
+	if r.OrgID == "" {
+		return nil, fmt.Errorf("%w: resource has no organization", ErrInvalid)
+	}
+	return s.rolesOnChain(ctx, p, r)
+}
+
+// rolesOnChain is the one membership query behind Authorize and Roles.
+func (s *service) rolesOnChain(ctx context.Context, p Principal, r Resource) ([]Role, error) {
+	if !isUUID(p.UserID) {
+		return nil, nil
+	}
 	if !isUUID(r.OrgID) || (r.WorkspaceID != "" && !isUUID(r.WorkspaceID)) || (r.ProjectID != "" && !isUUID(r.ProjectID)) {
-		return fmt.Errorf("%w: resource ids", ErrInvalid)
+		return nil, fmt.Errorf("%w: resource ids", ErrInvalid)
 	}
 	// Absent levels are passed as NULL: `scope_id = NULL` is never true, so
 	// an org-level action simply does not match workspace or project rows.
@@ -94,27 +120,18 @@ func (s *service) authorizeUser(ctx context.Context, p Principal, r Resource, a 
 		     OR (scope_level = 'project'      AND scope_id = $4))`,
 		p.UserID, r.OrgID, nullable(r.WorkspaceID), nullable(r.ProjectID))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
-	var best Role
+	var roles []Role
 	for rows.Next() {
 		var role string
 		if err := rows.Scan(&role); err != nil {
-			return err
+			return nil, err
 		}
-		best = stronger(best, Role(role))
+		roles = append(roles, Role(role))
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if best == "" {
-		return ErrNoAccess
-	}
-	if !roleAllows(best, a) {
-		return ErrForbidden
-	}
-	return nil
+	return roles, rows.Err()
 }
 
 // ---- Tokens --------------------------------------------------------------
@@ -391,8 +408,13 @@ func (s *service) GrantRole(ctx context.Context, userID string, scope ScopeRef, 
 	if !membershipLevels[scope.Level] || !isUUID(scope.ID) {
 		return Membership{}, fmt.Errorf("%w: membership scope", ErrInvalid)
 	}
-	if !validRoles[role] {
+	level, ok := RoleLevel[role]
+	if !ok {
 		return Membership{}, fmt.Errorf("%w: role %q", ErrInvalid, role)
+	}
+	// §11.3.1 "Gán ở tầng": a role lives at one level and inherits down.
+	if level != scope.Level {
+		return Membership{}, fmt.Errorf("%w: role %s is granted at the %s level, not %s", ErrInvalid, role, level, scope.Level)
 	}
 	if !isUUID(userID) {
 		return Membership{}, ErrNotFound

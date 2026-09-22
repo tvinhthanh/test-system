@@ -256,6 +256,12 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	if p0["id"] != string(checkout.ID) || p0["name"] != "checkout" || p0["workspaceName"] != "Payments" {
 		t.Errorf("project DTO: %v", p0)
 	}
+	// §11.3.2 for the UI: a member's actions are exactly view, triage and
+	// testmgmt.write — the buttons the screens may show (the server still
+	// checks every call below).
+	if fmt.Sprint(p0["actions"]) != "[view triage testmgmt.write]" {
+		t.Errorf("member actions: %v", p0["actions"])
+	}
 	base := "/v1/projects/" + string(checkout.ID)
 
 	// ---- Runs: envelope, DTO, sort, cursor, filters ----
@@ -449,8 +455,8 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	if r := bobc.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}}); r.code != 404 {
 		t.Errorf("bob triage on checkout: %d %s", r.code, r.raw)
 	}
-	if r := bobc.get("/v1/projects"); len(r.items()) != 1 || r.items()[0].(map[string]any)["name"] != "search" {
-		t.Errorf("bob's projects: %s", r.raw)
+	if r := bobc.get("/v1/projects"); len(r.items()) != 1 || r.items()[0].(map[string]any)["name"] != "search" || fmt.Sprint(r.items()[0].(map[string]any)["actions"]) != "[view]" {
+		t.Errorf("bob's projects (viewer: actions = [view]): %s", r.raw)
 	}
 	// Viewer role: may see, may mark seen, may not triage (403, not 404).
 	searchBase := "/v1/projects/" + string(search.ID)
@@ -471,17 +477,21 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	if r := web.post(base+"/identities/"+cartID+"/merge", map[string]any{"into": payID}); r.code != 403 || r.errCode() != "FORBIDDEN" {
 		t.Errorf("member merging: %d %s", r.code, r.raw)
 	}
-	// carol is an admin of checkout.
+	// carol is a maintainer of checkout (§11.3.1): identity merge, tokens,
+	// release decisions — but not project/member management.
 	carol, _ := az.CreateUser(ctx, "carol@example.com")
 	_ = az.SetPassword(ctx, carol.ID, "carol passphrase long enough", "")
 	_ = az.VerifyEmail(ctx, carol.ID)
-	_, _ = az.GrantRole(ctx, carol.ID, authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, authz.RoleAdmin)
+	_, _ = az.GrantRole(ctx, carol.ID, authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, authz.RoleMaintainer)
 	carolc := newClient(t, srv)
 	carolc.bootstrap()
 	if r := carolc.post("/v1/session", map[string]string{"email": "carol@example.com", "password": "carol passphrase long enough"}); r.code != 200 {
 		t.Fatalf("carol login: %d %s", r.code, r.raw)
 	}
 	carolc.csrf, _ = carolc.get("/v1/session").body["csrfToken"].(string)
+	if r := carolc.get("/v1/projects"); fmt.Sprint(r.items()[0].(map[string]any)["actions"]) != "[view triage identity.merge token.manage project.configure data.delete testmgmt.write release.decide]" {
+		t.Errorf("maintainer actions: %s", r.raw)
+	}
 	// Aliases: one fingerprint in force per identity.
 	al := carolc.get(base + "/identities/" + cartID + "/aliases")
 	if al.code != 200 || len(al.items()) != 1 || al.items()[0].(map[string]any)["validTo"] != nil {

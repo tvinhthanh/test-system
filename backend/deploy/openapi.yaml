@@ -1549,11 +1549,18 @@ components:
     # dashboard
     Project:
       type: object
-      required: [id, name, workspaceName]
+      required: [id, name, workspaceName, actions]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         workspaceName: { type: string }
+        actions:
+          type: array
+          description: "What the caller may do here per the §11.3.2 matrix, from the roles held on the chain org → workspace → project (six roles, §11.3.1). The UI hides what is absent; every call is still checked server-side (403 when the role is too low)."
+          items: { $ref: "#/components/schemas/ProjectAction" }
+    ProjectAction:
+      type: string
+      enum: [view, triage, identity.merge, token.manage, project.configure, project.manage, member.manage, org.manage, data.delete, testmgmt.write, release.decide]
     Run:
       type: object
       required: [id, branch, commitSha, status, environmentName, startedAt, durationMs, totalCount, passedCount, failedCount, flakyCount]
