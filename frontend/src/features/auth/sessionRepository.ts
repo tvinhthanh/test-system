@@ -13,9 +13,14 @@ export interface User {
   email: string;
   mfa: MfaFlags | null;
 }
+// OAuth sign-ins the api has switched on (SPEC §11.2; OAUTH_GOOGLE /
+// OAUTH_GITHUB in its configuration).
+export const oauthProviders = ["google", "github"] as const;
+export type OAuthProvider = (typeof oauthProviders)[number];
 export interface Session {
   user: User | null;
   csrfToken: string;
+  providers: OAuthProvider[];
 }
 // A correct password on an account with MFA on: no session yet (202).
 export interface MfaChallenge {
@@ -26,8 +31,13 @@ function parseSession(value: unknown): Session {
   const json = record(value);
   const user = json.user === null ? null : record(json.user);
   const mfa = user && user.mfa !== undefined ? record(user.mfa) : null;
+  // Unknown names are skipped, not fatal: an older client must still sign in.
+  const providers = Array.isArray(json.providers)
+    ? oauthProviders.filter((p) => (json.providers as unknown[]).includes(p))
+    : [];
   return {
     csrfToken: string(json.csrfToken),
+    providers,
     user: user
       ? {
           id: string(user.id),

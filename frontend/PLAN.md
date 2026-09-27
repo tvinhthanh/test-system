@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 46 unit tests, production build + bundle gate
+- Latest verification: typecheck, 48 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,22 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-27 (Google / GitHub sign-in)
+
+- Bootstrap decodes `providers` (unknown names skipped); the sign-in page
+  shows "Continue with Google / GitHub" as plain links for the switched-on
+  ones, reads `?oauth=<reason>` into a sentence, and opens the code step on
+  `?step=mfa` (`session.resumeMfa()`, empty challenge — the api reads its
+  HttpOnly cookie).
+- Verified: typecheck, 48 unit tests, screenshots light/dark/390 px; a
+  browser run on the real api with both providers on (fake credentials):
+  buttons shown, the Google link's 302 carries client id, the callback
+  redirect URI, PKCE S256 and a state, sets the signed `atp_oauth` cookie; a
+  forged-state callback lands on `/sign-in?oauth=state` with its sentence;
+  restarting the api with `OAUTH_GITHUB=off` leaves only the Google button.
+  The full round trip (code → token → identity → session, PKCE checked) is
+  `backend/cmd/api/oauth_test.go` against a fake provider.
 
 ### 2026-09-27 (Team: workspace and organization members)
 

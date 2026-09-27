@@ -35,6 +35,10 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		{"unknown store", map[string]string{"OBJSTORE": "gcs"}, "OBJSTORE="},
 		{"job retention not a duration", map[string]string{"JOB_RETENTION": "7d"}, "JOB_RETENTION"},
 		{"job retention too short", map[string]string{"JOB_RETENTION": "30s"}, "JOB_RETENTION"},
+		{"oauth switch not on/off", map[string]string{"OAUTH_GOOGLE": "yes"}, "OAUTH_GOOGLE"},
+		{"google on without credentials", map[string]string{"OAUTH_GOOGLE": "on", "PUBLIC_URL": "http://localhost:5173"}, "OAUTH_GOOGLE_CLIENT_ID"},
+		{"github on without a public url", map[string]string{"OAUTH_GITHUB": "on", "OAUTH_GITHUB_CLIENT_ID": "id", "OAUTH_GITHUB_CLIENT_SECRET": "s"}, "PUBLIC_URL"},
+		{"plain http public url outside dev", map[string]string{"APP_ENV": "staging", "DATABASE_URL": "postgres://u:p@h/db", "TOKEN_PEPPER": "0123456789abcdef0123456789abcdef", "OBJSTORE": "s3", "OBJSTORE_ENDPOINT": "https://s3", "OBJSTORE_BUCKET": "b", "OBJSTORE_ACCESS_KEY": "a", "OBJSTORE_SECRET_KEY": "s", "OAUTH_GITHUB": "on", "OAUTH_GITHUB_CLIENT_ID": "id", "OAUTH_GITHUB_CLIENT_SECRET": "s", "PUBLIC_URL": "http://atp.example.com"}, "PUBLIC_URL"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,5 +53,25 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 				t.Error("config error leaked the database password")
 			}
 		})
+	}
+}
+
+// OAuth is off unless switched on, and a switched-on provider with its
+// credentials and a public URL loads.
+func TestOAuthSwitches(t *testing.T) {
+	for _, k := range []string{"APP_ENV", "OAUTH_GOOGLE", "OAUTH_GITHUB", "PUBLIC_URL"} {
+		t.Setenv(k, "")
+	}
+	c, err := Load()
+	if err != nil || c.OAuthGoogle.Enabled || c.OAuthGitHub.Enabled {
+		t.Fatalf("default must be off: %+v %v", c, err)
+	}
+	t.Setenv("OAUTH_GITHUB", "on")
+	t.Setenv("OAUTH_GITHUB_CLIENT_ID", "gh-id")
+	t.Setenv("OAUTH_GITHUB_CLIENT_SECRET", "gh-secret")
+	t.Setenv("PUBLIC_URL", "http://localhost:5173/")
+	c, err = Load()
+	if err != nil || !c.OAuthGitHub.Enabled || c.OAuthGoogle.Enabled || c.OAuthGitHub.ClientID != "gh-id" || c.PublicURL != "http://localhost:5173" {
+		t.Errorf("github on: %+v %v", c, err)
 	}
 }

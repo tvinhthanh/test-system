@@ -58,6 +58,21 @@ type Config struct {
 	// prunes them (§14.1 T5: the jobs table must not grow with history).
 	// Default 168h; the soak harness shortens it to watch the prune loop.
 	JobRetention time.Duration
+	// OAuth sign-in (§11.2), one switch per provider: OAUTH_GOOGLE=on|off,
+	// OAUTH_GITHUB=on|off (default off), each with its CLIENT_ID and
+	// CLIENT_SECRET. PublicURL is the dashboard's public origin; the
+	// redirect URI registered with the provider is
+	// PublicURL + "/v1/session/oauth/<provider>/callback".
+	OAuthGoogle OAuthClient
+	OAuthGitHub OAuthClient
+	PublicURL   string
+}
+
+// OAuthClient is one provider's switch and credentials.
+type OAuthClient struct {
+	Enabled      bool
+	ClientID     string
+	ClientSecret string
 }
 
 // devPepper is only ever accepted when APP_ENV=dev.
@@ -94,6 +109,21 @@ func Load() (Config, error) {
 	} else {
 		c.JobRetention = d
 	}
+	for _, p := range []struct {
+		env string
+		dst *OAuthClient
+	}{{"GOOGLE", &c.OAuthGoogle}, {"GITHUB", &c.OAuthGitHub}} {
+		switch v := strings.ToLower(getenv("OAUTH_"+p.env, "off")); v {
+		case "on", "true", "1":
+			p.dst.Enabled = true
+		case "off", "false", "0":
+		default:
+			return c, fmt.Errorf("OAUTH_%s=%q: want on|off", p.env, v)
+		}
+		p.dst.ClientID = os.Getenv("OAUTH_" + p.env + "_CLIENT_ID")
+		p.dst.ClientSecret = os.Getenv("OAUTH_" + p.env + "_CLIENT_SECRET")
+	}
+	c.PublicURL = strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/")
 	return c, c.validate()
 }
 
@@ -126,6 +156,19 @@ func (c Config) validate() error {
 	for _, o := range c.DashboardOrigins {
 		if o == "*" || (!strings.HasPrefix(o, "http://") && !strings.HasPrefix(o, "https://")) {
 			errs = append(errs, fmt.Sprintf("DASHBOARD_ORIGINS: %q must be a scheme://host origin, never *", o))
+		}
+	}
+	for name, p := range map[string]OAuthClient{"GOOGLE": c.OAuthGoogle, "GITHUB": c.OAuthGitHub} {
+		if p.Enabled && (p.ClientID == "" || p.ClientSecret == "") {
+			errs = append(errs, fmt.Sprintf("OAUTH_%s=on needs OAUTH_%s_CLIENT_ID and OAUTH_%s_CLIENT_SECRET", name, name, name))
+		}
+	}
+	if c.OAuthGoogle.Enabled || c.OAuthGitHub.Enabled {
+		switch {
+		case c.PublicURL == "":
+			errs = append(errs, "PUBLIC_URL is required when an OAuth provider is on (the redirect URI is built from it)")
+		case !strings.HasPrefix(c.PublicURL, "https://") && !(c.Env == "dev" && strings.HasPrefix(c.PublicURL, "http://")):
+			errs = append(errs, fmt.Sprintf("PUBLIC_URL=%q: want https:// (http:// only when APP_ENV=dev)", c.PublicURL))
 		}
 	}
 	switch c.ObjStore {

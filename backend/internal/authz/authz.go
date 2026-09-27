@@ -165,6 +165,14 @@ type MFARequired struct {
 
 func (e *MFARequired) Error() string { return "authz: second factor required" }
 
+// ExternalIdentity is who an OAuth provider says signed in (§11.2).
+type ExternalIdentity struct {
+	Provider      string // google | github
+	Subject       string // the provider's stable user id — never the email
+	Email         string
+	EmailVerified bool
+}
+
 // Membership grants a role at a node; it inherits down the tree.
 type Membership struct {
 	ID        string
@@ -262,6 +270,9 @@ var (
 	ErrInvalidCode = errors.New("authz: invalid code")
 	// ErrMFAMandatory: an org owner may not turn MFA off (§11.2).
 	ErrMFAMandatory = errors.New("authz: MFA is mandatory for org owners")
+	// ErrNoAccount: an OAuth identity that is not linked and whose verified
+	// email matches no verified account (no self-signup, §11.2).
+	ErrNoAccount = errors.New("authz: no account for that identity")
 	// ErrLastOwner: the change would leave an organization with no owner.
 	ErrLastOwner = errors.New("authz: an organization keeps at least one owner")
 )
@@ -310,6 +321,13 @@ type Service interface {
 	Login(ctx context.Context, email, password string, meta SessionMeta) (session Session, secret string, err error)
 	// AuthenticateSession turns a cookie value into a user Principal.
 	AuthenticateSession(ctx context.Context, secret string) (Principal, Session, error)
+	// LoginWithIdentity signs in whoever an OAuth provider vouched for: by
+	// the linked (provider, subject), or on first use by the provider's
+	// verified email matching a verified account, which links them (audited
+	// identity.link). ErrNoAccount otherwise; ErrConflict when the account
+	// already has a different identity at that provider. Like Login it
+	// returns *MFARequired when the account has MFA on.
+	LoginWithIdentity(ctx context.Context, id ExternalIdentity, meta SessionMeta) (session Session, secret string, err error)
 	// CompleteMFALogin trades the challenge from Login plus a TOTP or
 	// recovery code for a session. Wrong codes count toward the rate limit
 	// (ErrInvalidCode, then ErrRateLimited); an unknown or expired challenge

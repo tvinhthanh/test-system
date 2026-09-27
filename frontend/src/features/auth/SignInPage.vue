@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Activity, ArrowLeft, ArrowRight, RefreshCw } from "@lucide/vue";
 import { useServices } from "../../app/providers/services";
 import { ApiError } from "../../core/api/client";
+import type { OAuthProvider } from "./sessionRepository";
 import ThemeToggle from "../../app/ThemeToggle.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,14 +27,44 @@ async function submitCode() {
   code.value = "";
   if (done) await enter();
 }
+const target = computed(() =>
+  typeof route.query.redirect === "string" &&
+  route.query.redirect.startsWith("/p/")
+    ? route.query.redirect
+    : "/",
+);
 async function enter() {
-  const target =
-    typeof route.query.redirect === "string" &&
-    route.query.redirect.startsWith("/p/")
-      ? route.query.redirect
-      : "/";
-  await router.replace(target);
+  await router.replace(target.value);
 }
+
+// Google / GitHub (§11.2): a full-page trip to the provider and back. The
+// api decides which exist (bootstrap `providers`) and where the trip ends:
+// in the app, on the code step (?step=mfa), or here with ?oauth=<reason>.
+const providerLabel = { google: "Google", github: "GitHub" } as const;
+const oauthHref = (p: OAuthProvider) =>
+  `/v1/session/oauth/${p}/start?redirect=${encodeURIComponent(target.value)}`;
+const oauthReasons: Record<string, string> = {
+  denied: "Sign-in was cancelled at the provider.",
+  state:
+    "That sign-in link expired or came from another tab. Please try again.",
+  provider:
+    "The provider did not confirm who you are. Please try again in a moment.",
+  no_account:
+    "No verified account here uses that email. Ask an admin to add you, or sign in with your password.",
+  conflict:
+    "Your account is already linked to a different account at that provider. Use that one, or sign in with your password.",
+  disabled: "That sign-in option is turned off.",
+  unavailable: "Sign-in is unavailable right now. Please try again.",
+};
+const oauthError = computed(() => {
+  const reason = route.query.oauth;
+  return typeof reason === "string"
+    ? (oauthReasons[reason] ?? oauthReasons.unavailable)
+    : "";
+});
+onMounted(() => {
+  if (route.query.step === "mfa") session.resumeMfa();
+});
 </script>
 <template>
   <main class="bg-background grid min-h-svh lg:grid-cols-[5fr_4fr]">
@@ -181,6 +212,13 @@ async function enter() {
           />
         </div>
         <p
+          v-if="oauthError && !session.error"
+          class="oauth-error bg-danger-soft text-danger border-danger/20 rounded-md border px-3 py-2 text-sm"
+          role="alert"
+        >
+          {{ oauthError }}
+        </p>
+        <p
           v-if="session.error"
           id="login-error"
           class="bg-danger-soft text-danger border-danger/20 rounded-md border px-3 py-2 text-sm"
@@ -204,6 +242,61 @@ async function enter() {
         >
           <RefreshCw />Retry connection
         </Button>
+        <template v-if="session.providers.length">
+          <div
+            class="text-muted-foreground flex items-center gap-3 text-xs"
+            aria-hidden="true"
+          >
+            <span class="bg-border h-px flex-1" />or<span
+              class="bg-border h-px flex-1"
+            />
+          </div>
+          <Button
+            v-for="p in session.providers"
+            :key="p"
+            as-child
+            variant="outline"
+            class="oauth-button w-full"
+          >
+            <a :href="oauthHref(p)">
+              <svg
+                v-if="p === 'google'"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                class="size-4"
+              >
+                <path
+                  fill="#4285F4"
+                  d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.2-2.1 3.5-5.1 3.5-8.8Z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24Z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6h-4a12 12 0 0 0 0 10.8l4-3.1Z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9Z"
+                />
+              </svg>
+              <svg
+                v-else
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                class="size-4"
+                fill="currentColor"
+              >
+                <path
+                  d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.3 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z"
+                />
+              </svg>
+              Continue with {{ providerLabel[p] }}
+            </a>
+          </Button>
+        </template>
         <p
           v-if="fixture"
           class="text-muted-foreground border-t pt-4 text-center text-xs"

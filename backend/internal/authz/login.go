@@ -46,6 +46,13 @@ type WebOptions struct {
 	// http://localhost still works because browsers treat localhost as a
 	// secure context.
 	Secure bool
+	// OAuth are the switched-on sign-in providers (config OAUTH_GOOGLE /
+	// OAUTH_GITHUB); empty means password only. StateKey signs the flow's
+	// state cookie (OAuthStateKey). OAuthHTTP reaches the providers (a
+	// platform/outbound client allowed only their endpoints).
+	OAuth     []*OAuthProvider
+	StateKey  []byte
+	OAuthHTTP OAuthHTTP
 }
 
 type sessionKey struct{}
@@ -179,6 +186,7 @@ func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	mux.Handle("POST /v1/session", http.HandlerFunc(h.login))
 	mux.Handle("POST /v1/session/logout", http.HandlerFunc(h.logout))
 	mfaRoutes(mux, h)
+	oauthRoutes(mux, h)
 }
 
 type webHandlers struct {
@@ -202,6 +210,9 @@ type sessionResponse struct {
 	User      *sessionUser `json:"user"`
 	CSRFToken string       `json:"csrfToken"`
 	ExpiresAt *time.Time   `json:"expiresAt,omitempty"`
+	// Providers are the OAuth sign-ins switched on (§11.2) — the sign-in
+	// page shows a button for each. Always present, possibly empty.
+	Providers []string `json:"providers"`
 }
 
 // session is the bootstrap: who is logged in (if anyone) plus a CSRF
@@ -216,7 +227,7 @@ func (h *webHandlers) session(w http.ResponseWriter, r *http.Request) {
 		csrf = newCSRFToken()
 		h.setCSRFCookie(w, csrf, time.Time{})
 	}
-	resp := sessionResponse{CSRFToken: csrf}
+	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames()}
 	if p, ok := PrincipalFrom(r.Context()); ok && p.Kind == PrincipalUser {
 		if u, err := h.svc.GetUser(r.Context(), p.UserID); err == nil {
 			resp.User = h.userOut(r, u)
@@ -287,13 +298,19 @@ func (h *webHandlers) login(w http.ResponseWriter, r *http.Request) {
 
 // signedIn sets the session cookie and answers like the bootstrap.
 func (h *webHandlers) signedIn(w http.ResponseWriter, r *http.Request, sess Session, secret string) {
-	// Rotate the CSRF token with the new session.
-	csrf := newCSRFToken()
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: secret, Path: "/", HttpOnly: true, Secure: h.opts.Secure, SameSite: http.SameSiteLaxMode, Expires: sess.ExpiresAt})
-	h.setCSRFCookie(w, csrf, sess.ExpiresAt)
+	csrf := h.setSessionCookies(w, sess, secret)
 	u, _ := h.svc.GetUser(r.Context(), sess.UserID)
 	exp := sess.ExpiresAt
 	writeJSON(w, http.StatusOK, sessionResponse{User: h.userOut(r, u), CSRFToken: csrf, ExpiresAt: &exp})
+}
+
+// setSessionCookies sets the session cookie and rotates the CSRF token
+// with it; it returns the new token.
+func (h *webHandlers) setSessionCookies(w http.ResponseWriter, sess Session, secret string) string {
+	csrf := newCSRFToken()
+	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: secret, Path: "/", HttpOnly: true, Secure: h.opts.Secure, SameSite: http.SameSiteLaxMode, Expires: sess.ExpiresAt})
+	h.setCSRFCookie(w, csrf, sess.ExpiresAt)
+	return csrf
 }
 
 func (h *webHandlers) logout(w http.ResponseWriter, r *http.Request) {

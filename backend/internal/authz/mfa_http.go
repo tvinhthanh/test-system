@@ -28,7 +28,8 @@ func mfaRoutes(mux httpx.Mux, h *webHandlers) {
 // mfaExempt: what an org owner without MFA may still reach — the bootstrap,
 // logout and the MFA routes themselves.
 func mfaExempt(path string) bool {
-	return path == "/v1/session" || path == "/v1/session/logout" || path == "/v1/session/mfa" || strings.HasPrefix(path, "/v1/session/mfa/")
+	return path == "/v1/session" || path == "/v1/session/logout" || path == "/v1/session/mfa" ||
+		strings.HasPrefix(path, "/v1/session/mfa/") || strings.HasPrefix(path, "/v1/session/oauth/")
 }
 
 type mfaFlags struct {
@@ -54,7 +55,18 @@ func (h *webHandlers) mfaComplete(w http.ResponseWriter, r *http.Request) {
 	if !h.anonymousWrite(w, r, &req) {
 		return
 	}
+	// After an OAuth sign-in the challenge is in an HttpOnly cookie the page
+	// cannot read (oauth_http.go); after a password it is in the body.
+	fromCookie := false
+	if req.Challenge == "" {
+		if c, err := r.Cookie(mfaCookie); err == nil {
+			req.Challenge, fromCookie = c.Value, true
+		}
+	}
 	sess, secret, err := h.svc.CompleteMFALogin(r.Context(), req.Challenge, req.Code, SessionMeta{IP: clientIP(r), UserAgent: r.UserAgent()})
+	if fromCookie && (err == nil || errors.Is(err, ErrUnauthenticated)) {
+		http.SetCookie(w, &http.Cookie{Name: mfaCookie, Value: "", Path: "/v1/session/mfa", HttpOnly: true, Secure: h.opts.Secure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	}
 	switch {
 	case err == nil:
 		h.signedIn(w, r, sess, secret)

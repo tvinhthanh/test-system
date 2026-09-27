@@ -37,6 +37,24 @@ generic 401; rate limit is enforced by backend. Login must return a user.
 `POST /v1/session/logout` takes `{}` and returns 200 `{}` or 204 after revoking
 the server session. UI clears state only after server confirmation or a 401.
 
+### Google / GitHub sign-in (§11.2, implemented 2026-09-27)
+
+- The bootstrap carries `providers`: the OAuth sign-ins switched on in the
+  api's configuration (`OAUTH_GOOGLE` / `OAUTH_GITHUB`, off by default).
+  The sign-in page shows "Continue with …" only for those; unknown names are
+  ignored.
+- A button is a plain link (a full-page trip, not an XHR):
+  `/v1/session/oauth/{google|github}/start?redirect=<path>`. The api sends
+  the browser to the provider and back to its callback, which ends in one of:
+  - the app at `redirect`, signed in;
+  - `/sign-in?step=mfa&redirect=…` when the account has MFA on — the page
+    opens the code step and posts `POST /v1/session/mfa {code}` with an empty
+    challenge (the api holds it in an HttpOnly cookie);
+  - `/sign-in?oauth=<reason>`, reason in `denied|state|provider|no_account|
+    conflict|disabled|unavailable`, each shown in plain words.
+- No account is created: the provider's verified email must match an existing
+  verified account here (the first sign-in links them).
+
 ### Two-factor authentication (§11.2, implemented 2026-09-27)
 
 - The session user carries `mfa:{enabled,required}`. `required` means an org

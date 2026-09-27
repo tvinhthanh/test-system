@@ -5,6 +5,7 @@ import { ApiError } from "../../core/api/client";
 import {
   isChallenge,
   type MfaChallenge,
+  type OAuthProvider,
   type SessionRepository,
   type Session,
   type User,
@@ -21,8 +22,11 @@ export function createSessionStore(
     const error = shallowRef<unknown>(null);
     // Set between a correct password and the second factor (SPEC §11.2).
     const challenge = shallowRef<MfaChallenge | null>(null);
+    // Switched-on OAuth providers, from the bootstrap.
+    const providers = shallowRef<OAuthProvider[]>([]);
     let bootstrap: Promise<void> | undefined;
     function apply(session: Session) {
+      providers.value = session.providers;
       user.value = session.user;
       api.csrfToken = session.csrfToken;
     }
@@ -81,7 +85,7 @@ export function createSessionStore(
     }
     async function completeMfa(code: string) {
       const pending = challenge.value;
-      if (busy.value || !pending) return false;
+      if (busy.value || pending === null) return false;
       busy.value = true;
       error.value = null;
       try {
@@ -112,6 +116,12 @@ export function createSessionStore(
         busy.value = false;
       }
     }
+    // After an OAuth sign-in the api keeps the challenge in an HttpOnly
+    // cookie and sends the page to ?step=mfa: the code step runs with an
+    // empty challenge, which the api reads from that cookie.
+    function resumeMfa() {
+      challenge.value = { challenge: "", expiresAt: "" };
+    }
     function cancelMfa() {
       challenge.value = null;
       error.value = null;
@@ -141,10 +151,12 @@ export function createSessionStore(
       busy,
       error,
       challenge,
+      providers,
       ensure,
       login,
       completeMfa,
       cancelMfa,
+      resumeMfa,
       refresh,
       logout,
     };

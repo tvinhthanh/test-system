@@ -132,3 +132,38 @@ it("only accepts an authenticator URI as the setup link, and at most ten recover
     reply({ recoveryCodes: Array(11).fill("aaaaa-bbbbb") }).enable("1", signal),
   ).rejects.toThrow();
 });
+
+it("offers only the OAuth providers the api switched on, ignoring names it does not know", async () => {
+  const s = store(
+    vi.fn<Transport>(async () =>
+      json({ user: null, csrfToken: "c", providers: ["github", "gitlab"] }),
+    ),
+  );
+  await s.ensure();
+  expect(s.providers).toEqual(["github"]);
+  const old = store(
+    vi.fn<Transport>(async () => json({ user: null, csrfToken: "c" })),
+  );
+  await old.ensure();
+  expect(old.providers).toEqual([]);
+});
+
+it("finishes an OAuth sign-in's code step with the challenge the api holds in its cookie", async () => {
+  const bodies: unknown[] = [];
+  const s = store(
+    vi.fn<Transport>(async (input, init) => {
+      if (String(input) === "/v1/session/mfa") {
+        bodies.push(JSON.parse(String(init?.body)));
+        return json({
+          user: user({ enabled: true, required: false }),
+          csrfToken: "c2",
+        });
+      }
+      return json({ user: null, csrfToken: "c1", providers: ["google"] });
+    }),
+  );
+  await s.ensure();
+  s.resumeMfa();
+  expect(await s.completeMfa("123456")).toBe(true);
+  expect(bodies).toEqual([{ challenge: "", code: "123456" }]);
+});

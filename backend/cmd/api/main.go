@@ -28,6 +28,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/memory" // OBJSTORE=memory (dev)
 	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/s3"     // OBJSTORE=s3
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/outbound"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
@@ -126,7 +127,25 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	artifact.Routes(mux, artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: art, Metrics: reg, Logger: logger})
 
 	// Dashboard: cookie sessions (§11.2) and the read model (§6.9.5).
-	web := authz.WebOptions{AllowedOrigins: cfg.DashboardOrigins, Secure: cfg.CookieSecure}
+	web := authz.WebOptions{
+		AllowedOrigins: cfg.DashboardOrigins, Secure: cfg.CookieSecure,
+		OAuth: oauthProviders(cfg), StateKey: authz.OAuthStateKey([]byte(cfg.TokenPepper)),
+	}
+	// The only outbound HTTP the api makes for sign-in, allowed exactly the
+	// providers' own endpoints (§11.6 API7).
+	var endpoints []string
+	for _, p := range web.OAuth {
+		endpoints = append(endpoints, p.Endpoints()...)
+	}
+	if client, err := outbound.New(10*time.Second, endpoints...); err != nil {
+		logger.Error("oauth sign-in off: provider endpoints", "err", err)
+		web.OAuth = nil
+	} else {
+		web.OAuthHTTP = client
+	}
+	for _, p := range web.OAuth {
+		logger.Info("oauth sign-in on", "provider", p.Name, "redirect_uri", p.RedirectURL)
+	}
 	authz.AuthRoutes(mux, az, web)
 	// Test Management (P2, §6.8): the gate reads the Intelligence Plane
 	// through query — the consumer-side Evidence interface (§6.9.4) keeps
@@ -140,6 +159,21 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// reads the matched route pattern) → routes.
 	policy := httpx.BrowserPolicy{AllowedOrigins: cfg.DashboardOrigins, HSTS: cfg.CookieSecure}
 	return httpx.RequestID(httpx.Logging(logger)(policy.Middleware(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux))))), mux
+}
+
+// oauthProviders turns the OAUTH_GOOGLE / OAUTH_GITHUB switches into the
+// sign-in providers (§11.2); a switched-off provider does not exist for the
+// api — its routes answer "disabled" and the sign-in page shows no button.
+// A variable so tests can point the providers at a fake.
+var oauthProviders = func(cfg config.Config) []*authz.OAuthProvider {
+	var out []*authz.OAuthProvider
+	if cfg.OAuthGoogle.Enabled {
+		out = append(out, authz.Google(cfg.OAuthGoogle.ClientID, cfg.OAuthGoogle.ClientSecret, cfg.PublicURL))
+	}
+	if cfg.OAuthGitHub.Enabled {
+		out = append(out, authz.GitHub(cfg.OAuthGitHub.ClientID, cfg.OAuthGitHub.ClientSecret, cfg.PublicURL))
+	}
+	return out
 }
 
 // gateEvidence adapts query's read model to testmgmt.Evidence.

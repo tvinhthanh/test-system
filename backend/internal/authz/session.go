@@ -284,3 +284,60 @@ func truncate(s string, n int) string {
 	}
 	return s[:n]
 }
+
+// ---- OAuth sign-in (§11.2) -------------------------------------------------
+
+func (s *service) LoginWithIdentity(ctx context.Context, id ExternalIdentity, meta SessionMeta) (Session, string, error) {
+	if (id.Provider != "google" && id.Provider != "github") || id.Subject == "" || len(id.Subject) > 255 {
+		return Session{}, "", fmt.Errorf("%w: identity", ErrInvalid)
+	}
+	var userID string
+	var mfa bool
+	err := s.db.WithTx(ctx, func(ctx context.Context) error {
+		now := s.now().UTC()
+		// Known subject: the email the provider reports today does not matter.
+		err := s.db.Q(ctx).QueryRow(ctx, `
+			UPDATE user_identities i SET last_login_at = $3
+			  FROM users u
+			 WHERE i.provider = $1 AND i.subject = $2 AND u.id = i.user_id AND u.email_verified_at IS NOT NULL
+			RETURNING i.user_id, u.totp_enabled_at IS NOT NULL`, id.Provider, id.Subject, now).Scan(&userID, &mfa)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pg.ErrNoRows) {
+			return err
+		}
+		// First sign-in: link by an email both sides have verified.
+		e, ok := normalizeEmail(id.Email)
+		if !id.EmailVerified || !ok {
+			return ErrNoAccount
+		}
+		err = s.db.Q(ctx).QueryRow(ctx,
+			`SELECT id, totp_enabled_at IS NOT NULL FROM users WHERE email = $1 AND email_verified_at IS NOT NULL`, e).Scan(&userID, &mfa)
+		if errors.Is(err, pg.ErrNoRows) {
+			return ErrNoAccount
+		}
+		if err != nil {
+			return err
+		}
+		var linkID string
+		err = s.db.Q(ctx).QueryRow(ctx, `
+			INSERT INTO user_identities (user_id, provider, subject, email, last_login_at) VALUES ($1, $2, $3, $4, $5)
+			RETURNING id`, userID, id.Provider, id.Subject, e, now).Scan(&linkID)
+		if err != nil {
+			return mapErr(err) // unique (user, provider): another account at that provider
+		}
+		return s.audit(ctx, "identity.link", "user", userID, "", "", e, map[string]any{"provider": id.Provider, "subject": id.Subject, "identity_id": linkID})
+	})
+	if err != nil {
+		return Session{}, "", err
+	}
+	if mfa {
+		ch, err := s.openChallenge(ctx, userID, meta)
+		if err != nil {
+			return Session{}, "", err
+		}
+		return Session{}, "", ch
+	}
+	return s.openSession(ctx, userID, meta)
+}

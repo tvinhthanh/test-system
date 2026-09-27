@@ -189,6 +189,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		// MFA acts on the signed-in user only; asserted in mfa_test.go.
 		"POST /v1/session/mfa": true, "GET /v1/session/mfa": true, "POST /v1/session/mfa/setup": true,
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
+		// OAuth sign-in: anonymous browser navigations, asserted in oauth_test.go.
+		"GET /v1/session/oauth/{provider}/start": true, "GET /v1/session/oauth/{provider}/callback": true,
 	}
 	param := regexp.MustCompile(`\{([a-zA-Z]+)\}`)
 	fill := func(path string, ids map[string]string) string {

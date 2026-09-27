@@ -265,6 +265,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/CSRF" }
         "503": { $ref: "#/components/responses/AuthUnavailable" }
+  /v1/session/oauth/{provider}/start:
+    get:
+      operationId: startOAuth
+      tags: [session]
+      summary: Sign in with Google or GitHub — send the browser to the provider
+      description: |
+        A browser navigation, not an XHR. Only providers switched on in the
+        api's configuration (`OAUTH_GOOGLE=on`, `OAUTH_GITHUB=on`) work; the
+        bootstrap lists them in `providers`. Sets a signed, HttpOnly
+        `atp_oauth` cookie (state, PKCE verifier, landing path; ten minutes)
+        and redirects to the provider with `code_challenge_method=S256`.
+        `redirect` must be a path inside the app; anything else lands on `/`.
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [google, github] } }
+        - { name: redirect, in: query, schema: { type: string }, description: "Where to land after sign-in, e.g. /p/{id}/runs." }
+      responses:
+        "302": { description: To the provider's authorize page. }
+        "303": { description: "Already signed in: to `redirect`. Provider switched off: to `/sign-in?oauth=disabled`." }
+  /v1/session/oauth/{provider}/callback:
+    get:
+      operationId: oauthCallback
+      tags: [session]
+      summary: The provider sends the browser back here
+      description: |
+        Checks the `atp_oauth` cookie and `state`, exchanges `code` with the
+        PKCE verifier, and reads who signed in (Google: `sub`, `email`,
+        `email_verified`; GitHub: user id and the primary verified email).
+        The account is the one linked to that provider subject, or — the
+        first time — the verified account with the same verified email, which
+        links them (audited `identity.link`). There is no self-signup.
+        Answers are redirects: success → `redirect` with the session cookie;
+        MFA on → `/sign-in?step=mfa&redirect=…` with the challenge in an
+        HttpOnly `atp_mfa` cookie for `POST /v1/session/mfa`; failure →
+        `/sign-in?oauth=` `denied` | `state` | `provider` | `no_account` |
+        `conflict` | `disabled` | `unavailable`.
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [google, github] } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        "303": { description: Into the app, to the code step, or back to the sign-in page with a reason. }
   /v1/session/mfa:
     post:
       operationId: completeMfaLogin
@@ -284,9 +326,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [challenge, code]
+              required: [code]
               properties:
-                challenge: { type: string }
+                challenge: { type: string, description: "From the 202 of POST /v1/session. Omitted after an OAuth sign-in: the challenge is then read from the HttpOnly atp_mfa cookie." }
                 code: { type: string }
       responses:
         "200":
@@ -1941,6 +1983,10 @@ components:
                 enabled: { type: boolean }
                 required: { type: boolean }
         csrfToken: { type: string }
+        providers:
+          type: array
+          description: "OAuth sign-ins switched on in the api's configuration (§11.2); the sign-in page shows a button for each."
+          items: { type: string, enum: [google, github] }
 
     # dashboard
     Project:

@@ -325,8 +325,11 @@ func TestNoOutboundHTTPFromDomainModules(t *testing.T) {
 			return nil
 		}
 		rel := filepath.ToSlash(strings.TrimPrefix(path, internalDir+string(filepath.Separator)))
-		if strings.HasPrefix(rel, "platform/objstore/") {
-			return nil // the one legitimate outbound caller: the configured bucket endpoint
+		// The two legitimate outbound callers: the configured bucket endpoint,
+		// and platform/outbound — a client allowed only hosts fixed from
+		// configuration (the OAuth providers of §11.2), no redirects.
+		if strings.HasPrefix(rel, "platform/objstore/") || strings.HasPrefix(rel, "platform/outbound/") {
+			return nil
 		}
 		src, err := os.ReadFile(path)
 		if err != nil {
@@ -335,7 +338,7 @@ func TestNoOutboundHTTPFromDomainModules(t *testing.T) {
 		scanned++
 		for _, needle := range outbound {
 			if strings.Contains(string(src), needle) {
-				t.Errorf("internal/%s uses %q — no outbound HTTP outside platform/objstore (§11.6 API7, §7.10)", rel, strings.TrimSuffix(needle, "("))
+				t.Errorf("internal/%s uses %q — no outbound HTTP outside platform/objstore and platform/outbound (§11.6 API7, §7.10)", rel, strings.TrimSuffix(needle, "("))
 			}
 		}
 		return nil
