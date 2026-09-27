@@ -146,6 +146,24 @@ type Membership struct {
 	CreatedAt time.Time
 }
 
+// Member is one membership that reaches a project, with the user's email:
+// the project's own rows and those inherited from its workspace and org —
+// everyone Authorize would let in, and through which node.
+type Member struct {
+	UserID    string
+	Email     string
+	Role      Role
+	Scope     ScopeRef
+	CreatedAt time.Time
+}
+
+// MemberKey is where a page of Members resumes: the last row's email and
+// level (one person may hold a role at several nodes of the chain).
+type MemberKey struct {
+	Email string
+	Level Level
+}
+
 // Token is the stored half of an API token. The secret is never stored and
 // never returned after issue (§11.4).
 type Token struct {
@@ -171,11 +189,12 @@ type TokenSpec struct {
 }
 
 // AuditEntry is one row of authz_audit — a destructive change (token or
-// role revoked), who did it and on what (§11.7). Append-only; written in
-// the same transaction as the change.
+// role revoked, or a role granted by a person — a grant can demote), who did
+// it and on what (§11.7). Append-only; written in the same transaction as
+// the change.
 type AuditEntry struct {
 	ID          int64
-	Action      string // token.revoke | role.revoke
+	Action      string // token.revoke | role.revoke | role.grant
 	SubjectKind string // api_token | membership
 	SubjectID   string
 	Scope       ScopeRef // the subject's scope, for filtering by tenant
@@ -258,9 +277,17 @@ type Service interface {
 	Logout(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
 	GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error)
+	// SetRole is GrantRole done by a person: it grants role at scope, or
+	// replaces the role already held on that node, and records actor and the
+	// replaced role in authz_audit in the same transaction (§11.7).
+	SetRole(ctx context.Context, userID string, scope ScopeRef, role Role, actor string) (Membership, error)
 	// RevokeRole removes a membership and records who did it (§11.7).
 	RevokeRole(ctx context.Context, userID string, scope ScopeRef, actor string) error
 	ListMemberships(ctx context.Context, userID string) ([]Membership, error)
+	// Members lists the memberships on r's chain org → workspace → project,
+	// ordered by email then level (org first), resuming after the given key
+	// (zero key = first page); limit ≤ 0 or > 100 → 100.
+	Members(ctx context.Context, r Resource, after MemberKey, limit int) ([]Member, error)
 	// ListAudit reads the newest destructive actions (§11.7), newest first,
 	// filtered to one scope id when given.
 	ListAudit(ctx context.Context, scopeID string, limit int) ([]AuditEntry, error)

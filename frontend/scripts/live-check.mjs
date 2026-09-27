@@ -173,6 +173,43 @@ await step("runs page renders real runs with a status", async () => {
 });
 
 await step(
+  "Members link follows the server's member.manage action (§11.3.2)",
+  async () => {
+    // Whatever role the seed gave this account, the nav must agree with
+    // the actions[] the api computed for it.
+    const actions = await page.evaluate(async (id) => {
+      const r = await fetch("/v1/projects?limit=100", {
+        credentials: "same-origin",
+      });
+      const body = await r.json();
+      return body.items.find((p) => p.id === id)?.actions ?? [];
+    }, project);
+    const manage = actions.includes("member.manage");
+    const link = page.getByRole("link", { name: "Members" });
+    // The link appears once ProjectAccess has the project; give it time
+    // either way so absence is not just "not loaded yet".
+    await link
+      .first()
+      .waitFor({ state: "visible", timeout: manage ? 10000 : 1500 })
+      .catch(() => undefined);
+    const links = await link.count();
+    if (manage !== links > 0)
+      throw new Error(
+        `actions ${JSON.stringify(actions)} but ${links} Members link(s)`,
+      );
+    if (manage) {
+      await page.goto(base + "/p/" + project + "/members");
+      await page.waitForResponse(v1(/^\/v1\/projects\/[^/]+\/members\?/), {
+        timeout: 10000,
+      });
+      await page
+        .locator(".member-table")
+        .waitFor({ state: "visible", timeout: 10000 });
+    }
+  },
+);
+
+await step(
   "run search that matches nothing shows the empty state, not an error",
   async () => {
     await page.goto(

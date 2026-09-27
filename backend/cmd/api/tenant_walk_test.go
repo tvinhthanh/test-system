@@ -52,6 +52,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		project tenancy.ProjectID
 		token   string
 		user    *client
+		userID  string
 	}
 	seed := func(slug, email, password string) org {
 		o, err := ten.CreateOrganization(ctx, strings.ToUpper(slug), slug)
@@ -72,7 +73,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			t.Fatalf("login %s: %d %s", email, r.code, r.raw)
 		}
 		c.csrf, _ = c.get("/v1/session").body["csrfToken"].(string)
-		return org{project: p.ID, token: tok.Plaintext, user: c}
+		return org{project: p.ID, token: tok.Plaintext, user: c, userID: u.ID}
 	}
 	a := seed("alpha", "a@alpha.example", "alpha passphrase long enough")
 	b := seed("beta", "b@beta.example", "beta passphrase long enough")
@@ -141,6 +142,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
 		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
 		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
+		"userId": a.userID,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -170,6 +172,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/releases":                                              map[string]any{"version": "walk"},
 		"POST /v1/projects/{projectId}/releases/{releaseId}/evaluate":                         map[string]any{},
 		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":                         map[string]any{"status": "approved"},
+		// Members: a real, verified account, so only the tenant check can refuse.
+		"POST /v1/projects/{projectId}/members": map[string]any{"email": "a@alpha.example", "role": "viewer"},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.

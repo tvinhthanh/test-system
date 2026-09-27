@@ -55,3 +55,6 @@ GET /v1/projects/{projectId}/releases/{releaseId}
 POST /v1/projects/{projectId}/releases/{releaseId}/evaluate
 POST /v1/projects/{projectId}/releases/{releaseId}/decision
 GET /v1/releases/{releaseId}/gate
+GET /v1/projects/{projectId}/members
+POST /v1/projects/{projectId}/members
+DELETE /v1/projects/{projectId}/members/{userId}

@@ -88,6 +88,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	handle("GET /v1/projects/{projectId}/metrics/trend", d.trend)
 	d.identityOpsRoutes(handle)
 	d.testmgmtRoutes(handle)
+	d.memberRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
 }
@@ -129,7 +130,7 @@ func (d *dashboard) project(w http.ResponseWriter, r *http.Request, p authz.Prin
 		d.internal(w, r, err)
 		return tenancy.Scope{}, false
 	}
-	res := authz.Resource{OrgID: string(scope.OrgID), WorkspaceID: string(scope.WorkspaceID), ProjectID: string(scope.ProjectID)}
+	res := resourceOf(scope)
 	switch err := d.authz.Authorize(r.Context(), p, res, action); {
 	case err == nil:
 		return scope, true

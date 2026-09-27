@@ -7,6 +7,7 @@ import {
   Gauge,
   GitBranch,
   LogOut,
+  Users,
 } from "@lucide/vue";
 import { computed } from "vue";
 import { useRoute } from "vue-router";
@@ -16,7 +17,7 @@ import { cn } from "@/lib/utils";
 // One nav, rendered in the desktop rail and inside the mobile sheet.
 const props = defineProps<{ project: string; busy: boolean }>();
 const emit = defineEmits<{ navigate: []; logout: [] }>();
-const { session } = useServices();
+const { session, projectAccess } = useServices();
 const route = useRoute();
 const p = computed(() => encodeURIComponent(props.project));
 const items = computed(() =>
@@ -53,6 +54,18 @@ const items = computed(() =>
             route.path.includes("/plans") ||
             route.path.includes("/releases"),
         },
+        // Only for those who may manage members (§11.3.2); others would
+        // meet a 403 there.
+        ...(projectAccess.can(props.project, "member.manage")
+          ? [
+              {
+                to: `/p/${p.value}/members`,
+                label: "Members",
+                icon: Users,
+                active: route.path.endsWith("/members"),
+              },
+            ]
+          : []),
       ]
     : [],
 );

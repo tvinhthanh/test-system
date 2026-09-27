@@ -7,6 +7,7 @@ import { createSessionStore } from "./features/auth/sessionStore";
 import { ReportsRepository } from "./features/reports/reportsRepository";
 import { ProjectAccess } from "./features/reports/projectAccess";
 import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
+import { MembersRepository } from "./features/members/membersRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
 import "./shared/theme.css";
@@ -36,6 +37,7 @@ async function start() {
     reports,
     projectAccess,
     testmgmt: new TestmgmtRepository(api),
+    members: new MembersRepository(api),
     fixture,
   });
   app.use(router);

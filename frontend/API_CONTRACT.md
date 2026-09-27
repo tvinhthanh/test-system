@@ -204,6 +204,26 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
   token holding `project:read`.
 
+## Members (§11.3.2, implemented 2026-09-27)
+
+Every route needs `member.manage` (workspace admin, org admin, owner; not a
+maintainer); the sidebar shows "Members" only when the project's `actions`
+contain it.
+
+- `GET /v1/projects/{projectId}/members?limit=100&cursor=...` → page of
+  `{userId,email,role,level,createdAt}`, ordered by email then level. `level`
+  other than `project` is inherited from the workspace/org and read-only here.
+  The UI walks pages (≤ 20) since a roster is small.
+- `POST /v1/projects/{projectId}/members` `{email, role}` with `role` in
+  `maintainer|member|viewer` → the project-level member. Re-posting changes the
+  role. `404 USER_NOT_FOUND` when no verified account uses the email (there is
+  no invite mail yet); the repository turns it into advice, other 404s stay
+  generic.
+- `DELETE /v1/projects/{projectId}/members/{userId}` → 204; 404 for a role
+  held only on the workspace/org.
+
+Every grant and revoke is recorded server-side with the session user as actor.
+
 ## Handoff And Verification
 
 Backend owner must confirm session bootstrap semantics, list limits, query

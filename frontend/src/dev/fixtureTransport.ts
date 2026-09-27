@@ -36,6 +36,17 @@ function run(i: number) {
   };
 }
 
+let fixtureMembers = [
+  { email: "alex@example.test", level: "workspace", role: "workspace_admin" },
+  { email: "jordan@example.test", level: "project", role: "maintainer" },
+  { email: "sam@example.test", level: "project", role: "member" },
+  { email: "taylor@example.test", level: "project", role: "viewer" },
+].map((m, i) => ({
+  ...m,
+  userId: i === 0 ? user.id : `preview-user-${i}`,
+  createdAt: new Date(Date.UTC(2026, 7, 20 + i * 5)).toISOString(),
+}));
+
 export function createFixtureTransport(): Transport {
   return async (input, init) => {
     await new Promise<void>((resolve, reject) => {
@@ -93,6 +104,7 @@ export function createFixtureTransport(): Transport {
               "view",
               "triage",
               "identity.merge",
+              "member.manage",
               "testmgmt.write",
               "release.decide",
             ],
@@ -215,6 +227,52 @@ export function createFixtureTransport(): Transport {
     // executions, two releases (one blocked, one shipped by override).
     const tm = fixtureTestmgmt(url, init);
     if (tm) return response(tm.body, tm.status);
+    // §11.3 members: the preview user is a workspace admin, so the list
+    // shows one inherited row next to the project's own.
+    const mm = path.match(/^\/v1\/projects\/commerce\/members(?:\/([^/]+))?$/);
+    if (mm) {
+      const body =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body) as { email?: string; role?: string })
+          : {};
+      if (init?.method === "DELETE") {
+        fixtureMembers = fixtureMembers.filter(
+          (m) => !(m.userId === mm[1] && m.level === "project"),
+        );
+        return new Response(null, { status: 204 });
+      }
+      if (init?.method === "POST") {
+        const email = String(body.email ?? "")
+          .trim()
+          .toLowerCase();
+        const known = fixtureMembers.find((m) => m.email === email);
+        if (!known)
+          return response(
+            {
+              error: {
+                code: "USER_NOT_FOUND",
+                message: "no verified account uses that email",
+                details: { field: "email" },
+              },
+            },
+            404,
+          );
+        const row = {
+          ...known,
+          role: String(body.role),
+          level: "project",
+          createdAt: iso(0),
+        };
+        fixtureMembers = [
+          ...fixtureMembers.filter(
+            (m) => !(m.userId === known.userId && m.level === "project"),
+          ),
+          row,
+        ].sort((a, b) => a.email.localeCompare(b.email));
+        return response(row);
+      }
+      return response({ items: fixtureMembers, nextCursor: null });
+    }
     // §2.5 overview and §9.4 review/aliases, so every screen renders offline.
     if (path.endsWith("/metrics/triage")) {
       const long = url.searchParams.get("days") === "90";

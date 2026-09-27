@@ -405,29 +405,100 @@ func (s *service) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 func (s *service) GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error) {
+	m, _, err := s.grant(ctx, userID, scope, role)
+	return m, err
+}
+
+func (s *service) SetRole(ctx context.Context, userID string, scope ScopeRef, role Role, actor string) (Membership, error) {
+	if strings.TrimSpace(actor) == "" {
+		return Membership{}, fmt.Errorf("%w: actor is required to grant a role", ErrInvalid)
+	}
+	var m Membership
+	err := s.db.WithTx(ctx, func(ctx context.Context) error {
+		var previous string
+		var err error
+		if m, previous, err = s.grant(ctx, userID, scope, role); err != nil {
+			return err
+		}
+		return s.audit(ctx, "role.grant", "membership", m.ID, string(scope.Level), scope.ID, actor, map[string]any{"user_id": userID, "role": role, "previous": previous})
+	})
+	return m, err
+}
+
+// grant upserts the one row per (user, node) and returns the role it
+// replaced ("" for a new row).
+func (s *service) grant(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, string, error) {
 	if !membershipLevels[scope.Level] || !isUUID(scope.ID) {
-		return Membership{}, fmt.Errorf("%w: membership scope", ErrInvalid)
+		return Membership{}, "", fmt.Errorf("%w: membership scope", ErrInvalid)
 	}
 	level, ok := RoleLevel[role]
 	if !ok {
-		return Membership{}, fmt.Errorf("%w: role %q", ErrInvalid, role)
+		return Membership{}, "", fmt.Errorf("%w: role %q", ErrInvalid, role)
 	}
 	// §11.3.1 "Gán ở tầng": a role lives at one level and inherits down.
 	if level != scope.Level {
-		return Membership{}, fmt.Errorf("%w: role %s is granted at the %s level, not %s", ErrInvalid, role, level, scope.Level)
+		return Membership{}, "", fmt.Errorf("%w: role %s is granted at the %s level, not %s", ErrInvalid, role, level, scope.Level)
 	}
 	if !isUUID(userID) {
-		return Membership{}, ErrNotFound
+		return Membership{}, "", ErrNotFound
 	}
 	var m Membership
-	// Granting again changes the role: one row per (user, node).
+	var previous *string
+	// Granting again changes the role: one row per (user, node). The CTE
+	// reads the row as it was before this statement.
 	err := s.db.Q(ctx).QueryRow(ctx, `
+		WITH prev AS (
+			SELECT role FROM memberships WHERE user_id = $1 AND scope_level = $2 AND scope_id = $3
+		)
 		INSERT INTO memberships (user_id, scope_level, scope_id, role) VALUES ($1, $2, $3, $4)
 		ON CONFLICT (user_id, scope_level, scope_id) DO UPDATE SET role = EXCLUDED.role
-		RETURNING id, user_id, scope_level, scope_id, role, created_at`,
+		RETURNING id, user_id, scope_level, scope_id, role, created_at, (SELECT role FROM prev)`,
 		userID, string(scope.Level), scope.ID, string(role),
-	).Scan(&m.ID, &m.UserID, &m.Scope.Level, &m.Scope.ID, &m.Role, &m.CreatedAt)
-	return m, mapErr(err)
+	).Scan(&m.ID, &m.UserID, &m.Scope.Level, &m.Scope.ID, &m.Role, &m.CreatedAt, &previous)
+	if previous == nil {
+		return m, "", mapErr(err)
+	}
+	return m, *previous, mapErr(err)
+}
+
+func (s *service) Members(ctx context.Context, r Resource, after MemberKey, limit int) ([]Member, error) {
+	if !isUUID(r.OrgID) || !isUUID(r.WorkspaceID) || !isUUID(r.ProjectID) {
+		return nil, fmt.Errorf("%w: resource", ErrInvalid)
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rank := map[Level]int{LevelOrganization: 0, LevelWorkspace: 1, LevelProject: 2}
+	afterRank, ok := rank[after.Level]
+	if after.Email != "" && !ok {
+		return nil, fmt.Errorf("%w: member cursor", ErrInvalid)
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT user_id, email, role, scope_level, scope_id, created_at FROM (
+			SELECT m.user_id, u.email, m.role, m.scope_level, m.scope_id, m.created_at,
+			       CASE m.scope_level WHEN 'organization' THEN 0 WHEN 'workspace' THEN 1 ELSE 2 END AS rank
+			  FROM memberships m JOIN users u ON u.id = m.user_id
+			 WHERE (m.scope_level = 'organization' AND m.scope_id = $1)
+			    OR (m.scope_level = 'workspace'    AND m.scope_id = $2)
+			    OR (m.scope_level = 'project'      AND m.scope_id = $3)
+		) chain
+		 WHERE $4 = '' OR (email, rank) > ($4, $5)
+		 ORDER BY email, rank
+		 LIMIT $6`,
+		r.OrgID, r.WorkspaceID, r.ProjectID, after.Email, afterRank, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Member{}
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.UserID, &m.Email, &m.Role, &m.Scope.Level, &m.Scope.ID, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 func (s *service) RevokeRole(ctx context.Context, userID string, scope ScopeRef, actor string) error {

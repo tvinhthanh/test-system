@@ -38,6 +38,8 @@ tags:
     description: Browser reads and triage writes, always inside one project the session may view. 600 requests/minute/user.
   - name: testmgmt
     description: "Test Management Plane (§6.8, P2): requirements, manual test cases linked to TestIdentity, plans with manual executions, releases with the server-side quality gate. Session for people; the gate is also readable by a project:read token for CI."
+  - name: members
+    description: "Who can reach a project and with which role (§11.3). Project-level roles are granted and revoked here by holders of `member.manage`; every change is audited."
   - name: ops
     description: Liveness.
 
@@ -273,6 +275,88 @@ paths:
                   - { $ref: "#/components/schemas/Page" }
                   - properties: { items: { type: array, items: { $ref: "#/components/schemas/Project" } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/projects/{projectId}/members:
+    get:
+      operationId: listProjectMembers
+      tags: [members]
+      summary: Everyone who can reach the project, and through which node
+      description: |
+        Memberships on the chain organization → workspace → project, ordered by
+        email then level (organization first); a person with roles at several
+        nodes appears once per node. `level` other than `project` is inherited
+        and changed at its own level. Needs `member.manage` (§11.3.2 — workspace
+        admin, org admin, owner; a maintainer cannot).
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of members.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Member" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: setProjectMember
+      tags: [members]
+      summary: Grant a project role to an existing account, or change it
+      description: |
+        Upsert of the one project-level row for that person; re-posting with
+        another role changes it. Only project roles are accepted (§11.3.1 "Gán
+        ở tầng"). The account must exist and be verified — there is no invite
+        mail yet — so `404 USER_NOT_FOUND` tells the manager the email is not
+        in use (accepted enumeration, §11.6 API6). Recorded in `authz_audit`
+        as `role.grant` with the replaced role and the session user as actor.
+        Needs `member.manage`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                role: { type: string, enum: [maintainer, member, viewer] }
+      responses:
+        "200":
+          description: The project-level membership as it now stands.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Member" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`PROJECT_NOT_FOUND`, or `USER_NOT_FOUND` — no verified account uses that email."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/members/{userId}:
+    delete:
+      operationId: revokeProjectMember
+      tags: [members]
+      summary: Remove the person's project-level role
+      description: |
+        Roles inherited from the workspace or organization are untouched (and
+        a person holding only those answers 404 here). Recorded in
+        `authz_audit` as `role.revoke`. Needs `member.manage`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/UserId" }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/runs:
     get:
       operationId: listRuns
@@ -1335,6 +1419,7 @@ components:
     PlanId: { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
     ExecutionId: { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
     ReleaseId: { name: releaseId, in: path, required: true, schema: { type: string, format: uuid } }
+    UserId: { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 }, description: Page size; the server caps at 100 (§7.10). }
     Cursor: { name: cursor, in: query, schema: { type: string }, description: "Opaque; bound to project, filter and sort. `400 INVALID_CURSOR` when reused elsewhere." }
 
@@ -1561,6 +1646,18 @@ components:
     ProjectAction:
       type: string
       enum: [view, triage, identity.merge, token.manage, project.configure, project.manage, member.manage, org.manage, data.delete, testmgmt.write, release.decide]
+    Member:
+      type: object
+      required: [userId, email, role, level, createdAt]
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [org_owner, org_admin, workspace_admin, maintainer, member, viewer] }
+        level:
+          type: string
+          enum: [organization, workspace, project]
+          description: Where the role is held. Anything but `project` is inherited and not changeable from the project.
+        createdAt: { type: string, format: date-time }
     Run:
       type: object
       required: [id, branch, commitSha, status, environmentName, startedAt, durationMs, totalCount, passedCount, failedCount, flakyCount]

@@ -26,6 +26,7 @@ const section = computed(() => {
   if (path.includes("/releases")) return "Releases";
   if (path.includes("/flaky")) return "Flaky tests";
   if (path.includes("/tests")) return "Test intelligence";
+  if (path.endsWith("/members")) return "Members";
   return "";
 });
 const menu = ref(false);

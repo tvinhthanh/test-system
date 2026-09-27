@@ -87,6 +87,10 @@ export function makeRouter(
               import("../../features/testmgmt/ReleaseDetailPage.vue"),
           },
           {
+            path: "p/:project/members",
+            component: () => import("../../features/members/MembersPage.vue"),
+          },
+          {
             path: "p/:project/tests/:identity/history",
             component: () =>
               import("../../features/reports/IdentityHistoryPage.vue"),

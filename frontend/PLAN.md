@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 36 unit tests, production build + bundle gate
+- Latest verification: typecheck, 40 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,24 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-27 (project members, §11.3.2)
+
+- `features/members/`: `MembersRepository` (roster pages, grant/change,
+  revoke; `USER_NOT_FOUND` mapped to actionable text), role vocabulary in
+  `roles.ts` so the screen imports no repository value, `MembersPage` at
+  `/p/:project/members` — add by email + role, per-row role select and a
+  two-step Remove on project-level rows, inherited rows read-only with
+  "via workspace/organization".
+- Sidebar "Members" item and breadcrumb only when `ProjectAccess` grants
+  `member.manage`; fixture project `commerce` has it and a four-person roster.
+- `live-check.mjs`: the Members link must match the api's `member.manage`
+  for the signed-in account (absent for the CI member; page opens when
+  present).
+- Verified: typecheck, 40 unit tests, fixture screenshots light/dark/390 px,
+  and a browser run against the real api + Postgres (workspace admin adds,
+  changes and removes a member; the member sees no link, gets 403 on the
+  api, and 404 on the project once removed).
 
 ### 2026-09-22 (project permissions and API hardening)
 
