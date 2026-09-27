@@ -158,7 +158,8 @@ func (s *service) Login(ctx context.Context, email, password string, meta Sessio
 	var userID string
 	var hash *string
 	var verified *time.Time
-	err := s.db.Q(ctx).QueryRow(ctx, `SELECT id, password_hash, email_verified_at FROM users WHERE email = $1`, e).Scan(&userID, &hash, &verified)
+	var mfa bool
+	err := s.db.Q(ctx).QueryRow(ctx, `SELECT id, password_hash, email_verified_at, totp_enabled_at IS NOT NULL FROM users WHERE email = $1`, e).Scan(&userID, &hash, &verified, &mfa)
 	if err != nil && !errors.Is(err, pg.ErrNoRows) {
 		return Session{}, "", err
 	}
@@ -178,11 +179,22 @@ func (s *service) Login(ctx context.Context, email, password string, meta Sessio
 	if err := s.clearLoginFailures(ctx, ipKey, emailKey); err != nil {
 		return Session{}, "", err
 	}
+	// The password alone opens no session on an account with a second factor.
+	if mfa {
+		ch, err := s.openChallenge(ctx, userID, meta)
+		if err != nil {
+			return Session{}, "", err
+		}
+		return Session{}, "", ch
+	}
+	return s.openSession(ctx, userID, meta)
+}
 
+func (s *service) openSession(ctx context.Context, userID string, meta SessionMeta) (Session, string, error) {
 	secret := newSessionSecret()
 	now := s.now().UTC()
 	var sess Session
-	err = scanSession(s.db.Q(ctx).QueryRow(ctx, `
+	err := scanSession(s.db.Q(ctx).QueryRow(ctx, `
 		INSERT INTO sessions (user_id, token_hash, created_at, last_seen_at, expires_at, ip, user_agent)
 		VALUES ($1, $2, $3, $3, $4, $5, $6)
 		RETURNING `+sessionColumns,
@@ -195,9 +207,10 @@ func (s *service) Login(ctx context.Context, email, password string, meta Sessio
 
 const sessionColumns = `id, user_id, created_at, last_seen_at, expires_at, revoked_at, coalesce(ip, ''), coalesce(user_agent, '')`
 
-func scanSession(row interface{ Scan(dest ...any) error }, out *Session) error {
+// scanSession reads sessionColumns, then any extra columns into extra.
+func scanSession(row interface{ Scan(dest ...any) error }, out *Session, extra ...any) error {
 	var revoked *time.Time
-	if err := row.Scan(&out.ID, &out.UserID, &out.CreatedAt, &out.LastSeenAt, &out.ExpiresAt, &revoked, &out.IP, &out.UserAgent); err != nil {
+	if err := row.Scan(append([]any{&out.ID, &out.UserID, &out.CreatedAt, &out.LastSeenAt, &out.ExpiresAt, &revoked, &out.IP, &out.UserAgent}, extra...)...); err != nil {
 		return err
 	}
 	out.CreatedAt, out.LastSeenAt, out.ExpiresAt = out.CreatedAt.UTC(), out.LastSeenAt.UTC(), out.ExpiresAt.UTC()
@@ -213,7 +226,14 @@ func (s *service) AuthenticateSession(ctx context.Context, secret string) (Princ
 		return Principal{}, Session{}, ErrUnauthenticated
 	}
 	var sess Session
-	err := scanSession(s.db.Q(ctx).QueryRow(ctx, `SELECT `+sessionColumns+` FROM sessions WHERE token_hash = $1 AND revoked_at IS NULL`, hashSecret(s.pepper, secret)), &sess)
+	var enrol bool
+	// One query: the session, and whether its user is an org owner without
+	// MFA (§11.2) — such a session reaches only the session and MFA routes.
+	err := scanSession(s.db.Q(ctx).QueryRow(ctx, `
+		SELECT `+sessionColumns+`,
+		       NOT EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.totp_enabled_at IS NOT NULL)
+		       AND EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = sessions.user_id AND m.role = 'org_owner')
+		  FROM sessions WHERE token_hash = $1 AND revoked_at IS NULL`, hashSecret(s.pepper, secret)), &sess, &enrol)
 	if err != nil {
 		if errors.Is(err, pg.ErrNoRows) {
 			return Principal{}, Session{}, ErrUnauthenticated
@@ -227,7 +247,7 @@ func (s *service) AuthenticateSession(ctx context.Context, secret string) (Princ
 	if now.Sub(sess.LastSeenAt) >= sessionTouch {
 		_, _ = s.db.Q(ctx).Exec(ctx, `UPDATE sessions SET last_seen_at = $2 WHERE id = $1`, sess.ID, now)
 	}
-	return Principal{Kind: PrincipalUser, UserID: sess.UserID}, sess, nil
+	return Principal{Kind: PrincipalUser, UserID: sess.UserID, MFAEnrollmentRequired: enrol}, sess, nil
 }
 
 func (s *service) Logout(ctx context.Context, sessionID string) error {

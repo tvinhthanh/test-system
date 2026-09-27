@@ -87,6 +87,10 @@ export function makeRouter(
               import("../../features/testmgmt/ReleaseDetailPage.vue"),
           },
           {
+            path: "account/security",
+            component: () => import("../../features/account/SecurityPage.vue"),
+          },
+          {
             path: "p/:project/members",
             component: () => import("../../features/members/MembersPage.vue"),
           },
@@ -108,6 +112,16 @@ export function makeRouter(
     if (to.meta.protected || to.path === "/sign-in") await session.ensure();
     if (to.meta.protected && !session.user)
       return { path: "/sign-in", query: { redirect: to.fullPath } };
+    // §11.2: an org owner without MFA reaches nothing else (the api agrees:
+    // 403 MFA_ENROLLMENT_REQUIRED), so go straight to the setup.
+    const mfa = session.user?.mfa;
+    if (
+      to.meta.protected &&
+      mfa?.required &&
+      !mfa.enabled &&
+      to.path !== "/account/security"
+    )
+      return "/account/security";
     if (to.path === "/sign-in" && session.user) return "/";
     return true;
   });

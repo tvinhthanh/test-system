@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 40 unit tests, production build + bundle gate
+- Latest verification: typecheck, 44 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,31 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-27 (two-factor authentication, §11.2)
+
+- Session user decodes `mfa:{enabled,required}`; `SessionRepository.login`
+  returns either a session or a challenge (202); the store keeps the
+  challenge, `completeMfa(code)` opens the session, `refresh()` re-reads the
+  flags after a change. Error codes `INVALID_CODE` and
+  `MFA_CHALLENGE_EXPIRED` get their own words; an expired challenge returns
+  the form to the password step.
+- Sign-in page: code step (one-time-code autocomplete, recovery codes
+  accepted, "Use another account").
+- `features/account/`: `MfaRepository` (setup link must be `otpauth://totp/`,
+  at most ten recovery codes) and `SecurityPage` at `/account/security` —
+  set up with the key in groups of four + an `otpauth://` link, confirm with
+  a code, recovery codes shown once (copy / download .txt), turn off with a
+  code or recovery code (not offered to owners). Shield link in the sidebar
+  footer, amber while an owner has not enrolled.
+- Router guard: an owner without MFA reaches only `/account/security`.
+- `decode.boolean` shared (testmgmt's local copy now uses it).
+- Verified: typecheck, 44 unit tests, fixture screenshots light/dark/390 px,
+  and a browser run against the real api + Postgres with an independent
+  RFC 6238 authenticator: owner held on Security (api 403 agrees), enable
+  with a wrong then right code, ten recovery codes, projects open, sign out,
+  password → code step, wrong code kept on the step, recovery code signs in,
+  9 left, no "turn off" for an owner.
 
 ### 2026-09-27 (project members, §11.3.2)
 

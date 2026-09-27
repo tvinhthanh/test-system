@@ -37,6 +37,24 @@ generic 401; rate limit is enforced by backend. Login must return a user.
 `POST /v1/session/logout` takes `{}` and returns 200 `{}` or 204 after revoking
 the server session. UI clears state only after server confirmation or a 401.
 
+### Two-factor authentication (§11.2, implemented 2026-09-27)
+
+- The session user carries `mfa:{enabled,required}`. `required` means an org
+  owner: until `enabled`, every route except `/v1/session*` answers
+  `403 MFA_ENROLLMENT_REQUIRED`, so the router sends such a user to
+  `/account/security` and nowhere else.
+- With MFA on, `POST /v1/session` answers **202**
+  `{mfa:"required",challenge,expiresAt}` and sets no cookie. The sign-in form
+  turns into a code step: `POST /v1/session/mfa {challenge,code}` returns the
+  normal session shape. `code` is a 6-digit TOTP or a recovery code
+  (`xxxxx-xxxxx`). `400 INVALID_CODE` keeps the step; `401 MFA_CHALLENGE_EXPIRED`
+  (five minutes, single use) goes back to the password.
+- Security page: `GET /v1/session/mfa` → `{enabled,required,recoveryCodesLeft}`;
+  `POST …/setup` → `{secret,otpauthUri}` (the link must start with
+  `otpauth://totp/`); `POST …/enable {code}` → `{recoveryCodes:[10]}`, shown
+  once, other sessions revoked; `POST …/disable {code}` → 204, or
+  `409 MFA_MANDATORY` for owners (the UI offers no "turn off" to them).
+
 ## Projects
 
 `GET /v1/projects?limit=50&cursor=...` returns a page of

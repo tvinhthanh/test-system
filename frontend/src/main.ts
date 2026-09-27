@@ -8,6 +8,7 @@ import { ReportsRepository } from "./features/reports/reportsRepository";
 import { ProjectAccess } from "./features/reports/projectAccess";
 import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
 import { MembersRepository } from "./features/members/membersRepository";
+import { MfaRepository } from "./features/account/mfaRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
 import "./shared/theme.css";
@@ -38,6 +39,7 @@ async function start() {
     projectAccess,
     testmgmt: new TestmgmtRepository(api),
     members: new MembersRepository(api),
+    mfa: new MfaRepository(api),
     fixture,
   });
   app.use(router);

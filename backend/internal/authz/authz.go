@@ -105,6 +105,10 @@ type Principal struct {
 	TokenID     string
 	TokenScope  ScopeRef
 	Permissions []Permission
+	// MFAEnrollmentRequired: a session of an org owner who has not turned
+	// on MFA (§11.2). SessionMiddleware lets it reach only the session and
+	// MFA routes.
+	MFAEnrollmentRequired bool
 }
 
 // User is a dashboard account (§11.2). P1-min creates users by script and
@@ -136,6 +140,30 @@ type SessionMeta struct {
 	IP        string
 	UserAgent string
 }
+
+// MFAStatus is what the account page shows. Required: the user is an org
+// owner somewhere (§11.2), so MFA cannot be turned off.
+type MFAStatus struct {
+	Enabled           bool
+	Required          bool
+	RecoveryCodesLeft int
+}
+
+// MFASetup is shown once, between "set up" and the first valid code.
+type MFASetup struct {
+	Secret string // base32, for typing into an authenticator app
+	URI    string // otpauth://totp/…, for a QR code or a tap on a phone
+}
+
+// MFARequired is Login's answer for an account with MFA on: the password
+// was right, no session exists yet, and Challenge (shown once, valid five
+// minutes) goes back with a code to CompleteMFALogin. Use errors.As.
+type MFARequired struct {
+	Challenge string
+	ExpiresAt time.Time
+}
+
+func (e *MFARequired) Error() string { return "authz: second factor required" }
 
 // Membership grants a role at a node; it inherits down the tree.
 type Membership struct {
@@ -229,6 +257,11 @@ var (
 	ErrRateLimited = errors.New("authz: too many attempts")
 	// ErrInvalid: input failed shape validation.
 	ErrInvalid = errors.New("authz: invalid input")
+	// ErrInvalidCode: a TOTP or recovery code that does not match (counted
+	// by the login rate limit).
+	ErrInvalidCode = errors.New("authz: invalid code")
+	// ErrMFAMandatory: an org owner may not turn MFA off (§11.2).
+	ErrMFAMandatory = errors.New("authz: MFA is mandatory for org owners")
 )
 
 // Service is the contract. Writes join the caller's transaction (§6.9.6).
@@ -270,10 +303,27 @@ type Service interface {
 	// ErrUnauthenticated — unknown email, wrong password, unverified email —
 	// so the response cannot enumerate accounts; the rate limit counts
 	// failures per IP and per account and answers ErrRateLimited once
-	// exceeded. The returned secret is the cookie value, shown once.
+	// exceeded. On an account with MFA on it opens no session and returns
+	// *MFARequired instead. The returned secret is the cookie value, shown once.
 	Login(ctx context.Context, email, password string, meta SessionMeta) (session Session, secret string, err error)
 	// AuthenticateSession turns a cookie value into a user Principal.
 	AuthenticateSession(ctx context.Context, secret string) (Principal, Session, error)
+	// CompleteMFALogin trades the challenge from Login plus a TOTP or
+	// recovery code for a session. Wrong codes count toward the rate limit
+	// (ErrInvalidCode, then ErrRateLimited); an unknown or expired challenge
+	// is ErrUnauthenticated.
+	CompleteMFALogin(ctx context.Context, challenge, code string, meta SessionMeta) (session Session, secret string, err error)
+	MFAStatus(ctx context.Context, userID string) (MFAStatus, error)
+	// BeginMFASetup draws a new secret (replacing an unconfirmed one);
+	// ErrConflict when MFA is already on.
+	BeginMFASetup(ctx context.Context, userID string) (MFASetup, error)
+	// EnableMFA turns MFA on once code matches the pending secret, returns
+	// ten recovery codes (shown once) and revokes every other session of the
+	// user except keepSession.
+	EnableMFA(ctx context.Context, userID, code, keepSession string) ([]string, error)
+	// DisableMFA needs a current code or a recovery code; ErrMFAMandatory
+	// for an org owner.
+	DisableMFA(ctx context.Context, userID, code string) error
 	Logout(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
 	GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error)

@@ -180,6 +180,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	exempt := map[string]bool{
 		"GET /healthz": true, "GET /v1/session": true, "POST /v1/session": true, "POST /v1/session/logout": true,
 		"GET /v1/projects": true, "POST /v1/runs": true, "POST /v1/artifacts": true,
+		// MFA acts on the signed-in user only; asserted in mfa_test.go.
+		"POST /v1/session/mfa": true, "GET /v1/session/mfa": true, "POST /v1/session/mfa/setup": true,
+		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
 	}
 	param := regexp.MustCompile(`\{([a-zA-Z]+)\}`)
 	fill := func(path string, ids map[string]string) string {

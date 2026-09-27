@@ -2,7 +2,13 @@ import { defineStore } from "pinia";
 import { ref, shallowRef } from "vue";
 import type { ApiClient } from "../../core/api/client";
 import { ApiError } from "../../core/api/client";
-import type { SessionRepository, Session, User } from "./sessionRepository";
+import {
+  isChallenge,
+  type MfaChallenge,
+  type SessionRepository,
+  type Session,
+  type User,
+} from "./sessionRepository";
 
 export function createSessionStore(
   api: ApiClient,
@@ -13,6 +19,8 @@ export function createSessionStore(
     const ready = ref(false);
     const busy = ref(false);
     const error = shallowRef<unknown>(null);
+    // Set between a correct password and the second factor (SPEC §11.2).
+    const challenge = shallowRef<MfaChallenge | null>(null);
     let bootstrap: Promise<void> | undefined;
     function apply(session: Session) {
       user.value = session.user;
@@ -48,7 +56,12 @@ export function createSessionStore(
       try {
         await ensure();
         if (!ready.value) return false;
-        apply(await repository.login(email, password));
+        const result = await repository.login(email, password);
+        if (isChallenge(result)) {
+          challenge.value = result;
+          return false;
+        }
+        apply(result);
         ready.value = true;
         if (!user.value) throw new Error("Missing session user");
         return true;
@@ -66,6 +79,47 @@ export function createSessionStore(
         busy.value = false;
       }
     }
+    async function completeMfa(code: string) {
+      const pending = challenge.value;
+      if (busy.value || !pending) return false;
+      busy.value = true;
+      error.value = null;
+      try {
+        apply(await repository.completeMfa(pending.challenge, code));
+        challenge.value = null;
+        ready.value = true;
+        if (!user.value) throw new Error("Missing session user");
+        return true;
+      } catch (e) {
+        const reason = e instanceof ApiError ? e.code : "";
+        if (reason === "MFA_CHALLENGE_EXPIRED") challenge.value = null;
+        error.value =
+          reason === "INVALID_CODE"
+            ? new ApiError(
+                400,
+                reason,
+                "That code is not valid. Codes change every 30 seconds and each works once.",
+              )
+            : reason === "MFA_CHALLENGE_EXPIRED"
+              ? new ApiError(
+                  401,
+                  reason,
+                  "That sign-in took too long. Enter your password again.",
+                )
+              : e;
+        return false;
+      } finally {
+        busy.value = false;
+      }
+    }
+    function cancelMfa() {
+      challenge.value = null;
+      error.value = null;
+    }
+    // After MFA changes: the user's flags come from the bootstrap.
+    async function refresh() {
+      apply(await repository.bootstrap());
+    }
     async function logout() {
       if (busy.value) return false;
       busy.value = true;
@@ -81,6 +135,18 @@ export function createSessionStore(
         busy.value = false;
       }
     }
-    return { user, ready, busy, error, ensure, login, logout };
+    return {
+      user,
+      ready,
+      busy,
+      error,
+      challenge,
+      ensure,
+      login,
+      completeMfa,
+      cancelMfa,
+      refresh,
+      logout,
+    };
   });
 }

@@ -58,3 +58,8 @@ GET /v1/releases/{releaseId}/gate
 GET /v1/projects/{projectId}/members
 POST /v1/projects/{projectId}/members
 DELETE /v1/projects/{projectId}/members/{userId}
+POST /v1/session/mfa
+GET /v1/session/mfa
+POST /v1/session/mfa/setup
+POST /v1/session/mfa/enable
+POST /v1/session/mfa/disable

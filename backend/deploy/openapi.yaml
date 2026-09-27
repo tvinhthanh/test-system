@@ -218,7 +218,7 @@ paths:
       operationId: login
       tags: [session]
       summary: Sign in with email and password
-      description: "Generic `401` for unknown email, wrong password and unverified email alike; rate limited per IP and per account. Rotates the CSRF token."
+      description: "Generic `401` for unknown email, wrong password and unverified email alike; rate limited per IP and per account. Rotates the CSRF token. On an account with MFA on, a correct password opens no session: `202` with a challenge for `POST /v1/session/mfa`."
       security: [{ csrf: [] }]
       requestBody:
         required: true
@@ -234,6 +234,17 @@ paths:
         "200":
           description: Signed in; the session cookie is set.
           content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "202":
+          description: Password correct, second factor required (§11.2). No cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mfa, challenge, expiresAt]
+                properties:
+                  mfa: { type: string, enum: [required] }
+                  challenge: { type: string, description: "Opaque, single use, five minutes." }
+                  expiresAt: { type: string, format: date-time }
         "400":
           description: "`INVALID_PAYLOAD` (malformed JSON) or `ALREADY_LOGGED_IN` (log out first)."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
@@ -254,6 +265,129 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/CSRF" }
         "503": { $ref: "#/components/responses/AuthUnavailable" }
+  /v1/session/mfa:
+    post:
+      operationId: completeMfaLogin
+      tags: [session]
+      summary: Second step of sign-in — trade the challenge and a code for the session
+      description: |
+        After `POST /v1/session` answered `202`. `code` is the current 6-digit
+        TOTP code or one unused recovery code (`xxxxx-xxxxx`, dash and case
+        ignored). A code works once; one 30-second step of clock drift either
+        way is accepted. Wrong codes count toward the same per-IP and
+        per-account limit as passwords. Guarded like the login (Origin +
+        double-submit CSRF).
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge, code]
+              properties:
+                challenge: { type: string }
+                code: { type: string }
+      responses:
+        "200":
+          description: Signed in; the session cookie is set.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400":
+          description: "`INVALID_CODE`, `INVALID_PAYLOAD` or `ALREADY_LOGGED_IN`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401":
+          description: "`MFA_CHALLENGE_EXPIRED` — unknown, used or older than five minutes; sign in again."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/AuthUnavailable" }
+    get:
+      operationId: getMfaStatus
+      tags: [session]
+      summary: Two-factor state of the signed-in user
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: "`required` — the user is an org owner (§11.2) and cannot turn MFA off."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, required, recoveryCodesLeft]
+                properties:
+                  enabled: { type: boolean }
+                  required: { type: boolean }
+                  recoveryCodesLeft: { type: integer, minimum: 0, maximum: 10 }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/session/mfa/setup:
+    post:
+      operationId: beginMfaSetup
+      tags: [session]
+      summary: Draw a new TOTP secret (MFA off only)
+      description: The secret is stored sealed and stays inactive until `enable` receives a valid code; calling again replaces it.
+      security: [{ sessionCookie: [], csrf: [] }]
+      responses:
+        "200":
+          description: Shown once — type the secret into an authenticator app, or open the URI.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauthUri]
+                properties:
+                  secret: { type: string, description: "Base32, 32 characters (160 bits)." }
+                  otpauthUri: { type: string, description: "otpauth://totp/ATP:<email>?secret=…&issuer=ATP&algorithm=SHA1&digits=6&period=30" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/session/mfa/enable:
+    post:
+      operationId: enableMfa
+      tags: [session]
+      summary: Turn MFA on with a first valid code
+      description: Returns ten recovery codes, shown once, and revokes every other session of the user. Audited as `mfa.enable`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string } } } } }
+      responses:
+        "200":
+          description: MFA is on.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recoveryCodes]
+                properties:
+                  recoveryCodes: { type: array, minItems: 10, maxItems: 10, items: { type: string } }
+        "400":
+          description: "`INVALID_CODE` or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/mfa/disable:
+    post:
+      operationId: disableMfa
+      tags: [session]
+      summary: Turn MFA off with a current code or a recovery code
+      description: Refused for org owners (§11.2). Deletes the recovery codes. Audited as `mfa.disable`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string } } } } }
+      responses:
+        "204": { description: MFA is off. }
+        "400":
+          description: "`INVALID_CODE` or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "409":
+          description: "`MFA_MANDATORY` — an org owner; or `CONFLICT` — MFA is already off."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   # ---- dashboard (frontend/API_CONTRACT.md) ------------------------------------
   /v1/projects:
@@ -1629,6 +1763,12 @@ components:
             id: { type: string, format: uuid }
             name: { type: string }
             email: { type: string, format: email }
+            mfa:
+              type: object
+              description: "`required` — an org owner (§11.2); while `required && !enabled` every route but the session and MFA ones answers `403 MFA_ENROLLMENT_REQUIRED`."
+              properties:
+                enabled: { type: boolean }
+                required: { type: boolean }
         csrfToken: { type: string }
 
     # dashboard

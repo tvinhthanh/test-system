@@ -22,6 +22,7 @@ import (
 //   - GET  /v1/session         → bootstrap: user or null, plus the CSRF token
 //   - POST /v1/session         {email, password} → session cookie, rotated CSRF
 //   - POST /v1/session/logout  → revokes the session
+//   - /v1/session/mfa…        → second factor (mfa_http.go)
 //
 // Session cookie: httpOnly, Secure, SameSite=Lax. CSRF: double submit — a
 // readable cookie whose value must be echoed in X-CSRF-Token on every
@@ -94,6 +95,12 @@ func SessionMiddleware(svc Service, opts WebOptions) func(http.Handler) http.Han
 					return
 				}
 			}
+			// §11.2: an org owner without MFA reaches nothing but the session
+			// and MFA routes until they turn it on.
+			if p.MFAEnrollmentRequired && !mfaExempt(r.URL.Path) {
+				httpx.WriteError(w, http.StatusForbidden, "MFA_ENROLLMENT_REQUIRED", "org owners must turn on two-factor authentication first", nil)
+				return
+			}
 			ctx := context.WithValue(WithPrincipal(r.Context(), p), sessionKey{}, sess)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -158,6 +165,10 @@ func originCheck(r *http.Request, opts WebOptions, requireHeader bool) string {
 //	POST /v1/session         {email, password} → same shape with the user and a rotated token
 //	POST /v1/session/logout  {} → 204
 //
+// and, when the account has MFA on, POST /v1/session answers 202
+// {mfa: "required", challenge, expiresAt} and the session comes from
+// POST /v1/session/mfa (mfa_http.go).
+//
 // The CSRF cookie is issued on the anonymous bootstrap so the login POST
 // itself can carry X-CSRF-Token (double submit) — the browser never
 // submits credentials without first having been handed a token by us.
@@ -167,6 +178,7 @@ func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	mux.Handle("GET /v1/session", http.HandlerFunc(h.session))
 	mux.Handle("POST /v1/session", http.HandlerFunc(h.login))
 	mux.Handle("POST /v1/session/logout", http.HandlerFunc(h.logout))
+	mfaRoutes(mux, h)
 }
 
 type webHandlers struct {
@@ -180,9 +192,10 @@ type loginRequest struct {
 }
 
 type sessionUser struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID    string    `json:"id"`
+	Name  string    `json:"name"`
+	Email string    `json:"email"`
+	MFA   *mfaFlags `json:"mfa,omitempty"`
 }
 
 type sessionResponse struct {
@@ -206,7 +219,7 @@ func (h *webHandlers) session(w http.ResponseWriter, r *http.Request) {
 	resp := sessionResponse{CSRFToken: csrf}
 	if p, ok := PrincipalFrom(r.Context()); ok && p.Kind == PrincipalUser {
 		if u, err := h.svc.GetUser(r.Context(), p.UserID); err == nil {
-			resp.User = userDTO(u)
+			resp.User = h.userOut(r, u)
 			if s, ok := SessionFrom(r.Context()); ok {
 				exp := s.ExpiresAt
 				resp.ExpiresAt = &exp
@@ -216,48 +229,71 @@ func (h *webHandlers) session(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *webHandlers) login(w http.ResponseWriter, r *http.Request) {
+// anonymousWrite is the CSRF gate for the two requests that run before a
+// session exists (password, then second factor): allow-listed Origin plus
+// the double-submit token from GET /v1/session; and nobody already signed in.
+func (h *webHandlers) anonymousWrite(w http.ResponseWriter, r *http.Request, v any) bool {
 	if reason := originCheck(r, h.opts, false); reason != "" {
 		httpx.WriteError(w, http.StatusForbidden, "CSRF", reason, nil)
-		return
+		return false
 	}
-	// Double submit on the login itself: the token from GET /v1/session.
 	if c, err := r.Cookie(CSRFCookie); err != nil || c.Value == "" || subtle.ConstantTimeCompare([]byte(c.Value), []byte(r.Header.Get(CSRFHeader))) != 1 {
 		httpx.WriteError(w, http.StatusForbidden, "CSRF", "CSRF token missing or mismatched; call GET /v1/session first", nil)
-		return
+		return false
 	}
 	if _, ok := PrincipalFrom(r.Context()); ok {
 		httpx.WriteError(w, http.StatusBadRequest, "ALREADY_LOGGED_IN", "log out first", nil)
-		return
+		return false
 	}
-	var req loginRequest
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "malformed JSON", nil)
+		return false
+	}
+	return true
+}
+
+// mfaChallengeResponse is the 202 of a correct password on an account with
+// MFA on: no session yet, only the challenge for POST /v1/session/mfa.
+type mfaChallengeResponse struct {
+	MFA       string    `json:"mfa"` // always "required"
+	Challenge string    `json:"challenge"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+func (h *webHandlers) login(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if !h.anonymousWrite(w, r, &req) {
 		return
 	}
 	sess, secret, err := h.svc.Login(r.Context(), req.Email, req.Password, SessionMeta{IP: clientIP(r), UserAgent: r.UserAgent()})
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrRateLimited):
-			w.Header().Set("Retry-After", "900")
-			httpx.WriteError(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many attempts; try again later", nil)
-		case errors.Is(err, ErrUnauthenticated):
-			// One message for every cause (§11.2).
-			httpx.WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "email or password is incorrect", nil)
-		default:
-			httpx.Cause(r.Context(), err)
-			httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "authentication temporarily unavailable", nil)
-		}
-		return
+	var ch *MFARequired
+	switch {
+	case err == nil:
+		h.signedIn(w, r, sess, secret)
+	case errors.As(err, &ch):
+		writeJSON(w, http.StatusAccepted, mfaChallengeResponse{MFA: "required", Challenge: ch.Challenge, ExpiresAt: ch.ExpiresAt})
+	case errors.Is(err, ErrRateLimited):
+		w.Header().Set("Retry-After", "900")
+		httpx.WriteError(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many attempts; try again later", nil)
+	case errors.Is(err, ErrUnauthenticated):
+		// One message for every cause (§11.2).
+		httpx.WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "email or password is incorrect", nil)
+	default:
+		httpx.Cause(r.Context(), err)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "authentication temporarily unavailable", nil)
 	}
+}
+
+// signedIn sets the session cookie and answers like the bootstrap.
+func (h *webHandlers) signedIn(w http.ResponseWriter, r *http.Request, sess Session, secret string) {
 	// Rotate the CSRF token with the new session.
 	csrf := newCSRFToken()
 	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: secret, Path: "/", HttpOnly: true, Secure: h.opts.Secure, SameSite: http.SameSiteLaxMode, Expires: sess.ExpiresAt})
 	h.setCSRFCookie(w, csrf, sess.ExpiresAt)
 	u, _ := h.svc.GetUser(r.Context(), sess.UserID)
 	exp := sess.ExpiresAt
-	writeJSON(w, http.StatusOK, sessionResponse{User: userDTO(u), CSRFToken: csrf, ExpiresAt: &exp})
+	writeJSON(w, http.StatusOK, sessionResponse{User: h.userOut(r, u), CSRFToken: csrf, ExpiresAt: &exp})
 }
 
 func (h *webHandlers) logout(w http.ResponseWriter, r *http.Request) {

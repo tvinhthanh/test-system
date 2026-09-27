@@ -293,7 +293,7 @@ func (s *service) audit(ctx context.Context, action, subjectKind, subjectID, lev
 	_, err = s.db.Q(ctx).Exec(ctx, `
 		INSERT INTO authz_audit (action, subject_kind, subject_id, scope_level, scope_id, actor, details, at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		action, subjectKind, subjectID, level, scopeID, strings.TrimSpace(actor), b, s.now().UTC())
+		action, subjectKind, subjectID, nullable(level), nullable(scopeID), strings.TrimSpace(actor), b, s.now().UTC())
 	return err
 }
 

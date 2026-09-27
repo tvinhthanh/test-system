@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Activity, ArrowRight, RefreshCw } from "@lucide/vue";
+import { Activity, ArrowLeft, ArrowRight, RefreshCw } from "@lucide/vue";
 import { useServices } from "../../app/providers/services";
 import { ApiError } from "../../core/api/client";
 import ThemeToggle from "../../app/ThemeToggle.vue";
@@ -12,17 +12,27 @@ const { session, fixture } = useServices();
 const router = useRouter(),
   route = useRoute();
 const email = ref(""),
-  password = ref("");
+  password = ref(""),
+  code = ref("");
 async function submit() {
-  if (await session.login(email.value.trim(), password.value)) {
-    password.value = "";
-    const target =
-      typeof route.query.redirect === "string" &&
-      route.query.redirect.startsWith("/p/")
-        ? route.query.redirect
-        : "/";
-    await router.replace(target);
-  }
+  const done = await session.login(email.value.trim(), password.value);
+  // With MFA on, the password alone opens a challenge: the form turns into
+  // the code step (session.challenge) and the password is not kept.
+  if (done || session.challenge) password.value = "";
+  if (done) await enter();
+}
+async function submitCode() {
+  const done = await session.completeMfa(code.value.trim());
+  code.value = "";
+  if (done) await enter();
+}
+async function enter() {
+  const target =
+    typeof route.query.redirect === "string" &&
+    route.query.redirect.startsWith("/p/")
+      ? route.query.redirect
+      : "/";
+  await router.replace(target);
 }
 </script>
 <template>
@@ -78,6 +88,62 @@ async function submit() {
         <ThemeToggle />
       </div>
       <form
+        v-if="session.challenge"
+        class="m-auto flex w-full max-w-sm flex-col gap-5 py-10"
+        @submit.prevent="submitCode"
+      >
+        <div class="space-y-1.5">
+          <p
+            class="text-muted-foreground text-[11px] font-semibold tracking-[0.12em] uppercase"
+          >
+            Two-factor authentication
+          </p>
+          <h1 class="text-2xl font-semibold tracking-tight">Enter your code</h1>
+          <p class="text-muted-foreground text-sm">
+            Open your authenticator app and type the 6-digit code for ATP. Lost
+            your phone? A recovery code works here too, once.
+          </p>
+        </div>
+        <div class="space-y-2">
+          <Label for="mfa-code">Code</Label>
+          <Input
+            id="mfa-code"
+            v-model="code"
+            autocomplete="one-time-code"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+            maxlength="20"
+            class="font-mono tracking-widest"
+            aria-describedby="login-error"
+          />
+        </div>
+        <p
+          v-if="session.error"
+          id="login-error"
+          class="bg-danger-soft text-danger border-danger/20 rounded-md border px-3 py-2 text-sm"
+          role="alert"
+        >
+          {{
+            session.error instanceof ApiError
+              ? session.error.message
+              : "Sign-in could not be completed."
+          }}
+        </p>
+        <Button type="submit" class="w-full" :disabled="session.busy">
+          {{ session.busy ? "Checking…" : "Verify" }}<ArrowRight />
+        </Button>
+        <Button
+          variant="ghost"
+          type="button"
+          :disabled="session.busy"
+          @click="session.cancelMfa()"
+        >
+          <ArrowLeft />Use another account
+        </Button>
+      </form>
+      <form
+        v-else
         class="m-auto flex w-full max-w-sm flex-col gap-5 py-10"
         @submit.prevent="submit"
       >

@@ -146,7 +146,7 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
   return (allowed as readonly string[]).includes(s) ? (s as T) : d.invalid();
 }
 const priority = (v: unknown) => oneOf(v, priorities);
-const bool = (v: unknown) => (typeof v === "boolean" ? v : d.invalid());
+const bool = d.boolean;
 const optionalString = (v: unknown) => (v === undefined ? "" : d.string(v));
 
 function suite(value: unknown): Suite {

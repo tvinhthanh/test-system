@@ -7,6 +7,7 @@ import {
   Gauge,
   GitBranch,
   LogOut,
+  ShieldCheck,
   Users,
 } from "@lucide/vue";
 import { computed } from "vue";
@@ -149,6 +150,24 @@ const active = "bg-accent text-accent-foreground";
           session.user?.email
         }}</span>
       </div>
+      <Button
+        as-child
+        variant="ghost"
+        size="icon-sm"
+        :class="
+          session.user?.mfa?.required && !session.user?.mfa?.enabled
+            ? 'text-warning'
+            : ''
+        "
+      >
+        <RouterLink
+          to="/account/security"
+          aria-label="Account security"
+          title="Account security"
+          @click="emit('navigate')"
+          ><ShieldCheck
+        /></RouterLink>
+      </Button>
       <Button
         variant="ghost"
         size="icon-sm"

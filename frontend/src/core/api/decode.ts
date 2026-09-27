@@ -18,6 +18,9 @@ export function integer(value: unknown): number {
     ? value
     : invalid();
 }
+export function boolean(value: unknown): boolean {
+  return typeof value === "boolean" ? value : invalid();
+}
 export function nullableString(value: unknown): string | null {
   return value === null ? null : string(value);
 }

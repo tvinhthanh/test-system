@@ -10,6 +10,7 @@ const user = {
   id: "preview-user",
   name: "Alex Morgan",
   email: "alex@example.test",
+  mfa: { enabled: false, required: false },
 };
 function run(i: number) {
   const status = i === 0 ? "running" : i % 4 === 1 ? "failed" : "passed";
@@ -92,6 +93,37 @@ export function createFixtureTransport(): Transport {
     if (path === "/v1/session/logout") {
       sessionStorage.setItem(sessionKey, "out");
       return response({});
+    }
+    // §11.2 MFA, off until "turned on" with any six digits.
+    if (path.startsWith("/v1/session/mfa")) {
+      const mfa = user.mfa;
+      if (path === "/v1/session/mfa")
+        return response({
+          ...mfa,
+          recoveryCodesLeft: mfa.enabled ? 10 : 0,
+        });
+      if (path.endsWith("/setup"))
+        return response({
+          secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+          otpauthUri:
+            "otpauth://totp/ATP:alex%40example.test?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=ATP",
+        });
+      const { code } = JSON.parse(String(init?.body ?? "{}")) as {
+        code?: string;
+      };
+      if (!/^\d{6}$/.test(code ?? ""))
+        return response(
+          { error: { code: "INVALID_CODE", message: "x", details: {} } },
+          400,
+        );
+      mfa.enabled = path.endsWith("/enable");
+      if (!mfa.enabled) return new Response(null, { status: 204 });
+      return response({
+        recoveryCodes: Array.from(
+          { length: 10 },
+          (_, i) => `k${i}f3q-7m${i}x2`,
+        ),
+      });
     }
     if (path === "/v1/projects")
       return response({
