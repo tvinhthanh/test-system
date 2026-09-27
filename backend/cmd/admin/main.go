@@ -11,6 +11,7 @@
 //	admin user create  -email alice@example.com [-password '…' -verified]
 //	admin user set-password -id <user> -password '…'   (revokes the user's other sessions, §11.2)
 //	admin user verify  -id <user>
+//	admin user mfa-reset -id <user> -actor you@x -reason "…"  (lost phone + recovery codes; audited, sessions revoked)
 //	admin role grant   -user <id> -level project -scope <id> -role admin
 //	admin token issue  -project <id> -name "github-actions" [-expires 2027-01-01]
 //	admin token revoke -id <id> -actor you@x            (recorded in authz_audit, §11.7)
@@ -152,6 +153,11 @@ func main() {
 		parse(fs)
 		err = az.RevokeRole(ctx, *user, authz.ScopeRef{Level: authz.Level(*level), ID: *scope}, *actor)
 		out = map[string]string{"revoked": *user, "level": *level, "scope": *scope, "actor": *actor}
+	case "user mfa-reset":
+		id, actor, reason := fs.String("id", "", "user id"), fs.String("actor", "", "who (email) — recorded in authz_audit, §11.7"), fs.String("reason", "", "why, e.g. the ticket that verified the person")
+		parse(fs)
+		err = az.ResetMFA(ctx, *id, *actor, *reason)
+		out = map[string]string{"user": *id, "mfa": "off; sessions revoked; an org owner must enrol again at next login", "actor": *actor}
 	case "audit list":
 		scope, limit := fs.String("scope", "", "organization|workspace|project id (default: everything)"), fs.Int("limit", 100, "max rows, newest first")
 		parse(fs)
@@ -270,6 +276,6 @@ func fail(code int, err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|user mfa-reset|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend> [flags]")
 	os.Exit(2)
 }

@@ -183,3 +183,47 @@ func join(s []string) string {
 	}
 	return out
 }
+
+// The operator's way back in (cmd/admin user mfa-reset): no code needed,
+// every session dies, and the record says who and why.
+func TestResetMFA(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	clock := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	svc := authz.NewForTest(db, pepper, func() time.Time { return clock })
+	ctx := context.Background()
+	meta := authz.SessionMeta{IP: "203.0.113.8"}
+	const pw = "lost my phone and my codes"
+	u, _ := svc.CreateUser(ctx, "bob@example.com")
+	_ = svc.SetPassword(ctx, u.ID, pw, "")
+	_ = svc.VerifyEmail(ctx, u.ID)
+	sess, secret, _ := svc.Login(ctx, "bob@example.com", pw, meta)
+	setup, _ := svc.BeginMFASetup(ctx, u.ID)
+	if _, err := svc.EnableMFA(ctx, u.ID, authz.TOTPCodeForTest(setup.Secret, clock), sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ResetMFA(ctx, u.ID, "", "ticket 12"); !errors.Is(err, authz.ErrInvalid) {
+		t.Errorf("reset without an actor: %v", err)
+	}
+	if err := svc.ResetMFA(ctx, u.ID, "ops@example.com", " "); !errors.Is(err, authz.ErrInvalid) {
+		t.Errorf("reset without a reason: %v", err)
+	}
+	if err := svc.ResetMFA(ctx, u.ID, "ops@example.com", "ticket 12: identity checked by video call"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := svc.MFAStatus(ctx, u.ID); st.Enabled || st.RecoveryCodesLeft != 0 {
+		t.Errorf("status after reset: %+v", st)
+	}
+	if _, _, err := svc.AuthenticateSession(ctx, secret); !errors.Is(err, authz.ErrUnauthenticated) {
+		t.Errorf("session survived the reset: %v", err)
+	}
+	if _, _, err := svc.Login(ctx, "bob@example.com", pw, meta); err != nil {
+		t.Errorf("password login after reset: %v", err)
+	}
+	if err := svc.ResetMFA(ctx, u.ID, "ops@example.com", "again"); !errors.Is(err, authz.ErrConflict) {
+		t.Errorf("reset with MFA already off: %v", err)
+	}
+	audit, _ := svc.ListAudit(ctx, "", 1)
+	if len(audit) != 1 || audit[0].Action != "mfa.disable" || audit[0].Actor != "ops@example.com" || audit[0].Details["via"] != "operator reset" || audit[0].Details["reason"] != "ticket 12: identity checked by video call" {
+		t.Errorf("audit: %+v", audit)
+	}
+}

@@ -324,6 +324,9 @@ type Service interface {
 	// DisableMFA needs a current code or a recovery code; ErrMFAMandatory
 	// for an org owner.
 	DisableMFA(ctx context.Context, userID, code string) error
+	// ResetMFA is for the operator (cmd/admin): MFA off without a code,
+	// every session revoked, audited with actor and reason.
+	ResetMFA(ctx context.Context, userID, actor, reason string) error
 	Logout(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
 	GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error)

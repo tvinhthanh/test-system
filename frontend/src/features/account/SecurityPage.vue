@@ -16,6 +16,7 @@ import { useMutation } from "../testmgmt/useMutation";
 import ErrorNote from "../testmgmt/ErrorNote.vue";
 import AsyncState from "../../shared/AsyncState.vue";
 import PageHeader from "../../shared/PageHeader.vue";
+import QrCode from "./QrCode.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -239,18 +240,28 @@ function downloadCodes() {
           />
         </div>
         <ol v-else class="mfa-setup space-y-5 text-sm">
-          <li class="space-y-2">
-            <p class="font-medium">1. Add ATP to your authenticator app</p>
-            <p class="text-muted-foreground">
-              Choose “enter a setup key” and type this key, or on your phone
-              <a class="text-primary underline" :href="setup.otpauthUri"
-                >open it in the app</a
-              >.
-            </p>
-            <code
-              class="mfa-secret bg-muted block rounded-md px-3 py-2 font-mono text-base tracking-wider break-words select-all"
-              >{{ grouped }}</code
-            >
+          <li
+            class="grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-start"
+          >
+            <QrCode
+              :value="setup.otpauthUri"
+              label="QR code to add ATP to an authenticator app"
+              class="mfa-qr size-44 border p-1"
+            />
+            <div class="space-y-2">
+              <p class="font-medium">1. Add ATP to your authenticator app</p>
+              <p class="text-muted-foreground">
+                Scan the code with the app. Can't scan? Choose “enter a setup
+                key” and type this key, or on your phone
+                <a class="text-primary underline" :href="setup.otpauthUri"
+                  >open it in the app</a
+                >.
+              </p>
+              <code
+                class="mfa-secret bg-muted block rounded-md px-3 py-2 font-mono text-base tracking-wider wrap-break-word select-all"
+                >{{ grouped }}</code
+              >
+            </div>
           </li>
           <li>
             <form

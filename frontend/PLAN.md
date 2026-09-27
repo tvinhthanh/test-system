@@ -255,6 +255,17 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-27 (MFA: QR code on setup)
+
+- `features/account/QrCode.vue`: the `otpauth://` link as a QR code, drawn as
+  one SVG path from `uqr`'s module matrix (dependency `uqr@0.1.3`, MIT, no
+  dependencies; lazy with the Security page, initial bundle unchanged at
+  48.5 KiB). No `v-html`. Dark on a white tile in both themes.
+- Verified by decoding screenshots of the rendered code with jsQR (light,
+  dark, 390 px): each decodes to exactly the setup link.
+- Backend counterpart: `admin user mfa-reset` for people who lost both phone
+  and recovery codes.
+
 ### 2026-09-27 (two-factor authentication, §11.2)
 
 - Session user decodes `mfa:{enabled,required}`; `SessionRepository.login`

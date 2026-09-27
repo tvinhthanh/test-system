@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
@@ -267,4 +268,41 @@ func (s *service) CompleteMFALogin(ctx context.Context, challenge, code string, 
 		})
 	})
 	return sess, secret, err
+}
+
+// ResetMFA is the operator's way back in for someone who lost both the
+// authenticator and the recovery codes: MFA off, codes and pending
+// challenges gone, every session revoked, recorded with the operator as
+// actor. An org owner is then held at enrolment again on the next login.
+func (s *service) ResetMFA(ctx context.Context, userID, actor, reason string) error {
+	if !isUUID(userID) {
+		return ErrNotFound
+	}
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("%w: actor and reason are required to reset MFA", ErrInvalid)
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		tag, err := s.db.Q(ctx).Exec(ctx, `
+			UPDATE users SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled_at = NULL, totp_last_step = 0
+			 WHERE id = $1 AND totp_enabled_at IS NOT NULL`, userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: MFA is not on for that user", ErrConflict)
+		}
+		now := s.now().UTC()
+		for _, q := range []string{
+			`DELETE FROM mfa_recovery_codes WHERE user_id = $1`,
+			`DELETE FROM mfa_challenges WHERE user_id = $1`,
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, userID); err != nil {
+				return err
+			}
+		}
+		if _, err := s.db.Q(ctx).Exec(ctx, `UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`, userID, now); err != nil {
+			return err
+		}
+		return s.audit(ctx, "mfa.disable", "user", userID, "", "", actor, map[string]any{"via": "operator reset", "reason": strings.TrimSpace(reason)})
+	})
 }
