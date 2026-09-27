@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 33 unit tests, production build + bundle gate
+- Latest verification: typecheck, 36 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,21 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-22 (project permissions and API hardening)
+
+- Projects decode the server-computed `actions` vocabulary and a shared
+  `ProjectAccess` cache resolves permissions for project deep links without
+  inferring roles in components. The cache is cleared when the signed-in user
+  changes, and only a full scan (not a later page reached by cursor) marks it
+  complete.
+- Mutation controls now follow the backend matrix: triage, identity merge,
+  Test Management writes, and release decisions are hidden when their action
+  is absent. The server remains authoritative for every request.
+- `ApiClient` default timeout now matches SPEC §7.9 at 30 s; evidence upload
+  keeps its explicit 120 s timeout.
+- Browser check uses DOM text rather than CSS-transformed text for the failure
+  detail marker and restores the documented E2E hook classes.
 
 ### 2026-09-22 (P2 — manual evidence on test plans, §6.8.2)
 

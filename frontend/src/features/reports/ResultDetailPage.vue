@@ -10,6 +10,7 @@ import {
   UserRoundCheck,
 } from "@lucide/vue";
 import { useResultDetail } from "./useResultDetail";
+import { useProjectPermission } from "./useProjectPermission";
 import { bytes, duration, time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
@@ -35,6 +36,7 @@ const {
 // Only these kinds are ever rendered inline by the server (§11.5 allowlist);
 // the rest download, so the link says so up front.
 const inlineKinds = new Set(["screenshot", "video", "log"]);
+const canTriage = useProjectPermission("triage");
 </script>
 <template>
   <BackLink :to="`/p/${encodeURIComponent(project)}/runs`">Test runs</BackLink>
@@ -82,6 +84,7 @@ const inlineKinds = new Set(["screenshot", "video", "log"]);
     <template v-if="data">
       <!-- Triage: three decisions, one row, always visible above the fold -->
       <div
+        v-if="canTriage"
         class="bg-card mb-6 flex flex-wrap items-center gap-2 rounded-lg border p-3"
       >
         <span class="text-muted-foreground mr-1 px-1 text-xs font-medium"

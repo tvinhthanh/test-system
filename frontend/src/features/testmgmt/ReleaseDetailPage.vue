@@ -16,6 +16,7 @@ import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
 import type { GateRule, Release } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
+import { useProjectPermission } from "../reports/useProjectPermission";
 import { time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
@@ -33,6 +34,8 @@ import { Label } from "@/components/ui/label";
 const route = useRoute();
 const { testmgmt } = useServices();
 const project = computed(() => String(route.params.project));
+const canWrite = useProjectPermission("testmgmt.write");
+const canDecide = useProjectPermission("release.decide");
 const releaseId = computed(() => String(route.params.release));
 const base = () => `/p/${encodeURIComponent(project.value)}`;
 const release = useResource<Release>();
@@ -127,7 +130,11 @@ const ciSnippet = computed(
         >
       </span>
     </template>
-    <Button size="sm" :disabled="mutation.busy.value !== null" @click="evaluate"
+    <Button
+      v-if="canWrite"
+      size="sm"
+      :disabled="mutation.busy.value !== null"
+      @click="evaluate"
       ><Play />Evaluate gate</Button
     >
     <Button
@@ -205,6 +212,7 @@ const ciSnippet = computed(
             rules. It never decides — you do.
           </p>
           <Button
+            v-if="canWrite"
             class="mt-4"
             size="sm"
             :disabled="mutation.busy.value !== null"
@@ -270,7 +278,10 @@ const ciSnippet = computed(
         >
           Shipped by {{ release.data.value.decidedBy }} — final.
         </div>
-        <div v-else class="bg-card space-y-3 rounded-lg border p-4">
+        <div
+          v-else-if="canDecide"
+          class="bg-card space-y-3 rounded-lg border p-4"
+        >
           <div class="space-y-2">
             <Label for="decision-note">Note (kept with the decision)</Label>
             <Input

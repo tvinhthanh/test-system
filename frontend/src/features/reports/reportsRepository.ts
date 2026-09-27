@@ -6,7 +6,24 @@ export interface Project {
   id: string;
   name: string;
   workspaceName: string;
+  actions: ProjectAction[];
 }
+export const projectActions = [
+  "view",
+  "triage",
+  "identity.merge",
+  "token.manage",
+  "project.configure",
+  "project.manage",
+  "member.manage",
+  "org.manage",
+  "data.delete",
+  "testmgmt.write",
+  "release.decide",
+] as const;
+export type ProjectAction = (typeof projectActions)[number];
+const isProjectAction = (value: string): value is ProjectAction =>
+  projectActions.some((action) => action === value);
 export interface Run {
   id: string;
   branch: string;
@@ -132,6 +149,15 @@ function project(value: unknown): Project {
     id: d.string(x.id),
     name: d.string(x.name),
     workspaceName: d.string(x.workspaceName),
+    actions: d.array(
+      x.actions,
+      (value) => {
+        const action = d.string(value);
+        if (!isProjectAction(action)) throw new Error("Invalid project action");
+        return action;
+      },
+      projectActions.length,
+    ),
   };
 }
 export function parseRun(value: unknown): Run {

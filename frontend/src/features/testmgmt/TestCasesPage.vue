@@ -16,6 +16,7 @@ import { useResource } from "../../core/state/useResource";
 import { automationStatuses, priorities, type Priority } from "./enums";
 import type { TestCase } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
+import { useProjectPermission } from "../reports/useProjectPermission";
 import AsyncState from "../../shared/AsyncState.vue";
 import EmptyState from "../../shared/EmptyState.vue";
 import NativeSelect from "../../shared/NativeSelect.vue";
@@ -33,6 +34,7 @@ const route = useRoute(),
 const { testmgmt } = useServices();
 const project = computed(() => String(route.params.project));
 const base = () => `/p/${encodeURIComponent(project.value)}`;
+const canWrite = useProjectPermission("testmgmt.write");
 
 // Filters are URL state so a filtered list is a shareable link.
 const q = computed(() => String(route.query.q ?? ""));
@@ -115,12 +117,14 @@ const label = (s: string) => s.replaceAll("_", " ");
     description="Manual and automated cases in one list. A case linked to a test identity carries that test's history and flaky signal (§6.8.1)."
   >
     <Button
+      v-if="canWrite"
       :variant="panel === 'import' ? 'secondary' : 'outline'"
       size="sm"
       @click="panel = panel === 'import' ? '' : 'import'"
       ><FileUp />Import CSV</Button
     >
     <Button
+      v-if="canWrite"
       :variant="panel === 'new' ? 'secondary' : 'default'"
       size="sm"
       @click="panel = panel === 'new' ? '' : 'new'"
@@ -138,7 +142,7 @@ const label = (s: string) => s.replaceAll("_", " ");
   <TmTabs :project="project" current="cases" />
 
   <form
-    v-if="panel === 'new'"
+    v-if="canWrite && panel === 'new'"
     class="bg-card mb-5 grid gap-4 rounded-lg border p-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto_auto] sm:items-end"
     @submit.prevent="create"
   >
@@ -177,7 +181,7 @@ const label = (s: string) => s.replaceAll("_", " ");
   </form>
 
   <form
-    v-if="panel === 'import'"
+    v-if="canWrite && panel === 'import'"
     class="bg-card mb-5 space-y-3 rounded-lg border p-4"
     @submit.prevent="importSheet"
   >
@@ -314,11 +318,11 @@ const label = (s: string) => s.replaceAll("_", " ");
           : 'Write the first case, or import your sheet — a CSV export from Excel, TestRail or a wiki table is enough to start.'
       "
     >
-      <Button v-if="!filtered" size="sm" @click="panel = 'new'"
+      <Button v-if="canWrite && !filtered" size="sm" @click="panel = 'new'"
         ><Plus />New case</Button
       >
       <Button
-        v-if="!filtered"
+        v-if="canWrite && !filtered"
         variant="outline"
         size="sm"
         @click="panel = 'import'"

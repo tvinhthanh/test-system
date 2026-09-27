@@ -5,6 +5,7 @@ import { ApiClient, type Transport } from "./core/api/client";
 import { SessionRepository } from "./features/auth/sessionRepository";
 import { createSessionStore } from "./features/auth/sessionStore";
 import { ReportsRepository } from "./features/reports/reportsRepository";
+import { ProjectAccess } from "./features/reports/projectAccess";
 import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
@@ -22,11 +23,18 @@ async function start() {
     pinia = createPinia();
   app.use(pinia);
   const api = new ApiClient(transport);
+  const reports = new ReportsRepository(api);
   const session = createSessionStore(api, new SessionRepository(api))(pinia);
   const router = makeRouter(session);
+  const projectAccess = new ProjectAccess(reports);
+  watch(
+    () => session.user?.id,
+    () => projectAccess.clear(),
+  );
   app.provide(servicesKey, {
     session,
-    reports: new ReportsRepository(api),
+    reports,
+    projectAccess,
     testmgmt: new TestmgmtRepository(api),
     fixture,
   });

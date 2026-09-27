@@ -50,7 +50,7 @@ const base = () => `/p/${encodeURIComponent(project.value)}`;
       <li v-for="identity in data.items" :key="identity.id">
         <RouterLink
           :to="`${base()}/tests/${encodeURIComponent(identity.id)}/history`"
-          class="hover:bg-accent focus-visible:bg-accent group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors outline-none md:grid-cols-[minmax(0,1fr)_9rem_auto_4rem_1.25rem]"
+          class="identity-row hover:bg-accent focus-visible:bg-accent group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors outline-none md:grid-cols-[minmax(0,1fr)_9rem_auto_4rem_1.25rem]"
         >
           <span class="min-w-0">
             <strong class="block truncate text-sm font-medium">{{

@@ -17,6 +17,7 @@ import type { Identity } from "../reports/reportsRepository";
 import { automationStatuses, priorities } from "./enums";
 import type { Requirement, Step, TestCase } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
+import { useProjectPermission } from "../reports/useProjectPermission";
 import { time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
@@ -32,6 +33,7 @@ import { Label } from "@/components/ui/label";
 const route = useRoute();
 const { testmgmt, reports } = useServices();
 const project = computed(() => String(route.params.project));
+const canWrite = useProjectPermission("testmgmt.write");
 const caseId = computed(() => String(route.params.case));
 const base = () => `/p/${encodeURIComponent(project.value)}`;
 
@@ -215,6 +217,7 @@ const label = (s: string) => s.replaceAll("_", " ");
       </span>
     </template>
     <Button
+      v-if="canWrite"
       size="sm"
       :disabled="!dirty || mutation.busy.value !== null"
       @click="save"
@@ -247,7 +250,12 @@ const label = (s: string) => s.replaceAll("_", " ");
           <div class="bg-card space-y-4 rounded-lg border p-4">
             <div class="space-y-2">
               <Label for="case-title">Title</Label>
-              <Input id="case-title" v-model="form.title" maxlength="500" />
+              <Input
+                id="case-title"
+                v-model="form.title"
+                maxlength="500"
+                :readonly="!canWrite"
+              />
             </div>
             <div class="grid gap-4 sm:grid-cols-3">
               <div class="space-y-2">
@@ -255,6 +263,7 @@ const label = (s: string) => s.replaceAll("_", " ");
                 <NativeSelect
                   id="case-priority"
                   v-model="form.priority"
+                  :disabled="!canWrite"
                   class="w-full"
                 >
                   <option v-for="p in priorities" :key="p" :value="p">
@@ -267,6 +276,7 @@ const label = (s: string) => s.replaceAll("_", " ");
                 <NativeSelect
                   id="case-automation"
                   v-model="form.automationStatus"
+                  :disabled="!canWrite"
                   class="w-full"
                 >
                   <option v-for="s in automationStatuses" :key="s" :value="s">
@@ -278,6 +288,7 @@ const label = (s: string) => s.replaceAll("_", " ");
                 <input
                   v-model="form.isCritical"
                   type="checkbox"
+                  :disabled="!canWrite"
                   class="accent-primary size-4"
                 />
                 Critical flow (release gate)
@@ -289,6 +300,7 @@ const label = (s: string) => s.replaceAll("_", " ");
             <div class="flex items-center justify-between border-b px-4 py-2">
               <h2 class="text-sm font-semibold">Steps</h2>
               <Button
+                v-if="canWrite"
                 variant="ghost"
                 size="xs"
                 @click="form.steps.push({ action: '', expected: '' })"
@@ -313,15 +325,18 @@ const label = (s: string) => s.replaceAll("_", " ");
                 }}</span>
                 <Input
                   v-model="s.action"
+                  :readonly="!canWrite"
                   placeholder="Action"
                   maxlength="2000"
                 />
                 <Input
                   v-model="s.expected"
+                  :readonly="!canWrite"
                   placeholder="Expected"
                   maxlength="2000"
                 />
                 <Button
+                  v-if="canWrite"
                   variant="ghost"
                   size="icon-sm"
                   :aria-label="`Remove step ${i + 1}`"
@@ -335,6 +350,7 @@ const label = (s: string) => s.replaceAll("_", " ");
               <Input
                 id="case-expected"
                 v-model="form.expected"
+                :readonly="!canWrite"
                 maxlength="4000"
               />
             </div>
@@ -348,7 +364,11 @@ const label = (s: string) => s.replaceAll("_", " ");
           >
             <div class="flex items-center justify-between border-b px-4 py-2">
               <h2 id="links-title" class="text-sm font-semibold">Automation</h2>
-              <Button variant="ghost" size="xs" @click="picker = !picker"
+              <Button
+                v-if="canWrite"
+                variant="ghost"
+                size="xs"
+                @click="picker = !picker"
                 ><Link2 />Link a test</Button
               >
             </div>
@@ -379,6 +399,7 @@ const label = (s: string) => s.replaceAll("_", " ");
                   >
                 </span>
                 <Button
+                  v-if="canWrite"
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Remove link"
@@ -391,7 +412,7 @@ const label = (s: string) => s.replaceAll("_", " ");
             <p v-else class="text-muted-foreground px-4 py-3 text-sm">
               Not linked to automation.
             </p>
-            <div v-if="picker" class="border-t p-3">
+            <div v-if="canWrite && picker" class="border-t p-3">
               <Input
                 v-model="identityFilter"
                 type="search"
@@ -475,6 +496,7 @@ const label = (s: string) => s.replaceAll("_", " ");
                   r.priority
                 }}</Badge>
                 <Button
+                  v-if="canWrite"
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Remove coverage"
@@ -487,7 +509,10 @@ const label = (s: string) => s.replaceAll("_", " ");
             <p v-else class="text-muted-foreground px-4 py-3 text-sm">
               Covers no requirement yet.
             </p>
-            <div v-if="uncovered.length" class="flex gap-2 border-t p-3">
+            <div
+              v-if="canWrite && uncovered.length"
+              class="flex gap-2 border-t p-3"
+            >
               <NativeSelect v-model="pickRequirement" class="min-w-0 flex-1">
                 <option value="">Add a requirement…</option>
                 <option v-for="r in uncovered" :key="r.id" :value="r.id">

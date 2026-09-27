@@ -8,13 +8,13 @@ import { useServices } from "../../app/providers/services";
 export function useProjects() {
   const route = useRoute(),
     router = useRouter();
-  const { reports } = useServices();
+  const { projectAccess } = useServices();
   const resource = useResource<Page<Project>>();
   const cursor = computed(() =>
     typeof route.query.cursor === "string" ? route.query.cursor : "",
   );
   function refresh() {
-    return resource.load((signal) => reports.projects(cursor.value, signal));
+    return resource.load((signal) => projectAccess.page(cursor.value, signal));
   }
   function next() {
     if (resource.data.value?.nextCursor)

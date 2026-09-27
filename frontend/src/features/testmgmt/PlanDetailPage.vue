@@ -16,6 +16,7 @@ import { useResource } from "../../core/state/useResource";
 import { executionStatuses, type ExecutionStatus } from "./enums";
 import type { Evidence, Execution, Plan, TestCase } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
+import { useProjectPermission } from "../reports/useProjectPermission";
 import { bytes, time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
@@ -31,6 +32,7 @@ import { Input } from "@/components/ui/input";
 const route = useRoute();
 const { testmgmt } = useServices();
 const project = computed(() => String(route.params.project));
+const canWrite = useProjectPermission("testmgmt.write");
 const planId = computed(() => String(route.params.plan));
 const base = () => `/p/${encodeURIComponent(project.value)}`;
 
@@ -174,7 +176,7 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
       </span>
     </template>
     <Button
-      v-if="plan.data.value && !closed"
+      v-if="canWrite && plan.data.value && !closed"
       variant="outline"
       size="sm"
       :disabled="mutation.busy.value !== null"
@@ -182,7 +184,7 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
       ><Lock />Close plan</Button
     >
     <Button
-      v-else-if="plan.data.value"
+      v-else-if="canWrite && plan.data.value"
       variant="outline"
       size="sm"
       :disabled="mutation.busy.value !== null"
@@ -323,12 +325,13 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
         </div>
         <Input
           v-model="notes[c.id]"
-          :disabled="closed"
+          :disabled="closed || !canWrite"
           placeholder="Note (optional)"
           maxlength="4000"
           :aria-label="`Note for ${c.title}`"
         />
         <div
+          v-if="canWrite"
           class="flex flex-wrap gap-1"
           role="group"
           :aria-label="`Record ${c.title}`"

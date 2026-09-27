@@ -40,7 +40,8 @@ the server session. UI clears state only after server confirmation or a 401.
 ## Projects
 
 `GET /v1/projects?limit=50&cursor=...` returns a page of
-`{id,name,workspaceName}`. Only projects the session can read appear. Selector
+`{id,name,workspaceName,actions}`. `actions` is the server-computed subset of
+`view|triage|identity.merge|token.manage|project.configure|project.manage|member.manage|org.manage|data.delete|testmgmt.write|release.decide` for that project. Only projects the session can read appear. Selector
 is a paginated project page, avoiding an unbounded app-wide dropdown cache.
 
 ## Runs

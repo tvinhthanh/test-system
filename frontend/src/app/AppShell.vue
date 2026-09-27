@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronRight, Menu } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useServices } from "./providers/services";
 import { ApiError } from "../core/api/client";
@@ -9,7 +9,7 @@ import ThemeToggle from "./ThemeToggle.vue";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-const { session, fixture } = useServices();
+const { session, fixture, projectAccess } = useServices();
 const route = useRoute(),
   router = useRouter();
 const project = computed(() =>
@@ -29,6 +29,9 @@ const section = computed(() => {
   return "";
 });
 const menu = ref(false);
+watch(project, (id) => void projectAccess.ensure(id).catch(() => undefined), {
+  immediate: true,
+});
 async function logout() {
   menu.value = false;
   if (await session.logout()) await router.replace("/sign-in");

@@ -12,6 +12,7 @@ import {
 } from "./enums";
 import type { Requirement } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
+import { useProjectPermission } from "../reports/useProjectPermission";
 import AsyncState from "../../shared/AsyncState.vue";
 import EmptyState from "../../shared/EmptyState.vue";
 import NativeSelect from "../../shared/NativeSelect.vue";
@@ -34,6 +35,7 @@ import {
 const route = useRoute();
 const { testmgmt } = useServices();
 const project = computed(() => String(route.params.project));
+const canWrite = useProjectPermission("testmgmt.write");
 const list = useResource<Requirement[]>();
 function refresh() {
   return list.load((signal) => testmgmt.requirements(project.value, signal));
@@ -81,6 +83,7 @@ const p0 = computed(() => {
     description="What the product must do, and how many test cases check each one. p0 coverage feeds the release gate (§6.8.4)."
   >
     <Button
+      v-if="canWrite"
       size="sm"
       :variant="panel ? 'secondary' : 'default'"
       @click="panel = !panel"
@@ -98,7 +101,7 @@ const p0 = computed(() => {
   <TmTabs :project="project" current="requirements" />
 
   <form
-    v-if="panel"
+    v-if="canWrite && panel"
     class="bg-card mb-5 grid gap-4 rounded-lg border p-4 sm:grid-cols-[8rem_minmax(0,1fr)_7rem_auto] sm:items-end"
     @submit.prevent="create"
   >
@@ -142,7 +145,9 @@ const p0 = computed(() => {
       title="No requirements yet"
       description="Add the p0 flows first — the release gate watches their coverage."
     >
-      <Button size="sm" @click="panel = true"><Plus />New requirement</Button>
+      <Button v-if="canWrite" size="sm" @click="panel = true"
+        ><Plus />New requirement</Button
+      >
     </EmptyState>
     <template v-else>
       <p v-if="p0.total" class="text-muted-foreground mb-3 text-sm">
@@ -181,6 +186,7 @@ const p0 = computed(() => {
               <TableCell>
                 <NativeSelect
                   :model-value="r.priority"
+                  :disabled="!canWrite"
                   class="w-20"
                   :aria-label="`Priority of ${r.title}`"
                   @update:model-value="
@@ -195,6 +201,7 @@ const p0 = computed(() => {
               <TableCell>
                 <NativeSelect
                   :model-value="r.status"
+                  :disabled="!canWrite"
                   class="w-28"
                   :aria-label="`Status of ${r.title}`"
                   @update:model-value="

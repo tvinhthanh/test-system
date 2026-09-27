@@ -54,9 +54,12 @@ try {
     fullPage: true,
   });
   await page.locator(".test-row").first().click();
-  await page.getByText("FAILURE DETAIL", { exact: true }).waitFor();
+  await page.getByText("Failure detail", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "Attempts", exact: true }).waitFor();
-  await page.getByRole("button", { name: "Copy Error", exact: true }).first().click();
+  await page
+    .getByRole("button", { name: "Copy Error", exact: true })
+    .first()
+    .click();
   await page.getByRole("button", { name: "Mark flaky", exact: true }).click();
   await page
     .getByRole("heading", { name: "Triage events", exact: true })
@@ -67,10 +70,16 @@ try {
   await page
     .getByRole("heading", { name: "Test history", exact: true })
     .waitFor();
-  assert.equal(await page.locator("nav a.active").count(), 1);
-  assert.match(
-    await page.getByRole("link", { name: "Test intelligence", exact: true }).getAttribute("class"),
-    /active/,
+  assert.equal(
+    await page.locator('aside nav a[aria-current="page"]').count(),
+    1,
+  );
+  assert.equal(
+    await page
+      .locator("aside")
+      .getByRole("link", { name: "Test intelligence", exact: true })
+      .getAttribute("aria-current"),
+    "page",
   );
   await page.locator(".identity-row").first().waitFor();
   await page.getByRole("link", { name: "Flaky view", exact: true }).click();
@@ -78,13 +87,16 @@ try {
     .getByRole("heading", { name: "Flaky tests", exact: true })
     .waitFor();
   await page.locator(".identity-row").first().click();
-  await page.getByText("IDENTITY HISTORY", { exact: true }).waitFor();
+  await page.getByText("Identity history", { exact: true }).waitFor();
   await page.locator(".history-runs .event-row").first().waitFor();
   await page
     .getByRole("link", { name: "Test runs", exact: true })
     .last()
     .click();
-  assert.equal(await page.locator("nav a.active").count(), 1);
+  assert.equal(
+    await page.locator('aside nav a[aria-current="page"]').count(),
+    1,
+  );
   await page.locator("tbody tr").first().waitFor();
   for (const width of [768, 360]) {
     await page.setViewportSize({ width, height: 900 });
@@ -112,6 +124,7 @@ try {
       `Overflow at ${width}: ${JSON.stringify(overflow)}`,
     );
   }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("link", { name: "ATP projects", exact: true }).click();
   await page.getByRole("link", { name: "Platform API" }).click();
   await page.getByRole("heading", { name: "No test runs yet" }).waitFor();

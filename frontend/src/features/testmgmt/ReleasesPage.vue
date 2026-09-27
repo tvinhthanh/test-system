@@ -6,6 +6,7 @@ import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
 import type { Release } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
+import { useProjectPermission } from "../reports/useProjectPermission";
 import { time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import EmptyState from "../../shared/EmptyState.vue";
@@ -22,6 +23,7 @@ const route = useRoute(),
   router = useRouter();
 const { testmgmt } = useServices();
 const project = computed(() => String(route.params.project));
+const canWrite = useProjectPermission("testmgmt.write");
 const base = () => `/p/${encodeURIComponent(project.value)}`;
 const releases = useResource<Release[]>();
 function refresh() {
@@ -48,6 +50,7 @@ async function create() {
     description="Each release gets a gate verdict computed from the newest finished run — and a human decision, recorded by name, that may override it (§6.8.4)."
   >
     <Button
+      v-if="canWrite"
       size="sm"
       :variant="panel ? 'secondary' : 'default'"
       @click="panel = !panel"
@@ -65,7 +68,7 @@ async function create() {
   <TmTabs :project="project" current="releases" />
 
   <form
-    v-if="panel"
+    v-if="canWrite && panel"
     class="bg-card mb-5 grid gap-4 rounded-lg border p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
     @submit.prevent="create"
   >
@@ -109,7 +112,9 @@ async function create() {
       title="No releases yet"
       description="Open one when a version is being prepared; evaluate the gate before deciding."
     >
-      <Button size="sm" @click="panel = true"><Plus />New release</Button>
+      <Button v-if="canWrite" size="sm" @click="panel = true"
+        ><Plus />New release</Button
+      >
     </EmptyState>
     <ul
       v-else

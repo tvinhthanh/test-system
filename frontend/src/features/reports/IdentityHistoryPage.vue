@@ -6,6 +6,7 @@ import { useServices } from "../../app/providers/services";
 import { ApiError } from "../../core/api/client";
 import { useResource } from "../../core/state/useResource";
 import { useIdentityActions } from "./useIdentityActions";
+import { useProjectPermission } from "./useProjectPermission";
 import { time, tone } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
@@ -51,6 +52,7 @@ refresh();
 // §9.4 tools. Admin-only on the server; everyone sees the aliases, the
 // actions answer with the server's 403 for anyone else.
 const actions = useIdentityActions(project, identityId, refresh);
+const canMerge = useProjectPermission("identity.merge");
 void actions.loadAliases();
 const tools = ref<"" | "merge" | "split">("");
 watch(tools, (t) => {
@@ -123,6 +125,7 @@ const reason = (e: unknown) =>
           ><template v-else>there</template> now. Undo puts every fingerprint
           back exactly where it was.
           <Button
+            v-if="canMerge"
             variant="outline"
             size="xs"
             class="mt-2"
@@ -245,10 +248,15 @@ const reason = (e: unknown) =>
     class="tools"
     aria-labelledby="tools-title"
   >
-    <SectionHeading id="tools-title" title="Identity tools">
+    <SectionHeading v-if="canMerge" id="tools-title" title="Identity tools">
       <span class="text-xs">admin · audited</span>
     </SectionHeading>
-    <div class="flex flex-wrap gap-2" role="group" aria-label="Tool">
+    <div
+      v-if="canMerge"
+      class="flex flex-wrap gap-2"
+      role="group"
+      aria-label="Tool"
+    >
       <Button
         type="button"
         :variant="tools === 'merge' ? 'secondary' : 'outline'"
@@ -270,7 +278,7 @@ const reason = (e: unknown) =>
     </div>
 
     <div
-      v-if="tools === 'merge'"
+      v-if="canMerge && tools === 'merge'"
       class="tool-panel bg-card mt-3 space-y-4 rounded-lg border p-4"
     >
       <p class="text-muted-foreground text-sm">
@@ -338,7 +346,7 @@ const reason = (e: unknown) =>
     </div>
 
     <div
-      v-if="tools === 'split'"
+      v-if="canMerge && tools === 'split'"
       class="tool-panel bg-card mt-3 space-y-4 rounded-lg border p-4"
     >
       <p class="text-muted-foreground text-sm">
@@ -411,7 +419,7 @@ const reason = (e: unknown) =>
       v-else
       class="history-runs bg-card divide-y overflow-hidden rounded-lg border"
     >
-      <li v-for="run in historyData.items" :key="run.id">
+      <li v-for="run in historyData.items" :key="run.id" class="event-row">
         <RouterLink
           :to="`${base()}/runs/${encodeURIComponent(run.id)}`"
           class="hover:bg-accent focus-visible:bg-accent flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm transition-colors outline-none"

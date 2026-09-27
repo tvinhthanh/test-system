@@ -2,6 +2,7 @@
 import { Activity, ArrowRight, GitMerge, RefreshCw, Split } from "@lucide/vue";
 import { ApiError } from "../../core/api/client";
 import { useReviewQueue } from "./useReviewQueue";
+import { useProjectPermission } from "./useProjectPermission";
 import { time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import EmptyState from "../../shared/EmptyState.vue";
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button";
 const { data, loading, error, project, busy, rowError, refresh, decide } =
   useReviewQueue();
 const base = () => `/p/${encodeURIComponent(project.value)}`;
+const canMerge = useProjectPermission("identity.merge");
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const reason = (e: unknown) =>
   e instanceof ApiError ? e.message : "The decision could not be recorded.";
@@ -130,7 +132,10 @@ const reason = (e: unknown) =>
             </dd>
           </div>
         </dl>
-        <div class="review-actions flex flex-wrap items-center gap-2 p-3">
+        <div
+          v-if="canMerge"
+          class="review-actions flex flex-wrap items-center gap-2 p-3"
+        >
           <Button
             type="button"
             size="sm"

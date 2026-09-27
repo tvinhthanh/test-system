@@ -42,7 +42,7 @@ export class ApiClient {
   private pending = new Set<AbortController>();
   constructor(
     private transport: Transport,
-    private timeoutMs = 15000,
+    private timeoutMs = 30000,
   ) {}
 
   clearSession() {

@@ -5,6 +5,7 @@ import {
   emptyQuery,
   parseRun,
 } from "../src/features/reports/reportsRepository";
+import { ProjectAccess } from "../src/features/reports/projectAccess";
 import { page } from "../src/core/api/decode";
 
 it("encodes scope, forwards opaque cursor, and requests bounded server filtering", async () => {
@@ -22,6 +23,85 @@ it("encodes scope, forwards opaque cursor, and requests bounded server filtering
   expect(url.searchParams.get("cursor")).toBe("opaque+/=");
   expect(url.searchParams.get("limit")).toBe("20");
   expect(url.searchParams.get("status")).toBe("failed");
+});
+
+it("decodes server-owned project actions and caches them for deep links", async () => {
+  const body = {
+    items: [
+      {
+        id: "p1",
+        name: "Checkout",
+        workspaceName: "Commerce",
+        actions: ["view", "testmgmt.write"],
+      },
+    ],
+    nextCursor: null,
+  };
+  const transport = vi.fn<Transport>(async () =>
+    Promise.resolve(new Response(JSON.stringify(body))),
+  );
+  const access = new ProjectAccess(
+    new ReportsRepository(new ApiClient(transport)),
+  );
+  await access.ensure("p1");
+  expect(access.can("p1", "view")).toBe(true);
+  expect(access.can("p1", "testmgmt.write")).toBe(true);
+  expect(access.can("p1", "release.decide")).toBe(false);
+  expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it("resolves a deep link after only a later page was seen, and forgets actions on clear", async () => {
+  const project = (id: string) => ({
+    id,
+    name: id,
+    workspaceName: "Commerce",
+    actions: ["view"],
+  });
+  const transport = vi.fn<Transport>(async (input) => {
+    const cursor = new URL(String(input), "http://localhost").searchParams.get(
+      "cursor",
+    );
+    return new Response(
+      JSON.stringify(
+        cursor
+          ? { items: [project("p2")], nextCursor: null }
+          : { items: [project("p1")], nextCursor: "c2" },
+      ),
+    );
+  });
+  const access = new ProjectAccess(
+    new ReportsRepository(new ApiClient(transport)),
+  );
+  await access.page("c2", new AbortController().signal);
+  await access.ensure("p1");
+  expect(access.can("p1", "view")).toBe(true);
+  access.clear();
+  expect(access.can("p1", "view")).toBe(false);
+  expect(access.can("p2", "view")).toBe(false);
+});
+
+it("refuses project actions outside the backend vocabulary", async () => {
+  const transport = vi.fn<Transport>(async () =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "p1",
+              name: "Checkout",
+              workspaceName: "Commerce",
+              actions: ["become.owner"],
+            },
+          ],
+          nextCursor: null,
+        }),
+      ),
+    ),
+  );
+  const repository = new ReportsRepository(new ApiClient(transport));
+  await expect(
+    repository.projects("", new AbortController().signal),
+  ).rejects.toThrow("Invalid project action");
 });
 it("refuses malformed DTOs and unbounded pages", () => {
   expect(() => parseRun({ id: "bad" })).toThrow();
