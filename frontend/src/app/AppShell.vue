@@ -28,6 +28,7 @@ const section = computed(() => {
   if (path.includes("/tests")) return "Test intelligence";
   if (path.endsWith("/members")) return "Members";
   if (path === "/account/security") return "Security";
+  if (path.startsWith("/team")) return "Team";
   return "";
 });
 const menu = ref(false);

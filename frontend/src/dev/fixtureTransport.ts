@@ -259,6 +259,51 @@ export function createFixtureTransport(): Transport {
     // executions, two releases (one blocked, one shipped by override).
     const tm = fixtureTestmgmt(url, init);
     if (tm) return response(tm.body, tm.status);
+    // Team screens: the preview user owns one organization with two
+    // workspaces. Read-only here — writes answer as the project list does.
+    if (path === "/v1/member-scopes")
+      return response({
+        items: [
+          ["organization", "acme", "Acme Engineering"],
+          ["workspace", "web", "Web"],
+          ["workspace", "platform-ws", "Platform"],
+        ].map(([level, id, name]) => ({
+          level,
+          id,
+          name,
+          organizationName: "Acme Engineering",
+          actions: ["view", "member.manage", "org.manage"],
+        })),
+        nextCursor: null,
+      });
+    const team = path.match(
+      /^\/v1\/(organizations|workspaces)\/[^/]+\/members(?:\/[^/]+)?$/,
+    );
+    if (team) {
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      const org = [
+        ["alex@example.test", "org_owner"],
+        ["morgan@example.test", "org_owner"],
+        ["riley@example.test", "org_admin"],
+      ];
+      const rows =
+        team[1] === "organizations"
+          ? org.map(([email, role]) => [email, role, "organization"])
+          : [
+              ...org.map(([email, role]) => [email, role, "organization"]),
+              ["jordan@example.test", "workspace_admin", "workspace"],
+            ];
+      return response({
+        items: rows.map(([email, role, level], i) => ({
+          userId: `team-${i}`,
+          email,
+          role,
+          level,
+          createdAt: new Date(Date.UTC(2026, 6, 1 + i * 9)).toISOString(),
+        })),
+        nextCursor: null,
+      });
+    }
     // §11.3 members: the preview user is a workspace admin, so the list
     // shows one inherited row next to the project's own.
     const mm = path.match(/^\/v1\/projects\/commerce\/members(?:\/([^/]+))?$/);

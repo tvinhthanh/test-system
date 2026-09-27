@@ -87,6 +87,18 @@ export function makeRouter(
               import("../../features/testmgmt/ReleaseDetailPage.vue"),
           },
           {
+            path: "team",
+            component: () => import("../../features/members/TeamPage.vue"),
+          },
+          {
+            path: "team/organizations/:organization",
+            component: () => import("../../features/members/MembersPage.vue"),
+          },
+          {
+            path: "team/workspaces/:workspace",
+            component: () => import("../../features/members/MembersPage.vue"),
+          },
+          {
             path: "account/security",
             component: () => import("../../features/account/SecurityPage.vue"),
           },

@@ -158,6 +158,38 @@ func (s *service) GetOrganization(ctx context.Context, id OrganizationID) (Organ
 	return o, mapErr(err)
 }
 
+func (s *service) GetWorkspace(ctx context.Context, id WorkspaceID) (Workspace, error) {
+	if !uuidRe.MatchString(string(id)) {
+		return Workspace{}, ErrNotFound
+	}
+	var w Workspace
+	err := s.db.Q(ctx).QueryRow(ctx,
+		`SELECT id, org_id, name, created_at FROM workspaces WHERE id = $1`, string(id),
+	).Scan(&w.ID, &w.OrgID, &w.Name, &w.CreatedAt)
+	return w, mapErr(err)
+}
+
+func (s *service) ListWorkspaces(ctx context.Context, org OrganizationID) ([]Workspace, error) {
+	if !uuidRe.MatchString(string(org)) {
+		return nil, ErrNotFound
+	}
+	rows, err := s.db.Q(ctx).Query(ctx,
+		`SELECT id, org_id, name, created_at FROM workspaces WHERE org_id = $1 ORDER BY name, id`, string(org))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Workspace
+	for rows.Next() {
+		var w Workspace
+		if err := rows.Scan(&w.ID, &w.OrgID, &w.Name, &w.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 func (s *service) ListProjects(ctx context.Context, level string, id string) ([]Project, error) {
 	if !uuidRe.MatchString(id) {
 		return nil, ErrNotFound

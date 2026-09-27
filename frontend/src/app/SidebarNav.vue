@@ -8,9 +8,10 @@ import {
   GitBranch,
   LogOut,
   ShieldCheck,
+  UserCog,
   Users,
 } from "@lucide/vue";
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useServices } from "./providers/services";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,17 @@ import { cn } from "@/lib/utils";
 // One nav, rendered in the desktop rail and inside the mobile sheet.
 const props = defineProps<{ project: string; busy: boolean }>();
 const emit = defineEmits<{ navigate: []; logout: [] }>();
-const { session, projectAccess } = useServices();
+const { session, projectAccess, teamAccess } = useServices();
 const route = useRoute();
+// "Team" only for admins of an organization or workspace; asked again on
+// navigation and when the MFA flags change, until it answers (an owner is
+// refused until enrolled).
+watch(
+  () => [route.path, session.user?.mfa?.enabled],
+  () => void teamAccess.ensure(),
+  { immediate: true },
+);
+const team = computed(() => teamAccess.scopes.length > 0);
 const p = computed(() => encodeURIComponent(props.project));
 const items = computed(() =>
   props.project
@@ -124,6 +134,14 @@ const active = "bg-accent text-accent-foreground";
         :aria-current="!project ? 'page' : undefined"
         @click="emit('navigate')"
         ><FolderGit2 />Projects</RouterLink
+      >
+      <RouterLink
+        v-if="team"
+        to="/team"
+        :class="cn(link, route.path.startsWith('/team') ? active : idle)"
+        :aria-current="route.path.startsWith('/team') ? 'page' : undefined"
+        @click="emit('navigate')"
+        ><UserCog />Team</RouterLink
       >
       <RouterLink
         v-for="item in items"

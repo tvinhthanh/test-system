@@ -4,6 +4,9 @@ import {
   MembersRepository,
   parseMember,
 } from "../src/features/members/membersRepository";
+import { TeamAccess } from "../src/features/members/teamAccess";
+
+const P = { level: "project", id: "p" } as const;
 
 const row = (email: string, level = "project", role = "member") => ({
   userId: `u-${email}`,
@@ -30,7 +33,10 @@ it("walks every page of the roster, bounded, forwarding the opaque cursor", asyn
     );
   });
   const repo = new MembersRepository(new ApiClient(transport));
-  const all = await repo.all("project/a", new AbortController().signal);
+  const all = await repo.all(
+    { level: "project", id: "project/a" },
+    new AbortController().signal,
+  );
   expect(all.map((m) => `${m.email}@${m.level}`)).toEqual([
     "a@x.io@project",
     "b@x.io@workspace",
@@ -47,7 +53,7 @@ it("walks every page of the roster, bounded, forwarding the opaque cursor", asyn
       new Response(JSON.stringify({ items: [row("a@x.io")], nextCursor: "c" })),
   );
   await new MembersRepository(new ApiClient(endless)).all(
-    "p",
+    { level: "project", id: "p" },
     new AbortController().signal,
     3,
   );
@@ -70,7 +76,7 @@ it("grants with a JSON body and revokes by encoded user id", async () => {
   api.csrfToken = "csrf";
   const repo = new MembersRepository(api);
   const signal = new AbortController().signal;
-  const granted = await repo.set("p", "a@x.io", "viewer", signal);
+  const granted = await repo.set(P, "a@x.io", "viewer", signal);
   expect(granted.role).toBe("viewer");
   const [, init] = transport.mock.calls[0] ?? [];
   expect(init?.method).toBe("POST");
@@ -78,7 +84,7 @@ it("grants with a JSON body and revokes by encoded user id", async () => {
     email: "a@x.io",
     role: "viewer",
   });
-  await repo.revoke("p", "u/1", signal);
+  await repo.revoke(P, "u/1", signal);
   expect(String(transport.mock.calls[1]?.[0])).toBe(
     "/v1/projects/p/members/u%2F1",
   );
@@ -100,9 +106,72 @@ it("turns USER_NOT_FOUND into advice, and leaves a missing project generic", asy
   };
   const signal = new AbortController().signal;
   await expect(
-    repo(notFound("USER_NOT_FOUND")).set("p", "a@x.io", "viewer", signal),
+    repo(notFound("USER_NOT_FOUND")).set(P, "a@x.io", "viewer", signal),
   ).rejects.toThrow("No verified account uses that email");
   await expect(
-    repo(notFound("PROJECT_NOT_FOUND")).set("p", "a@x.io", "viewer", signal),
+    repo(notFound("PROJECT_NOT_FOUND")).set(P, "a@x.io", "viewer", signal),
   ).rejects.toThrow("unavailable or no longer exists");
+});
+
+it("addresses workspaces and organizations by their own collections, and explains the owner rules", async () => {
+  const seen: string[] = [];
+  const transport = vi.fn<Transport>(async (input, init) => {
+    seen.push(`${init?.method ?? "GET"} ${String(input)}`);
+    if (String(input).includes("/organizations/"))
+      return new Response(
+        JSON.stringify({ error: { code: "OWNER_ONLY", message: "x" } }),
+        { status: 403 },
+      );
+    return new Response(JSON.stringify({ items: [], nextCursor: null }));
+  });
+  const api = new ApiClient(transport);
+  api.csrfToken = "c";
+  const repo = new MembersRepository(api);
+  const signal = new AbortController().signal;
+  await repo.all({ level: "workspace", id: "w/1" }, signal);
+  await expect(
+    repo.set(
+      { level: "organization", id: "o1" },
+      "a@x.io",
+      "org_owner",
+      signal,
+    ),
+  ).rejects.toThrow("Only an organization owner");
+  expect(seen[0]).toBe("GET /v1/workspaces/w%2F1/members?limit=100");
+  expect(seen[1]).toBe("POST /v1/organizations/o1/members");
+});
+
+it("keeps asking for team scopes until it gets an answer, and forgets them on clear", async () => {
+  let fail = true;
+  const transport = vi.fn<Transport>(async () =>
+    fail
+      ? new Response(
+          JSON.stringify({ error: { code: "MFA_ENROLLMENT_REQUIRED" } }),
+          { status: 403 },
+        )
+      : new Response(
+          JSON.stringify({
+            items: [
+              {
+                level: "organization",
+                id: "o1",
+                name: "Acme",
+                organizationName: "Acme",
+                actions: ["view", "member.manage", "org.manage"],
+              },
+            ],
+            nextCursor: null,
+          }),
+        ),
+  );
+  const team = new TeamAccess(new MembersRepository(new ApiClient(transport)));
+  await team.ensure();
+  expect(team.scopes).toEqual([]);
+  fail = false;
+  await team.ensure();
+  expect(team.find("organization", "o1")?.actions).toContain("org.manage");
+  await team.ensure();
+  expect(transport).toHaveBeenCalledTimes(2); // cached once answered
+  team.clear();
+  expect(team.scopes).toEqual([]);
 });

@@ -91,6 +91,10 @@ type Service interface {
 
 	GetProject(ctx context.Context, id ProjectID) (Project, error)
 	GetOrganization(ctx context.Context, id OrganizationID) (Organization, error)
+	GetWorkspace(ctx context.Context, id WorkspaceID) (Workspace, error)
+	// ListWorkspaces returns an organization's workspaces by name — for the
+	// team screens, where an org admin picks the workspace to manage.
+	ListWorkspaces(ctx context.Context, org OrganizationID) ([]Workspace, error)
 	// ListProjects returns the projects under a node of the tree — all of an
 	// organization, one workspace, or just the one project — which is how a
 	// membership at that level maps to visible projects (§11.3.1).

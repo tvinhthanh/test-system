@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 44 unit tests, production build + bundle gate
+- Latest verification: typecheck, 46 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,28 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-27 (Team: workspace and organization members)
+
+- `MembersRepository` takes a `MemberNode` (`project|workspace|organization`
+  + id) instead of a project id, adds `scopes()` (`GET /v1/member-scopes`), and
+  explains `OWNER_ONLY` / `LAST_OWNER`. `roles.ts` gains `grantable` per level.
+- `TeamAccess`: the scopes the user manages; cached once answered, not on a
+  403, cleared when the user changes. Sidebar "Team" link when non-empty,
+  re-asked on navigation and when MFA turns on (live run found the link
+  missing right after an owner enrolled).
+- `TeamPage` (`/team`) lists them; `MembersPage` serves
+  `/team/organizations/:organization` and `/team/workspaces/:workspace` as
+  well as the project route: inherited rows read-only, `org_owner` offered and
+  owner rows editable only with `org.manage`.
+- Fixture: an org with two workspaces and a small roster.
+- Verified: typecheck, 46 unit tests, bundle gate 49.0 KiB, screenshots
+  (light/dark/390 px), and a browser run on the real api + Postgres: an owner
+  reset by the operator enrols, sees org + workspace, cannot step down as last
+  owner (select put back), makes an org admin; the org admin sees owner rows
+  read-only, is offered only org admin, gets 403 OWNER_ONLY forcing it through
+  the api, adds and removes a workspace admin; a project member has no Team
+  link.
 
 ### 2026-09-27 (MFA: QR code on setup)
 

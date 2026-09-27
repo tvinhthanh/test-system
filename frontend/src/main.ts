@@ -8,6 +8,7 @@ import { ReportsRepository } from "./features/reports/reportsRepository";
 import { ProjectAccess } from "./features/reports/projectAccess";
 import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
 import { MembersRepository } from "./features/members/membersRepository";
+import { TeamAccess } from "./features/members/teamAccess";
 import { MfaRepository } from "./features/account/mfaRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
@@ -29,16 +30,22 @@ async function start() {
   const session = createSessionStore(api, new SessionRepository(api))(pinia);
   const router = makeRouter(session);
   const projectAccess = new ProjectAccess(reports);
+  const members = new MembersRepository(api);
+  const teamAccess = new TeamAccess(members);
   watch(
     () => session.user?.id,
-    () => projectAccess.clear(),
+    () => {
+      projectAccess.clear();
+      teamAccess.clear();
+    },
   );
   app.provide(servicesKey, {
     session,
     reports,
     projectAccess,
     testmgmt: new TestmgmtRepository(api),
-    members: new MembersRepository(api),
+    members,
+    teamAccess,
     mfa: new MfaRepository(api),
     fixture,
   });

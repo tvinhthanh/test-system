@@ -53,6 +53,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		token   string
 		user    *client
 		userID  string
+		orgID   string
+		wsID    string
 	}
 	seed := func(slug, email, password string) org {
 		o, err := ten.CreateOrganization(ctx, strings.ToUpper(slug), slug)
@@ -73,7 +75,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			t.Fatalf("login %s: %d %s", email, r.code, r.raw)
 		}
 		c.csrf, _ = c.get("/v1/session").body["csrfToken"].(string)
-		return org{project: p.ID, token: tok.Plaintext, user: c, userID: u.ID}
+		return org{project: p.ID, token: tok.Plaintext, user: c, userID: u.ID, orgID: string(o.ID), wsID: string(ws.ID)}
 	}
 	a := seed("alpha", "a@alpha.example", "alpha passphrase long enough")
 	b := seed("beta", "b@beta.example", "beta passphrase long enough")
@@ -142,7 +144,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
 		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
 		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
-		"userId": a.userID,
+		"userId":      a.userID,
+		"workspaceId": a.wsID, "organizationId": a.orgID,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -173,13 +176,16 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/releases/{releaseId}/evaluate":                         map[string]any{},
 		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":                         map[string]any{"status": "approved"},
 		// Members: a real, verified account, so only the tenant check can refuse.
-		"POST /v1/projects/{projectId}/members": map[string]any{"email": "a@alpha.example", "role": "viewer"},
+		"POST /v1/projects/{projectId}/members":           map[string]any{"email": "a@alpha.example", "role": "viewer"},
+		"POST /v1/workspaces/{workspaceId}/members":       map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},
+		"POST /v1/organizations/{organizationId}/members": map[string]any{"email": "a@alpha.example", "role": "org_admin"},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.
 	exempt := map[string]bool{
 		"GET /healthz": true, "GET /v1/session": true, "POST /v1/session": true, "POST /v1/session/logout": true,
 		"GET /v1/projects": true, "POST /v1/runs": true, "POST /v1/artifacts": true,
+		"GET /v1/member-scopes": true, // per user; asserted below
 		// MFA acts on the signed-in user only; asserted in mfa_test.go.
 		"POST /v1/session/mfa": true, "GET /v1/session/mfa": true, "POST /v1/session/mfa/setup": true,
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
@@ -216,7 +222,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		switch {
 		case exempt[pat]:
 			continue
-		case strings.HasPrefix(path, "/v1/projects/"):
+		case strings.HasPrefix(path, "/v1/projects/"), strings.HasPrefix(path, "/v1/workspaces/"), strings.HasPrefix(path, "/v1/organizations/"):
 			walked++
 			// Wrong project: every id belongs to org A.
 			refused("B member → "+pat, b.user.do(method, fill(path, foreign), body, nil))
@@ -228,6 +234,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 					mixed[k] = v
 				}
 				mixed["projectId"] = string(b.project)
+				mixed["workspaceId"], mixed["organizationId"] = b.wsID, b.orgID
 				refused("B member (own project, A's ids) → "+pat, b.user.do(method, fill(path, mixed), body, nil))
 			}
 			// A bearer token is not a dashboard principal.
@@ -263,6 +270,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	}
 
 	// The exempt routes' tenant properties.
+	if r := b.user.get("/v1/member-scopes"); r.code != 200 || len(r.items()) != 0 {
+		t.Errorf("B (a project member) manages some scope: %s", r.raw)
+	}
 	if r := b.user.get("/v1/projects"); len(r.items()) != 1 || r.items()[0].(map[string]any)["id"] != string(b.project) {
 		t.Errorf("B's project list leaks: %s", r.raw)
 	}

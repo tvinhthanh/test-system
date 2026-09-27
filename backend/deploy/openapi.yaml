@@ -491,6 +491,175 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/member-scopes:
+    get:
+      operationId: listMemberScopes
+      tags: [members]
+      summary: Organizations and workspaces whose members the caller manages
+      description: |
+        The way into the team screens. An org admin or owner gets the
+        organization and every workspace in it; a workspace admin gets that
+        workspace. Only nodes where `actions` contains `member.manage` are
+        listed; `org.manage` in an organization's actions means the caller may
+        grant, change and remove owners there. Unpaged: bounded by one tenant.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: Organizations first, then workspaces, by name.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/MemberScope" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/workspaces/{workspaceId}/members:
+    get:
+      operationId: listWorkspaceMembers
+      tags: [members]
+      summary: Who holds a role on the workspace or its organization
+      description: Same shape as the project list; `level` = `organization` rows are inherited. Needs `member.manage` on the workspace.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of members.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Member" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: setWorkspaceMember
+      tags: [members]
+      summary: Make an existing account workspace admin
+      description: "`role` must be `workspace_admin` (§11.3.1 \"Gán ở tầng\"). Otherwise as the project route: verified account or `404 USER_NOT_FOUND`, audited as `role.grant`."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                role: { type: string, enum: [workspace_admin] }
+      responses:
+        "200":
+          description: The workspace-level membership.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Member" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`WORKSPACE_NOT_FOUND`, or `USER_NOT_FOUND`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/workspaces/{workspaceId}/members/{userId}:
+    delete:
+      operationId: revokeWorkspaceMember
+      tags: [members]
+      summary: Remove the person's workspace-level role
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+        - { $ref: "#/components/parameters/UserId" }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/members:
+    get:
+      operationId: listOrganizationMembers
+      tags: [members]
+      summary: Who holds an organization-level role
+      description: Needs `member.manage` on the organization (org admin or owner).
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: A page of members.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Member" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: setOrganizationMember
+      tags: [members]
+      summary: Make an existing account org admin or owner, or change which
+      description: |
+        Granting `org_owner`, or changing someone who is owner, needs
+        `org.manage` — only an owner (`403 OWNER_ONLY`). Demoting the last
+        owner is refused (`409 LAST_OWNER`). A new owner is held at MFA
+        enrolment on their next request (§11.2).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                role: { type: string, enum: [org_admin, org_owner] }
+      responses:
+        "200":
+          description: The organization-level membership.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Member" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: "`FORBIDDEN`, `OWNER_ONLY` or `CSRF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404":
+          description: "`ORGANIZATION_NOT_FOUND`, or `USER_NOT_FOUND`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: "`LAST_OWNER` — make someone else owner first."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/organizations/{organizationId}/members/{userId}:
+    delete:
+      operationId: revokeOrganizationMember
+      tags: [members]
+      summary: Remove the person's organization-level role
+      description: Removing an owner needs `org.manage` (`403 OWNER_ONLY`); the last owner cannot be removed (`409 LAST_OWNER`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+        - { $ref: "#/components/parameters/UserId" }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: "`FORBIDDEN`, `OWNER_ONLY` or `CSRF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`LAST_OWNER`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/projects/{projectId}/runs:
     get:
       operationId: listRuns
@@ -1554,6 +1723,8 @@ components:
     ExecutionId: { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
     ReleaseId: { name: releaseId, in: path, required: true, schema: { type: string, format: uuid } }
     UserId: { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    WorkspaceId: { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+    OrganizationId: { name: organizationId, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 }, description: Page size; the server caps at 100 (§7.10). }
     Cursor: { name: cursor, in: query, schema: { type: string }, description: "Opaque; bound to project, filter and sort. `400 INVALID_CURSOR` when reused elsewhere." }
 
@@ -1786,6 +1957,15 @@ components:
     ProjectAction:
       type: string
       enum: [view, triage, identity.merge, token.manage, project.configure, project.manage, member.manage, org.manage, data.delete, testmgmt.write, release.decide]
+    MemberScope:
+      type: object
+      required: [level, id, name, organizationName, actions]
+      properties:
+        level: { type: string, enum: [organization, workspace] }
+        id: { type: string, format: uuid }
+        name: { type: string }
+        organizationName: { type: string }
+        actions: { type: array, items: { $ref: "#/components/schemas/ProjectAction" } }
     Member:
       type: object
       required: [userId, email, role, level, createdAt]
@@ -1796,7 +1976,7 @@ components:
         level:
           type: string
           enum: [organization, workspace, project]
-          description: Where the role is held. Anything but `project` is inherited and not changeable from the project.
+          description: Where the role is held. A level above the list's own node is inherited and changed there.
         createdAt: { type: string, format: date-time }
     Run:
       type: object

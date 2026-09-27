@@ -262,6 +262,8 @@ var (
 	ErrInvalidCode = errors.New("authz: invalid code")
 	// ErrMFAMandatory: an org owner may not turn MFA off (§11.2).
 	ErrMFAMandatory = errors.New("authz: MFA is mandatory for org owners")
+	// ErrLastOwner: the change would leave an organization with no owner.
+	ErrLastOwner = errors.New("authz: an organization keeps at least one owner")
 )
 
 // Service is the contract. Writes join the caller's transaction (§6.9.6).
@@ -334,10 +336,13 @@ type Service interface {
 	// replaces the role already held on that node, and records actor and the
 	// replaced role in authz_audit in the same transaction (§11.7).
 	SetRole(ctx context.Context, userID string, scope ScopeRef, role Role, actor string) (Membership, error)
+	// GrantRole, SetRole and RevokeRole refuse with ErrLastOwner a change
+	// that would leave an organization without an org_owner.
 	// RevokeRole removes a membership and records who did it (§11.7).
 	RevokeRole(ctx context.Context, userID string, scope ScopeRef, actor string) error
 	ListMemberships(ctx context.Context, userID string) ([]Membership, error)
 	// Members lists the memberships on r's chain org → workspace → project,
+	// (r may stop at the workspace or the organization),
 	// ordered by email then level (org first), resuming after the given key
 	// (zero key = first page); limit ≤ 0 or > 100 → 100.
 	Members(ctx context.Context, r Resource, after MemberKey, limit int) ([]Member, error)

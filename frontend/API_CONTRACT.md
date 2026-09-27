@@ -242,6 +242,24 @@ contain it.
 
 Every grant and revoke is recorded server-side with the session user as actor.
 
+### Workspaces and organizations (Team screens)
+
+- `GET /v1/member-scopes` → `{items:[{level,id,name,organizationName,actions}]}`:
+  the organizations and workspaces the caller manages (org admin/owner: the
+  org and all its workspaces; workspace admin: that workspace). Non-empty →
+  the sidebar shows "Team" (`/team`). A 403 (owner not yet enrolled in MFA) is
+  not cached; the sidebar asks again on navigation and when MFA turns on.
+- `/v1/workspaces/{workspaceId}/members` and
+  `/v1/organizations/{organizationId}/members` take the same GET / POST /
+  DELETE as the project route. Grantable: `workspace_admin` on a workspace;
+  `org_admin` and `org_owner` on an organization. `org_owner` is offered only
+  when the org's `actions` contain `org.manage`; an owner's row is read-only
+  otherwise.
+- `403 OWNER_ONLY`: an org admin tried to grant, change or remove the owner
+  role. `409 LAST_OWNER`: the change would leave the org without an owner.
+  Both get their own words in the repository; a refused role change reloads
+  the list so the select shows the stored role again.
+
 ## Handoff And Verification
 
 Backend owner must confirm session bootstrap semantics, list limits, query

@@ -283,6 +283,14 @@ func TestMembershipsAgainstPostgres(t *testing.T) {
 	if err := svc.Authorize(ctx, as(alice), res, authz.ActionIngest); !errors.Is(err, authz.ErrForbidden) {
 		t.Errorf("humans never ingest: %v", err)
 	}
+	// The sole owner cannot step down; with a second owner in place, they can.
+	if _, err := svc.GrantRole(ctx, alice.ID, authz.ScopeRef{authz.LevelOrganization, org}, authz.RoleOrgAdmin); !errors.Is(err, authz.ErrLastOwner) {
+		t.Errorf("sole owner stepping down: %v", err)
+	}
+	coOwner, _ := svc.CreateUser(ctx, "co-owner@example.com")
+	if _, err := svc.GrantRole(ctx, coOwner.ID, authz.ScopeRef{authz.LevelOrganization, org}, authz.RoleOrgOwner); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.GrantRole(ctx, alice.ID, authz.ScopeRef{authz.LevelOrganization, org}, authz.RoleOrgAdmin); err != nil {
 		t.Fatal(err)
 	}

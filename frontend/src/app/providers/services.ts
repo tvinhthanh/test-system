@@ -4,6 +4,7 @@ import type { ProjectAccess } from "../../features/reports/projectAccess";
 import type { TestmgmtRepository } from "../../features/testmgmt/testmgmtRepository";
 import type { MembersRepository } from "../../features/members/membersRepository";
 import type { MfaRepository } from "../../features/account/mfaRepository";
+import type { TeamAccess } from "../../features/members/teamAccess";
 import type { createSessionStore } from "../../features/auth/sessionStore";
 
 export interface Services {
@@ -12,6 +13,7 @@ export interface Services {
   testmgmt: TestmgmtRepository;
   members: MembersRepository;
   mfa: MfaRepository;
+  teamAccess: TeamAccess;
   session: ReturnType<ReturnType<typeof createSessionStore>>;
   fixture: boolean;
 }

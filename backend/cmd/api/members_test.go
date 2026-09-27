@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
@@ -174,5 +176,159 @@ func TestProjectMembers(t *testing.T) {
 	dave.csrf = ""
 	if r := dave.post(base+"/members", map[string]any{"email": "bob@example.com", "role": "viewer"}); r.code != 403 || r.errCode() != "CSRF" {
 		t.Errorf("grant without CSRF: %d %s", r.code, r.raw)
+	}
+}
+
+// Workspace and organization members (P2, §11.3.2 "tầng tương ứng"): what
+// each admin reaches, what may be granted where, and the owner rules —
+// only an owner touches the owner role, and an org keeps one owner.
+func TestTeamMembers(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false}
+	handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	ten, az := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper))
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
+	ws2, _ := ten.CreateWorkspace(ctx, org.ID, "Search")
+	other, _ := ten.CreateOrganization(ctx, "Globex", "globex")
+	onOrg := func(o tenancy.OrganizationID) authz.ScopeRef {
+		return authz.ScopeRef{Level: authz.LevelOrganization, ID: string(o)}
+	}
+	// signIn creates a verified account with a role and a browser for it.
+	// An owner must pass MFA (§11.2): enrolled here, signed in with a
+	// recovery code.
+	signIn := func(email string, scope authz.ScopeRef, role authz.Role) (authz.User, *client) {
+		u, _ := az.CreateUser(ctx, email)
+		pw := email + " passphrase"
+		_ = az.SetPassword(ctx, u.ID, pw, "")
+		_ = az.VerifyEmail(ctx, u.ID)
+		if role != "" {
+			if _, err := az.GrantRole(ctx, u.ID, scope, role); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var codes []string
+		if role == authz.RoleOrgOwner {
+			setup, _ := az.BeginMFASetup(ctx, u.ID)
+			var err error
+			if codes, err = az.EnableMFA(ctx, u.ID, authenticator(t, setup.Secret, time.Now()), ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c := newClient(t, srv)
+		c.bootstrap()
+		r := c.post("/v1/session", map[string]string{"email": email, "password": pw})
+		if r.code == 202 {
+			r = c.post("/v1/session/mfa", map[string]any{"challenge": r.body["challenge"], "code": codes[0]})
+		}
+		if r.code != 200 {
+			t.Fatalf("login %s: %d %s", email, r.code, r.raw)
+		}
+		c.csrf, _ = c.get("/v1/session").body["csrfToken"].(string)
+		return u, c
+	}
+	owen, owenc := signIn("owen@example.com", onOrg(org.ID), authz.RoleOrgOwner)
+	ada, adac := signIn("ada@example.com", onOrg(org.ID), authz.RoleOrgAdmin)
+	_, dave := signIn("dave@example.com", authz.ScopeRef{Level: authz.LevelWorkspace, ID: string(ws.ID)}, authz.RoleWorkspaceAdmin)
+	bob, _ := signIn("bob@example.com", authz.ScopeRef{}, "")
+	_, gus := signIn("gus@example.com", onOrg(other.ID), authz.RoleOrgOwner)
+	orgPath, wsPath := "/v1/organizations/"+string(org.ID)+"/members", "/v1/workspaces/"+string(ws.ID)+"/members"
+
+	scopes := func(c *client) string {
+		var out []string
+		for _, it := range c.get("/v1/member-scopes").items() {
+			s := it.(map[string]any)
+			out = append(out, s["level"].(string)+":"+s["name"].(string))
+		}
+		return strings.Join(out, " ")
+	}
+	if got := scopes(adac); got != "organization:Acme workspace:Payments workspace:Search" {
+		t.Errorf("org admin scopes: %s", got)
+	}
+	if got := scopes(dave); got != "workspace:Payments" {
+		t.Errorf("workspace admin scopes: %s", got)
+	}
+
+	// A workspace admin manages the workspace, sees the org's roles as
+	// inherited, and reaches neither the org nor a sibling workspace.
+	if r := dave.get(wsPath); r.code != 200 || len(r.items()) != 3 {
+		t.Errorf("workspace members: %d %s", r.code, r.raw)
+	}
+	if r := dave.post(wsPath, map[string]any{"email": "bob@example.com", "role": "member"}); r.code != 400 || r.errCode() != "INVALID_PAYLOAD" {
+		t.Errorf("project role on a workspace: %d %s", r.code, r.raw)
+	}
+	if r := dave.post(wsPath, map[string]any{"email": "bob@example.com", "role": "workspace_admin"}); r.code != 200 || r.body["level"] != "workspace" {
+		t.Errorf("grant workspace admin: %d %s", r.code, r.raw)
+	}
+	if r := dave.do("DELETE", wsPath+"/"+bob.ID, nil, nil); r.code != 204 {
+		t.Errorf("revoke workspace admin: %d %s", r.code, r.raw)
+	}
+	if r := dave.get(orgPath); r.code != 404 {
+		t.Errorf("workspace admin reading the org: %d %s", r.code, r.raw)
+	}
+	if r := dave.get("/v1/workspaces/" + string(ws2.ID) + "/members"); r.code != 404 {
+		t.Errorf("workspace admin reading a sibling workspace: %d %s", r.code, r.raw)
+	}
+
+	// An org admin manages admins but not owners.
+	if r := adac.post(orgPath, map[string]any{"email": "bob@example.com", "role": "org_admin"}); r.code != 200 {
+		t.Errorf("org admin grants org admin: %d %s", r.code, r.raw)
+	}
+	if r := adac.post(orgPath, map[string]any{"email": "bob@example.com", "role": "org_owner"}); r.code != 403 || r.errCode() != "OWNER_ONLY" {
+		t.Errorf("org admin grants owner: %d %s", r.code, r.raw)
+	}
+	if r := adac.post(orgPath, map[string]any{"email": "owen@example.com", "role": "org_admin"}); r.code != 403 || r.errCode() != "OWNER_ONLY" {
+		t.Errorf("org admin demotes the owner: %d %s", r.code, r.raw)
+	}
+	if r := adac.do("DELETE", orgPath+"/"+owen.ID, nil, nil); r.code != 403 || r.errCode() != "OWNER_ONLY" {
+		t.Errorf("org admin removes the owner: %d %s", r.code, r.raw)
+	}
+	if r := adac.post(orgPath, map[string]any{"email": "bob@example.com", "role": "workspace_admin"}); r.code != 400 {
+		t.Errorf("workspace role on an org: %d %s", r.code, r.raw)
+	}
+
+	// The owner: the last owner cannot leave or step down; with a second
+	// owner, they can.
+	if r := owenc.do("DELETE", orgPath+"/"+owen.ID, nil, nil); r.code != 409 || r.errCode() != "LAST_OWNER" {
+		t.Errorf("last owner leaves: %d %s", r.code, r.raw)
+	}
+	if r := owenc.post(orgPath, map[string]any{"email": "owen@example.com", "role": "org_admin"}); r.code != 409 || r.errCode() != "LAST_OWNER" {
+		t.Errorf("last owner steps down: %d %s", r.code, r.raw)
+	}
+	if r := owenc.post(orgPath, map[string]any{"email": "ada@example.com", "role": "org_owner"}); r.code != 200 || r.body["role"] != "org_owner" {
+		t.Fatalf("owner makes ada owner: %d %s", r.code, r.raw)
+	}
+	// A new owner without MFA is held at enrolment (§11.2).
+	if r := adac.get("/v1/member-scopes"); r.code != 403 || r.errCode() != "MFA_ENROLLMENT_REQUIRED" {
+		t.Errorf("new owner without MFA: %d %s", r.code, r.raw)
+	}
+	if r := owenc.post(orgPath, map[string]any{"email": "owen@example.com", "role": "org_admin"}); r.code != 200 {
+		t.Errorf("owner steps down with another owner in place: %d %s", r.code, r.raw)
+	}
+	if _, err := az.GrantRole(ctx, ada.ID, onOrg(org.ID), authz.RoleOrgAdmin); !errors.Is(err, authz.ErrLastOwner) {
+		t.Errorf("CLI demoting the last owner: %v", err)
+	}
+	if err := az.RevokeRole(ctx, ada.ID, onOrg(org.ID), "ops@example.com"); !errors.Is(err, authz.ErrLastOwner) {
+		t.Errorf("CLI removing the last owner: %v", err)
+	}
+
+	// Another org's owner reaches none of it.
+	for _, path := range []string{orgPath, wsPath} {
+		if r := gus.get(path); r.code != 404 {
+			t.Errorf("foreign owner reading %s: %d %s", path, r.code, r.raw)
+		}
+		if r := gus.post(path, map[string]any{"email": "gus@example.com", "role": "workspace_admin"}); r.code != 404 {
+			t.Errorf("foreign owner writing %s: %d %s", path, r.code, r.raw)
+		}
+	}
+	audit, _ := az.ListAudit(ctx, string(org.ID), 20)
+	if len(audit) < 3 {
+		t.Errorf("org audit: %+v", audit)
 	}
 }

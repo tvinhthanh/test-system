@@ -63,3 +63,10 @@ GET /v1/session/mfa
 POST /v1/session/mfa/setup
 POST /v1/session/mfa/enable
 POST /v1/session/mfa/disable
+GET /v1/member-scopes
+GET /v1/workspaces/{workspaceId}/members
+POST /v1/workspaces/{workspaceId}/members
+DELETE /v1/workspaces/{workspaceId}/members/{userId}
+GET /v1/organizations/{organizationId}/members
+POST /v1/organizations/{organizationId}/members
+DELETE /v1/organizations/{organizationId}/members/{userId}

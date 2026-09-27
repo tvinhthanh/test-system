@@ -405,8 +405,47 @@ func (s *service) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 func (s *service) GrantRole(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, error) {
-	m, _, err := s.grant(ctx, userID, scope, role)
+	if err := checkGrant(userID, scope, role); err != nil {
+		return Membership{}, err
+	}
+	var m Membership
+	// A transaction, so the last-owner check and the upsert see one state.
+	err := s.db.WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		m, _, err = s.grant(ctx, userID, scope, role)
+		return err
+	})
 	return m, err
+}
+
+// keepAnOwner refuses a change that removes userID's org_owner role at org
+// when it is the last one (§11.3.1: the owner holds billing and deleting the
+// org — an org without one cannot be recovered from the UI). The owner rows
+// are locked, so two concurrent demotions cannot both pass.
+func (s *service) keepAnOwner(ctx context.Context, org, userID string) error {
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT user_id FROM memberships
+		 WHERE scope_level = 'organization' AND scope_id = $1 AND role = 'org_owner'
+		   FOR UPDATE`, org)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var owners []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		owners = append(owners, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(owners) == 1 && owners[0] == userID {
+		return ErrLastOwner
+	}
+	return nil
 }
 
 func (s *service) SetRole(ctx context.Context, userID string, scope ScopeRef, role Role, actor string) (Membership, error) {
@@ -427,20 +466,33 @@ func (s *service) SetRole(ctx context.Context, userID string, scope ScopeRef, ro
 
 // grant upserts the one row per (user, node) and returns the role it
 // replaced ("" for a new row).
-func (s *service) grant(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, string, error) {
+// checkGrant is the input validation of a grant, before any round trip.
+func checkGrant(userID string, scope ScopeRef, role Role) error {
 	if !membershipLevels[scope.Level] || !isUUID(scope.ID) {
-		return Membership{}, "", fmt.Errorf("%w: membership scope", ErrInvalid)
+		return fmt.Errorf("%w: membership scope", ErrInvalid)
 	}
 	level, ok := RoleLevel[role]
 	if !ok {
-		return Membership{}, "", fmt.Errorf("%w: role %q", ErrInvalid, role)
+		return fmt.Errorf("%w: role %q", ErrInvalid, role)
 	}
 	// §11.3.1 "Gán ở tầng": a role lives at one level and inherits down.
 	if level != scope.Level {
-		return Membership{}, "", fmt.Errorf("%w: role %s is granted at the %s level, not %s", ErrInvalid, role, level, scope.Level)
+		return fmt.Errorf("%w: role %s is granted at the %s level, not %s", ErrInvalid, role, level, scope.Level)
 	}
 	if !isUUID(userID) {
-		return Membership{}, "", ErrNotFound
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *service) grant(ctx context.Context, userID string, scope ScopeRef, role Role) (Membership, string, error) {
+	if err := checkGrant(userID, scope, role); err != nil {
+		return Membership{}, "", err
+	}
+	if scope.Level == LevelOrganization && role != RoleOrgOwner {
+		if err := s.keepAnOwner(ctx, scope.ID, userID); err != nil {
+			return Membership{}, "", err
+		}
 	}
 	var m Membership
 	var previous *string
@@ -462,7 +514,9 @@ func (s *service) grant(ctx context.Context, userID string, scope ScopeRef, role
 }
 
 func (s *service) Members(ctx context.Context, r Resource, after MemberKey, limit int) ([]Member, error) {
-	if !isUUID(r.OrgID) || !isUUID(r.WorkspaceID) || !isUUID(r.ProjectID) {
+	// An organization, a workspace or a project: the chain stops at the
+	// deepest id given (scope_id = NULL matches nothing).
+	if !isUUID(r.OrgID) || (r.WorkspaceID != "" && !isUUID(r.WorkspaceID)) || (r.ProjectID != "" && !isUUID(r.ProjectID)) {
 		return nil, fmt.Errorf("%w: resource", ErrInvalid)
 	}
 	if limit <= 0 || limit > 100 {
@@ -485,7 +539,7 @@ func (s *service) Members(ctx context.Context, r Resource, after MemberKey, limi
 		 WHERE $4 = '' OR (email, rank) > ($4, $5)
 		 ORDER BY email, rank
 		 LIMIT $6`,
-		r.OrgID, r.WorkspaceID, r.ProjectID, after.Email, afterRank, limit)
+		r.OrgID, nullable(r.WorkspaceID), nullable(r.ProjectID), after.Email, afterRank, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -512,6 +566,11 @@ func (s *service) RevokeRole(ctx context.Context, userID string, scope ScopeRef,
 		return fmt.Errorf("%w: actor is required to revoke a role", ErrInvalid)
 	}
 	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		if scope.Level == LevelOrganization {
+			if err := s.keepAnOwner(ctx, scope.ID, userID); err != nil {
+				return err
+			}
+		}
 		var id, role string
 		err := s.db.Q(ctx).QueryRow(ctx,
 			`DELETE FROM memberships WHERE user_id = $1 AND scope_level = $2 AND scope_id = $3 RETURNING id, role`,

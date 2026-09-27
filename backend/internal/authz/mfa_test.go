@@ -140,6 +140,11 @@ func TestMFALifecycle(t *testing.T) {
 	if p, _, _ := svc.AuthenticateSession(ctx, secret); p.MFAEnrollmentRequired {
 		t.Error("owner with MFA flagged for enrolment")
 	}
+	// Leaving the owner role takes another owner (ErrLastOwner otherwise).
+	coOwner, _ := svc.CreateUser(ctx, "co-owner@example.com")
+	if _, err := svc.GrantRole(ctx, coOwner.ID, authz.ScopeRef{Level: authz.LevelOrganization, ID: org}, authz.RoleOrgOwner); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.RevokeRole(ctx, u.ID, authz.ScopeRef{Level: authz.LevelOrganization, ID: org}, "test"); err != nil {
 		t.Fatal(err)
 	}
