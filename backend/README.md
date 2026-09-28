@@ -40,6 +40,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `OAUTH_GOOGLE` / `OAUTH_GITHUB` | `off` | công tắc đăng nhập Google / GitHub (§11.2), `on` hoặc `off`. Bật cần `OAUTH_<P>_CLIENT_ID` + `OAUTH_<P>_CLIENT_SECRET` và `PUBLIC_URL`, thiếu → không khởi động. Tắt → không nút, route trả "disabled" |
 | `PUBLIC_URL` | *(trống)* | origin công khai của dashboard (vd `https://atp.example.com`; `http://` chỉ dev); redirect URI đăng ký với provider là `${PUBLIC_URL}/v1/session/oauth/<provider>/callback` (`google` hoặc `github`) |
 | `MAIL` | `off` | `smtp` bật lời mời và quên mật khẩu qua email (§11.2): thêm email chưa có tài khoản vào team sẽ gửi link mời. Cần `SMTP_HOST`, `SMTP_FROM` (vd `ATP <no-reply@example.com>`) và `PUBLIC_URL`; tùy chọn `SMTP_PORT` (587), `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS` = `starttls` (mặc định) / `tls` / `none` (chỉ dev, cho Mailpit). SMTP chuẩn — SES, Resend, Mailgun, Postmark, relay công ty đều được |
+| `TRUSTED_PROXIES` | *(trống; `compose.yml` đặt dải private của mạng compose)* | reverse proxy (CIDR) mà `X-Forwarded-For` của nó chỉ ra client. Sau Caddy **bắt buộc** đặt, nếu không mọi giới hạn theo IP (đăng nhập, MFA, lời mời, reset) đếm Caddy như một người cho tất cả — ai cũng khóa được mọi người (rà soát 28-09) |
 | `TEST_DATABASE_URL` | *(trống)* | chỉ cho test; mỗi test tạo schema riêng `t_xxxx`, chạy migration, xóa khi xong (`pg/pgtest`) |
 
 ## Điều kiện QĐ-11 — đọc trước khi viết code
@@ -56,7 +57,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 |---|---|---|
 | `platform/config` | ✅ | env → struct, validate, fail fast. Không in URL có mật khẩu |
 | `platform/log` | ✅ | `log/slog`; text ở dev, JSON còn lại. Import với alias `platlog` |
-| `platform/httpx` | ✅ | request id (`X-Request-Id`), access log, `/healthz`, metric theo **route pattern** (không theo path — tránh nổ cardinality), `WriteError` envelope §7.1, `RateLimit` token bucket theo key (§7.4; in-process — phải dời sang Postgres/Redis khi có >1 replica, ghi trong code). Origin/CSRF guard (N18) đi cùng login |
+| `platform/httpx` | ✅ | request id (`X-Request-Id`), `RealIP` (28-09: client thật sau proxy tin cậy, đọc `X-Forwarded-For` từ phải sang, bỏ qua hop client tự ghi), access log, `/healthz`, metric theo **route pattern** (không theo path — tránh nổ cardinality), `WriteError` envelope §7.1, `RateLimit` token bucket theo key (§7.4; in-process — phải dời sang Postgres/Redis khi có >1 replica, ghi trong code). Origin/CSRF guard (N18) đi cùng login |
 | `platform/metric` | ✅ | Counter / Gauge / Histogram có label, text exposition 0.0.4, stdlib thuần. Module nhận `*metric.Registry` tường minh, không có registry toàn cục |
 | `platform/pg` | ✅ | pool (pgx v5), `WithTx` truyền tx qua ctx (§6.9.6, gọi lồng thì nhập vào tx ngoài), `Q(ctx)`, `Migrate` (advisory lock, mỗi file một tx, từ chối drift), `IsUniqueViolation`… |
 | `platform/pg/pgtest` | ✅ | Postgres thật cho test, schema riêng mỗi test, skip khi thiếu `TEST_DATABASE_URL` |

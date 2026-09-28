@@ -75,14 +75,15 @@ func (s *service) RequestPasswordReset(ctx context.Context, email, ip string) (s
 }
 
 func (s *service) ResetPassword(ctx context.Context, token, password, ip string) error {
-	hash, err := hashPassword(password) // the policy first: a weak password spends no token
-	if err != nil {
-		return err
-	}
 	var email string
-	err = s.guardInvitation(ctx, ip, func() error {
+	err := s.guardInvitation(ctx, ip, func() error {
 		if len(token) > 100 || len(token) <= len(resetPrefix) || token[:len(resetPrefix)] != resetPrefix {
 			return ErrNotFound
+		}
+		// argon2 only after the rate limit (see AcceptInvitation).
+		hash, err := hashPassword(password)
+		if err != nil {
+			return err
 		}
 		return s.db.WithTx(ctx, func(ctx context.Context) error {
 			now := s.now().UTC()

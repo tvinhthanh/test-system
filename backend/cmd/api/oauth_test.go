@@ -258,7 +258,9 @@ func TestOAuthSignIn(t *testing.T) {
 		t.Errorf("callback without the cookie: %s", resp.Header.Get("Location"))
 	}
 	// Redirects stay inside the app.
-	for _, evil := range []string{"https://evil.example/", "//evil.example", "/v1/projects"} {
+	// The tab/newline and backslash forms were the 28-09 review's finding:
+	// browsers strip the first and read the second as "/", leaving the site.
+	for _, evil := range []string{"https://evil.example/", "//evil.example", "/v1/projects", "/\t/evil.example", "/\n/evil.example", "/\r/evil.example", "/\\evil.example", "/x/../\\evil", "/\x7f/evil"} {
 		if loc, _ := signIn("google", fakeUser{sub: "g-1001", email: "alice@example.com", verified: true}, evil, nil); loc != "/" {
 			t.Errorf("redirect %q landed on %s", evil, loc)
 		}

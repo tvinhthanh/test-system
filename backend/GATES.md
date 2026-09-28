@@ -460,3 +460,18 @@ laptop, `OBJSTORE=s3` với bucket staging (để `api_heap_live_adj_mb` không 
 phải trừ), tất cả trend `ok`, và số liệu dán vào đây. Lệnh ở trên; `SOAK_SAMPLE=1m`
 cho 1 440 mẫu; nếu `api_heap_live_adj_mb` vẫn lên, lấy profile qua `/debug/pprof/heap`
 của `METRICS_ADDR` trước khi kết luận.
+
+## Rà soát bảo mật phần xác thực — 28-09-2026
+
+Đọc lại toàn bộ bề mặt §11.2/§11.3 làm trong 22→28-09 (MFA, OAuth, lời mời, quên mật khẩu, luật owner, `platform/outbound`, `platform/mail`) tìm lỗ ở **chỗ các phần gặp nhau**. Mỗi phát hiện có test hồi quy.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 1 | Cao | **Open redirect sau OAuth**: `landing()` để lọt tab/xuống dòng (`/%09/evil.example`); trình duyệt bỏ chúng khỏi `Location` → `//evil.example`. Xác nhận bằng Chromium thật. Kẻ gian gửi link `…/oauth/google/start?redirect=…`, nạn nhân đăng nhập Google thật rồi bị đưa sang trang giả | từ chối mọi ký tự điều khiển và mọi `\`, rồi parse lại: không scheme/host/user | `TestLandingStaysInTheApp`, danh sách `evil` trong `TestOAuthSignIn` |
+| 2 | Cao | **Giới hạn theo IP là một bộ đếm chung sau Caddy**: `clientIP` = `RemoteAddr` = Caddy cho mọi request → 5 lần sai từ bất kỳ ai khóa đăng nhập của **mọi người** (15 phút, gấp đôi tới 24 h); token lời mời sai cũng đếm chung. Có từ P1-min, các tính năng mới làm nặng thêm | `httpx.RealIP` + `TRUSTED_PROXIES` (compose đặt mặc định) — chỉ tin `X-Forwarded-For` từ proxy tin cậy, đi từ phải sang | `TestRealIPTrustsOnlyTheProxy`, `TestLoginLimitCountsEachClientBehindAProxy` |
+| 3 | Trung bình | **argon2 trước rate limit** ở `accept` lời mời và `reset` mật khẩu: route ẩn danh, mỗi request tốn ~19 MiB + CPU trước khi bị chặn | băm sau khi qua giới hạn | `TestInvitations`: bị khóa thì cả mật khẩu yếu cũng nhận 429 |
+| 4 | Thấp | Hai người mời cùng email cùng lúc → người thua nhận "tài khoản chưa verify" (sai) | `ErrAccountExists` tách khỏi `ErrConflict` → `409 CONFLICT` | build + test lời mời |
+| 5 | Thấp, chấp nhận | `forgot`: email có tài khoản tốn thêm vài ms ghi DB (mail đã gửi nền) | không sửa — 5 yêu cầu/15 phút/IP làm việc đo thời gian vô ích | — |
+| 6 | Chấp nhận (thiết kế §11.2) | Ai biết email cũng khóa được tài khoản đó 15 phút+ (giới hạn "theo account") | giữ; quên mật khẩu mở khóa | `TestPasswordReset` |
+
+Đã kiểm và **không** có lỗ: CSRF trên mọi route ghi (kể cả ẩn danh: double-submit + Origin), login CSRF qua OAuth (state gắn cookie), phát lại mã TOTP, recovery code dùng một lần, token (mời/reset/challenge) chỉ lưu HMAC và không đi qua URL server thấy, access log chỉ ghi path, liên kết OAuth chỉ khi email verify **cả hai phía**, email đã có tài khoản không bị link chiếm, owner không tắt được MFA, owner mới bị giữ ở bước bật MFA, owner cuối không bị hạ (khóa hàng), gọi ra ngoài chỉ tới host lấy từ cấu hình, header mail không nhận CR/LF.

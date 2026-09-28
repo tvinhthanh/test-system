@@ -362,8 +362,8 @@ type Service interface {
 	// anyone else's), audited identity.unlink; ErrLastSignIn when it is the
 	// account's only way in.
 	UnlinkIdentity(ctx context.Context, userID, identityID string) error
-	// Invite makes an invitation for an email with no account (ErrConflict
-	// if it has one), replacing an open one for the same node; the token is
+	// Invite makes an invitation for an email with no account (ErrAccountExists
+	// if it has one; ErrConflict if another invite raced it), replacing an open one for the same node; the token is
 	// returned once, for the mail. Audited invitation.create.
 	Invite(ctx context.Context, email string, scope ScopeRef, role Role, actor string) (Invitation, string, error)
 	// Invitations lists a node's open invitations, newest first.

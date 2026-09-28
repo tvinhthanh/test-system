@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -66,6 +67,11 @@ type Config struct {
 	OAuthGoogle OAuthClient
 	OAuthGitHub OAuthClient
 	PublicURL   string
+	// TrustedProxies lists the reverse proxies (CIDRs or addresses) whose
+	// X-Forwarded-For names the client, e.g. Caddy on the compose network.
+	// Empty: RemoteAddr is the client. Behind a proxy it must be set, or
+	// every per-IP limit counts the proxy once for everybody.
+	TrustedProxies string
 	// Mail sends invitations (§11.2 "mời member"). MAIL=off (default) or
 	// smtp; with smtp, SMTP_HOST, SMTP_PORT (587), SMTP_USERNAME,
 	// SMTP_PASSWORD, SMTP_FROM and SMTP_TLS=starttls|tls (none: dev only,
@@ -140,6 +146,7 @@ func Load() (Config, error) {
 		p.dst.ClientSecret = os.Getenv("OAUTH_" + p.env + "_CLIENT_SECRET")
 	}
 	c.PublicURL = strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/")
+	c.TrustedProxies = os.Getenv("TRUSTED_PROXIES")
 	switch v := strings.ToLower(getenv("MAIL", "off")); v {
 	case "smtp":
 		c.Mail.Enabled = true
@@ -191,6 +198,16 @@ func (c Config) validate() error {
 	for name, p := range map[string]OAuthClient{"GOOGLE": c.OAuthGoogle, "GITHUB": c.OAuthGitHub} {
 		if p.Enabled && (p.ClientID == "" || p.ClientSecret == "") {
 			errs = append(errs, fmt.Sprintf("OAUTH_%s=on needs OAUTH_%s_CLIENT_ID and OAUTH_%s_CLIENT_SECRET", name, name, name))
+		}
+	}
+	for _, f := range strings.Split(c.TrustedProxies, ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		if _, err := netip.ParsePrefix(f); err != nil {
+			if _, err := netip.ParseAddr(f); err != nil {
+				errs = append(errs, fmt.Sprintf("TRUSTED_PROXIES: %q is not an address or CIDR", f))
+			}
 		}
 	}
 	if c.Mail.Enabled {

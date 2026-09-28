@@ -28,6 +28,11 @@ x-app: &app
     HTTP_ADDR: ":8080"
     METRICS_ADDR: ":9090"
     OBJSTORE_MEMORY_ADDR: ":9100" # only read when OBJSTORE=memory (dev/CI without a bucket)
+    # Caddy is the api's only way in (the api only `expose`s ports on this
+    # network), so the private ranges Docker gives a compose network are the
+    # proxy; the client is the address Caddy writes in X-Forwarded-For.
+    # Without this every per-IP login limit counts Caddy once for everybody.
+    TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
   read_only: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]

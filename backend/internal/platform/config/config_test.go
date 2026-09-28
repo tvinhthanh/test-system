@@ -35,6 +35,7 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		{"unknown store", map[string]string{"OBJSTORE": "gcs"}, "OBJSTORE="},
 		{"job retention not a duration", map[string]string{"JOB_RETENTION": "7d"}, "JOB_RETENTION"},
 		{"job retention too short", map[string]string{"JOB_RETENTION": "30s"}, "JOB_RETENTION"},
+		{"trusted proxies not cidrs", map[string]string{"TRUSTED_PROXIES": "10.0.0.0/8, caddy"}, "TRUSTED_PROXIES"},
 		{"mail switch unknown", map[string]string{"MAIL": "sendgrid"}, "MAIL="},
 		{"smtp without host", map[string]string{"MAIL": "smtp", "SMTP_FROM": "a@b.c", "PUBLIC_URL": "http://localhost:5173"}, "SMTP_HOST"},
 		{"smtp without public url", map[string]string{"MAIL": "smtp", "SMTP_HOST": "mail", "SMTP_FROM": "a@b.c"}, "PUBLIC_URL"},

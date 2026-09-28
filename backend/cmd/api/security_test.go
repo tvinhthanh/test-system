@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -175,4 +176,49 @@ func TestRouteInventoryMatchesFile(t *testing.T) {
 		}
 	}
 	t.Logf("%d routes mounted, %d in the file", len(got), len(want))
+}
+
+// The 28-09 review's finding: behind a reverse proxy every request carries
+// the proxy's address, so "5 failures per IP" was 5 failures for everyone —
+// anyone could lock every user out. With TRUSTED_PROXIES the limit counts
+// the client X-Forwarded-For names (httptest clients all come from
+// 127.0.0.1, which plays the proxy here).
+func TestLoginLimitCountsEachClientBehindAProxy(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	az := authz.New(db, []byte("test-pepper-test-pepper-test-pepper!"))
+	u, _ := az.CreateUser(ctx, "user@example.com")
+	_ = az.SetPassword(ctx, u.ID, "the right passphrase", "")
+	_ = az.VerifyEmail(ctx, u.ID)
+	attempt := func(trusted, from, email, pw string) int {
+		cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false, TrustedProxies: trusted}
+		handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		srv := httptest.NewServer(handler)
+		defer srv.Close()
+		c := newClient(t, srv)
+		c.bootstrap()
+		return c.do("POST", "/v1/session", map[string]string{"email": email, "password": pw}, map[string]string{"X-Forwarded-For": from}).code
+	}
+	// An attacker at 203.0.113.66 guesses passwords for accounts that do
+	// not exist until the IP is locked.
+	for i := 0; i < 5; i++ {
+		attempt("127.0.0.0/8", "203.0.113.66", fmt.Sprintf("nobody%d@example.com", i), "wrong wrong wrong")
+	}
+	if code := attempt("127.0.0.0/8", "203.0.113.66", "nobody9@example.com", "x"); code != 429 {
+		t.Errorf("the attacker's sixth try: %d, want 429", code)
+	}
+	// Someone else, through the same proxy, still signs in.
+	if code := attempt("127.0.0.0/8", "198.51.100.20", "user@example.com", "the right passphrase"); code != 200 {
+		t.Errorf("another client behind the proxy: %d, want 200", code)
+	}
+	// A forged X-Forwarded-For from an untrusted peer changes nothing: the
+	// peer (127.0.0.1, not trusted here) is who is counted.
+	for i := 0; i < 5; i++ {
+		attempt("", fmt.Sprintf("192.0.2.%d", i), fmt.Sprintf("x%d@example.com", i), "wrong wrong wrong")
+	}
+	if code := attempt("", "192.0.2.200", "user@example.com", "the right passphrase"); code != 429 {
+		t.Errorf("rotating a forged header from an untrusted peer: %d, want 429 (still one peer)", code)
+	}
 }

@@ -167,7 +167,10 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it
 	// reads the matched route pattern) → routes.
 	policy := httpx.BrowserPolicy{AllowedOrigins: cfg.DashboardOrigins, HSTS: cfg.CookieSecure}
-	return httpx.RequestID(httpx.Logging(logger)(policy.Middleware(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux))))), mux
+	// Behind a reverse proxy (TRUSTED_PROXIES), the client's own address is
+	// what every per-IP limit counts — first, before anything reads it.
+	trusted, _ := httpx.ParsePrefixes(cfg.TrustedProxies) // validated by config
+	return httpx.RealIP(trusted)(httpx.RequestID(httpx.Logging(logger)(policy.Middleware(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux)))))), mux
 }
 
 // newMailer is the invitation sender for MAIL=smtp, nil when mail is off

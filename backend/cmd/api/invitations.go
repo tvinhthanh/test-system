@@ -105,9 +105,13 @@ func (d *dashboard) invite(w http.ResponseWriter, r *http.Request, n node, email
 	case errors.Is(err, authz.ErrInvalid):
 		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", err.Error(), map[string]any{"field": "email"})
 		return
-	case errors.Is(err, authz.ErrConflict):
+	case errors.Is(err, authz.ErrAccountExists):
 		// An account appeared in between (or is unverified): not a mail case.
 		httpx.WriteError(w, http.StatusNotFound, "USER_NOT_FOUND", "that email has an account that is not verified yet", map[string]any{"field": "email"})
+		return
+	case errors.Is(err, authz.ErrConflict):
+		// Someone invited the same email here a moment ago.
+		httpx.WriteError(w, http.StatusConflict, "CONFLICT", "an invitation to that email was just sent; refresh the list", nil)
 		return
 	case err != nil:
 		d.internal(w, r, err)

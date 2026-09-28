@@ -66,8 +66,21 @@ func (h *webHandlers) providerNames() []string {
 
 // landing keeps a redirect inside the app: a path, not a URL, and never
 // the api itself. Anything else lands on the projects page.
+//
+// Browsers drop tabs and newlines from a Location and read "\" as "/", so
+// "/\t/evil.example" or "/\evil.example" would leave the site (found in the
+// 28-09 security review, confirmed in Chromium): no control character and no
+// backslash anywhere, and what is left must parse with no scheme and no host.
 func landing(s string) string {
-	if !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") || strings.HasPrefix(s, "/\\") || strings.HasPrefix(s, "/v1/") || len(s) > 512 {
+	if len(s) > 512 || !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") || strings.HasPrefix(s, "/v1/") || strings.Contains(s, "\\") {
+		return "/"
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return "/"
+		}
+	}
+	if u, err := url.Parse(s); err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
 		return "/"
 	}
 	return s

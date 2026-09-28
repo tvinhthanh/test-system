@@ -193,6 +193,11 @@ func TestInvitations(t *testing.T) {
 	if last.code != 429 {
 		t.Errorf("sixth wrong token: %d %s", last.code, last.raw)
 	}
+	// Locked out, even the cheap refusal waits: nothing is hashed (argon2,
+	// 19 MiB) for a client the limit has stopped — the 28-09 review's finding.
+	if r := g.post("/v1/invitations/accept", map[string]any{"token": "atp_inv_guess", "password": "short"}); r.code != 429 {
+		t.Errorf("accept while locked: %d %s, want 429 before any password work", r.code, r.raw)
+	}
 
 	// The record.
 	audit, _ := az.ListAudit(ctx, "", 50)

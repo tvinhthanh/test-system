@@ -45,7 +45,7 @@ func (s *service) Invite(ctx context.Context, email string, scope ScopeRef, role
 			return err
 		}
 		if exists {
-			return fmt.Errorf("%w: an account already uses that email", ErrConflict)
+			return ErrAccountExists
 		}
 		// Inviting again replaces the open invitation (a new link, a new week).
 		if _, err := s.db.Q(ctx).Exec(ctx, `
@@ -169,12 +169,15 @@ func (s *service) LookupInvitation(ctx context.Context, token, ip string) (Invit
 }
 
 func (s *service) AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (Session, string, error) {
-	hash, err := hashPassword(password) // the policy first: a weak password spends no token
-	if err != nil {
-		return Session{}, "", err
-	}
 	var userID string
-	err = s.guardInvitation(ctx, meta.IP, func() error {
+	err := s.guardInvitation(ctx, meta.IP, func() error {
+		// argon2 (19 MiB) only after the rate limit let the request in, so
+		// this anonymous route cannot be used to burn memory; and before the
+		// token is looked at, so a weak password spends nothing.
+		hash, err := hashPassword(password)
+		if err != nil {
+			return err
+		}
 		return s.db.WithTx(ctx, func(ctx context.Context) error {
 			inv, err := s.findInvitation(ctx, token, true)
 			if err != nil {
