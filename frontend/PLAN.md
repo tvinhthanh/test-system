@@ -255,6 +255,14 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-29 (create a project)
+
+- Workspace Team page: "New project" for `project.manage`; on success the
+  project list cache is cleared and the new project opens on CI tokens.
+  `MembersRepository.createProject`, fixture (and the fixture scopes now
+  carry `project.manage`, as the server does), `project-create.test.ts`;
+  checked in fixture mode: create → lands on `/p/…/tokens`.
+
 ### 2026-09-29 (CI tokens)
 
 - `/p/:project/tokens` "CI tokens" (nav only with `token.manage`): issue

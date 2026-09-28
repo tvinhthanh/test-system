@@ -192,4 +192,14 @@ export class MembersRepository {
       500,
     );
   }
+  // §11.3.2 "Tạo project": in a workspace the caller administers.
+  async createProject(workspaceId: string, name: string, signal: AbortSignal) {
+    const x = d.record(
+      await this.api.request(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/projects`,
+        { signal, body: { name } },
+      ),
+    );
+    return { id: d.string(x.id), name: d.string(x.name) };
+  }
 }

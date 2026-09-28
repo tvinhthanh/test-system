@@ -6,6 +6,7 @@ import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
 import type { Invitation, Member } from "./membersRepository";
 import { grantable, type MemberNode, type Role } from "./roles";
+import NewProject from "./NewProject.vue";
 import { useMutation } from "../testmgmt/useMutation";
 import ErrorNote from "../testmgmt/ErrorNote.vue";
 import { useProjectPermission } from "../reports/useProjectPermission";
@@ -50,6 +51,12 @@ const canManage = computed(() =>
   node.value.level === "project"
     ? projectManage.value
     : !!scope.value?.actions.includes("member.manage"),
+);
+// §11.3.2 "Tạo project": workspace admins, org admins and owners.
+const canCreateProject = computed(
+  () =>
+    node.value.level === "workspace" &&
+    !!scope.value?.actions.includes("project.manage"),
 );
 const canOwners = computed(() => !!scope.value?.actions.includes("org.manage"));
 const offered = computed(() =>
@@ -202,6 +209,8 @@ const rowRoles = (m: Member) =>
       ><RefreshCw
     /></Button>
   </PageHeader>
+
+  <NewProject v-if="canCreateProject" :workspace="node.id" />
 
   <form
     v-if="canManage && offered.length"

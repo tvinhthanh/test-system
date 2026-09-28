@@ -816,6 +816,42 @@ paths:
                   - { $ref: "#/components/schemas/Page" }
                   - properties: { items: { type: array, items: { $ref: "#/components/schemas/MemberScope" } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/workspaces/{workspaceId}/projects:
+    post:
+      operationId: createProject
+      tags: [members]
+      summary: Create a project in a workspace (§11.3.2 "Tạo/xóa project", create half)
+      description: Needs `project.manage` on the workspace — workspace admins, org admins and owners. The creator then issues a CI token on the new project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                defaultBranch: { type: string }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, workspaceName]
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  workspaceName: { type: string }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/workspaces/{workspaceId}/members:
     get:
       operationId: listWorkspaceMembers

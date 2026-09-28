@@ -329,6 +329,13 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
   token holding `project:read`.
 
+### Create a project (§11.3.2, implemented 2026-09-29)
+
+`POST /v1/workspaces/{workspaceId}/projects {name, defaultBranch?}` → `201
+{id, name, workspaceName}`; `project.manage` on the workspace (its
+`member-scopes` row carries it), `409` for a name already there. The
+workspace Team page offers it and then opens `/p/{id}/tokens`.
+
 ## CI tokens (§11.3.2, §11.4, implemented 2026-09-29)
 
 `GET /v1/projects/{projectId}/tokens` → `{items: [{id, prefix, name,

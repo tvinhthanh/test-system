@@ -288,6 +288,12 @@ export function createFixtureTransport(): Transport {
         fewTriaged: false,
         minTriaged: 10,
       });
+    // Create project: lands on the first fixture project.
+    if (/^\/v1\/workspaces\/[^/]+\/projects$/.test(path))
+      return response(
+        { id: "commerce", name: "Commerce Web", workspaceName: "Web" },
+        201,
+      );
     // CI tokens: one live, one revoked; issuing echoes a fake secret.
     if (/^\/v1\/projects\/[^/]+\/tokens(?:\/[^/]+)?$/.test(path)) {
       if (init?.method === "DELETE") return new Response(null, { status: 204 });
@@ -469,7 +475,7 @@ export function createFixtureTransport(): Transport {
           id,
           name,
           organizationName: "Acme Engineering",
-          actions: ["view", "member.manage", "org.manage"],
+          actions: ["view", "project.manage", "member.manage", "org.manage"],
         })),
         nextCursor: null,
       });
