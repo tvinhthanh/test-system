@@ -24,6 +24,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	platlog "github.com/vinh/automation-testing-platform/backend/internal/platform/log"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/memory" // OBJSTORE=memory (dev)
@@ -137,6 +138,11 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	for _, p := range web.OAuth {
 		endpoints = append(endpoints, p.Endpoints()...)
 	}
+	// Invitations by mail (§11.2) when MAIL=smtp; the accept page names the
+	// node through tenancy.
+	mailer := newMailer(cfg)
+	web.Invitations = mailer != nil
+	web.DescribeScope = func(ctx context.Context, s authz.ScopeRef) string { return scopeName(ctx, ten, s) }
 	if client, err := outbound.New(10*time.Second, endpoints...); err != nil {
 		logger.Error("oauth sign-in off: provider endpoints", "err", err)
 		web.OAuth = nil
@@ -152,13 +158,23 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
 	qry := query.New(db)
 	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
-	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute}).routes(mux)
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it
 	// reads the matched route pattern) → routes.
 	policy := httpx.BrowserPolicy{AllowedOrigins: cfg.DashboardOrigins, HSTS: cfg.CookieSecure}
 	return httpx.RequestID(httpx.Logging(logger)(policy.Middleware(authz.SessionMiddleware(az, web)(httpx.Metrics(reg)(mux))))), mux
+}
+
+// newMailer is the invitation sender for MAIL=smtp, nil when mail is off
+// (then adding an unknown email answers USER_NOT_FOUND as before). A
+// variable so tests can catch the mail instead of sending it.
+var newMailer = func(cfg config.Config) mail.Sender {
+	if !cfg.Mail.Enabled {
+		return nil
+	}
+	return &mail.SMTP{Host: cfg.Mail.Host, Port: cfg.Mail.Port, Username: cfg.Mail.Username, Password: cfg.Mail.Password, From: cfg.Mail.From, TLS: cfg.Mail.TLS}
 }
 
 // oauthProviders turns the OAUTH_GOOGLE / OAUTH_GITHUB switches into the

@@ -74,3 +74,11 @@ GET /v1/session/oauth/{provider}/start
 GET /v1/session/oauth/{provider}/callback
 GET /v1/session/identities
 DELETE /v1/session/identities/{identityId}
+POST /v1/invitations/lookup
+POST /v1/invitations/accept
+GET /v1/projects/{projectId}/invitations
+DELETE /v1/projects/{projectId}/invitations/{invitationId}
+GET /v1/workspaces/{workspaceId}/invitations
+DELETE /v1/workspaces/{workspaceId}/invitations/{invitationId}
+GET /v1/organizations/{organizationId}/invitations
+DELETE /v1/organizations/{organizationId}/invitations/{invitationId}

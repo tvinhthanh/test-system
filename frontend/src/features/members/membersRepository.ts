@@ -28,6 +28,20 @@ export interface Member {
   level: Level;
   createdAt: string;
 }
+// An open invitation to a node (mail on; SPEC §11.2).
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  invitedBy: string;
+  createdAt: string;
+  expiresAt: string;
+}
+// What adding an email did: a member now, or an invitation mailed.
+export type AddResult =
+  | { kind: "member"; member: Member }
+  | { kind: "invited"; invitation: Invitation };
+
 // An organization or workspace whose members the caller manages.
 export interface MemberScope {
   level: "organization" | "workspace";
@@ -49,6 +63,17 @@ export function parseMember(value: unknown): Member {
     role: oneOf(roles, x.role),
     level: oneOf(levels, x.level),
     createdAt: d.date(x.createdAt),
+  };
+}
+function parseInvitation(value: unknown): Invitation {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    email: d.string(x.email),
+    role: oneOf(roles, x.role),
+    invitedBy: d.string(x.invitedBy),
+    createdAt: d.date(x.createdAt),
+    expiresAt: d.date(x.expiresAt),
   };
 }
 function parseScope(value: unknown): MemberScope {
@@ -73,6 +98,8 @@ const collection: Record<Level, string> = {
 };
 const members = (n: MemberNode) =>
   `/v1/${collection[n.level]}/${encodeURIComponent(n.id)}/members`;
+const invitations = (n: MemberNode) =>
+  `/v1/${collection[n.level]}/${encodeURIComponent(n.id)}/invitations`;
 
 // The api answers these by code; the client's status messages are too
 // generic for a form about one person.
@@ -83,6 +110,8 @@ const messages: Record<string, string> = {
     "Only an organization owner can grant, change or remove the owner role.",
   LAST_OWNER:
     "An organization keeps at least one owner. Make someone else owner first.",
+  MAIL_FAILED:
+    "The invitation email could not be sent, so nothing was created. Try again later.",
 };
 async function explained<T>(call: Promise<T>): Promise<T> {
   try {
@@ -119,12 +148,34 @@ export class MembersRepository {
     }
     return out;
   }
-  async set(node: MemberNode, email: string, role: Role, signal: AbortSignal) {
-    return parseMember(
+  async set(
+    node: MemberNode,
+    email: string,
+    role: Role,
+    signal: AbortSignal,
+  ): Promise<AddResult> {
+    const body = d.record(
       await explained(
         this.api.request(members(node), { body: { email, role }, signal }),
       ),
     );
+    // 202 {invitation}: the email had no account and mail is on.
+    return body.invitation !== undefined
+      ? { kind: "invited", invitation: parseInvitation(body.invitation) }
+      : { kind: "member", member: parseMember(body) };
+  }
+  async invitations(node: MemberNode, signal: AbortSignal) {
+    return d.array(
+      d.record(await this.api.request(invitations(node), { signal })).items,
+      parseInvitation,
+      200,
+    );
+  }
+  async revokeInvitation(node: MemberNode, id: string, signal: AbortSignal) {
+    await this.api.request(`${invitations(node)}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      signal,
+    });
   }
   async revoke(node: MemberNode, userId: string, signal: AbortSignal) {
     await explained(

@@ -53,6 +53,11 @@ type WebOptions struct {
 	OAuth     []*OAuthProvider
 	StateKey  []byte
 	OAuthHTTP OAuthHTTP
+	// Invitations says mail is on, so granting a role to an unknown email
+	// invites it (the bootstrap tells the members screen). DescribeScope
+	// names a node for the accept page — authz does not know tenancy.
+	Invitations   bool
+	DescribeScope func(ctx context.Context, s ScopeRef) string
 }
 
 type sessionKey struct{}
@@ -187,6 +192,7 @@ func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	mux.Handle("POST /v1/session/logout", http.HandlerFunc(h.logout))
 	mfaRoutes(mux, h)
 	oauthRoutes(mux, h)
+	invitationRoutes(mux, h)
 }
 
 type webHandlers struct {
@@ -213,6 +219,8 @@ type sessionResponse struct {
 	// Providers are the OAuth sign-ins switched on (§11.2) — the sign-in
 	// page shows a button for each. Always present, possibly empty.
 	Providers []string `json:"providers"`
+	// Invitations: mail is on; adding an unknown email to a team invites it.
+	Invitations bool `json:"invitations"`
 }
 
 // session is the bootstrap: who is logged in (if anyone) plus a CSRF
@@ -227,7 +235,7 @@ func (h *webHandlers) session(w http.ResponseWriter, r *http.Request) {
 		csrf = newCSRFToken()
 		h.setCSRFCookie(w, csrf, time.Time{})
 	}
-	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames()}
+	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames(), Invitations: h.opts.Invitations}
 	if p, ok := PrincipalFrom(r.Context()); ok && p.Kind == PrincipalUser {
 		if u, err := h.svc.GetUser(r.Context(), p.UserID); err == nil {
 			resp.User = h.userOut(r, u)

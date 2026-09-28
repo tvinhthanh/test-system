@@ -21,6 +21,8 @@ export interface Session {
   user: User | null;
   csrfToken: string;
   providers: OAuthProvider[];
+  // Mail is on: adding an email with no account to a team invites it.
+  invitations: boolean;
 }
 // A correct password on an account with MFA on: no session yet (202).
 export interface MfaChallenge {
@@ -38,6 +40,7 @@ function parseSession(value: unknown): Session {
   return {
     csrfToken: string(json.csrfToken),
     providers,
+    invitations: json.invitations === true,
     user: user
       ? {
           id: string(user.id),
@@ -63,6 +66,30 @@ export const isChallenge = (
   result: Session | MfaChallenge,
 ): result is MfaChallenge => "challenge" in result;
 
+// An open invitation, as the accept page shows it (SPEC §11.2).
+export interface InvitationInfo {
+  email: string;
+  role: string;
+  level: "organization" | "workspace" | "project";
+  scopeName: string;
+  invitedBy: string;
+  expiresAt: string;
+}
+function parseInvitation(value: unknown): InvitationInfo {
+  const x = record(value);
+  const level = string(x.level);
+  if (level !== "organization" && level !== "workspace" && level !== "project")
+    throw new Error("Invalid invitation level");
+  return {
+    email: string(x.email),
+    role: string(x.role),
+    level,
+    scopeName: string(x.scopeName),
+    invitedBy: string(x.invitedBy),
+    expiresAt: date(x.expiresAt),
+  };
+}
+
 export class SessionRepository {
   constructor(private api: ApiClient) {}
   async bootstrap() {
@@ -76,6 +103,20 @@ export class SessionRepository {
   async completeMfa(challenge: string, code: string) {
     return parseSession(
       await this.api.request("/v1/session/mfa", { body: { challenge, code } }),
+    );
+  }
+  // The token only ever travels in a body (the link carries it in a
+  // fragment), never in a URL the server would log.
+  async lookupInvitation(token: string) {
+    return parseInvitation(
+      await this.api.request("/v1/invitations/lookup", { body: { token } }),
+    );
+  }
+  async acceptInvitation(token: string, password: string) {
+    return parseSession(
+      await this.api.request("/v1/invitations/accept", {
+        body: { token, password },
+      }),
     );
   }
   async logout() {

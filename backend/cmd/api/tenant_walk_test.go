@@ -138,6 +138,12 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q %q", reqA, caseA, linkA, planA, execA, releaseA)
 	}
 
+	// An open invitation on A's project (the mail itself is not part of the walk).
+	inviteA, _, err := az.Invite(ctx, "invitee@alpha.example", authz.ScopeRef{Level: authz.LevelProject, ID: string(a.project)}, authz.RoleViewer, "a@alpha.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Org A's ids by path parameter name. A parameter this map does not
 	// know is a route the walk cannot exercise — fail loudly, do not skip.
 	foreign := map[string]string{
@@ -146,6 +152,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
 		"userId":      a.userID,
 		"workspaceId": a.wsID, "organizationId": a.orgID,
+		"invitationId": inviteA.ID,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -191,6 +198,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
 		// OAuth sign-in: anonymous browser navigations, asserted in oauth_test.go.
 		"GET /v1/session/oauth/{provider}/start": true, "GET /v1/session/oauth/{provider}/callback": true,
+		"POST /v1/invitations/lookup": true, "POST /v1/invitations/accept": true, // anonymous, by token; invitations_test.go
 		"GET /v1/session/identities": true, "DELETE /v1/session/identities/{identityId}": true, // the caller's own; oauth_test.go
 	}
 	param := regexp.MustCompile(`\{([a-zA-Z]+)\}`)

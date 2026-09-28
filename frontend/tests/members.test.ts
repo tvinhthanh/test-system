@@ -77,7 +77,7 @@ it("grants with a JSON body and revokes by encoded user id", async () => {
   const repo = new MembersRepository(api);
   const signal = new AbortController().signal;
   const granted = await repo.set(P, "a@x.io", "viewer", signal);
-  expect(granted.role).toBe("viewer");
+  expect(granted.kind === "member" && granted.member.role).toBe("viewer");
   const [, init] = transport.mock.calls[0] ?? [];
   expect(init?.method).toBe("POST");
   expect(JSON.parse(String(init?.body))).toEqual({
@@ -174,4 +174,37 @@ it("keeps asking for team scopes until it gets an answer, and forgets them on cl
   expect(transport).toHaveBeenCalledTimes(2); // cached once answered
   team.clear();
   expect(team.scopes).toEqual([]);
+});
+
+it("tells an invitation from a grant, and lists and withdraws invitations by node", async () => {
+  const seen: string[] = [];
+  const invitation = {
+    id: "inv1",
+    email: "new@x.io",
+    role: "member",
+    invitedBy: "dana@x.io",
+    createdAt: "2026-09-28T00:00:00Z",
+    expiresAt: "2026-10-05T00:00:00Z",
+  };
+  const api = new ApiClient(async (input, init) => {
+    seen.push(`${init?.method ?? "GET"} ${String(input)}`);
+    if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    if (String(input).endsWith("/invitations"))
+      return new Response(
+        JSON.stringify({ items: [invitation], nextCursor: null }),
+      );
+    return new Response(JSON.stringify({ invitation }), { status: 202 });
+  });
+  api.csrfToken = "c";
+  const repo = new MembersRepository(api);
+  const signal = new AbortController().signal;
+  const added = await repo.set(P, "new@x.io", "member", signal);
+  expect(added.kind).toBe("invited");
+  expect((await repo.invitations(P, signal))[0]?.email).toBe("new@x.io");
+  await repo.revokeInvitation(P, "inv1", signal);
+  expect(seen).toEqual([
+    "POST /v1/projects/p/members",
+    "GET /v1/projects/p/invitations",
+    "DELETE /v1/projects/p/invitations/inv1",
+  ]);
 });

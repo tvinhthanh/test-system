@@ -13,6 +13,10 @@ export function makeRouter(
         component: () => import("../../features/auth/SignInPage.vue"),
       },
       {
+        path: "/invite",
+        component: () => import("../../features/auth/InvitePage.vue"),
+      },
+      {
         path: "/",
         component: () => import("../AppShell.vue"),
         meta: { protected: true },

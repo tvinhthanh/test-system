@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 49 unit tests, production build + bundle gate
+- Latest verification: typecheck, 50 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,26 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-28 (invitations by email)
+
+- Session decodes `invitations`; the store gains `lookupInvitation` /
+  `acceptInvitation` (repository posts the token in the body only).
+- `InvitePage` at `/invite` (public): reads the token from the fragment,
+  strips it from the address bar and history, shows who invited whom to
+  what, sets a password (12+, confirmed) and signs in; states for used /
+  withdrawn / expired, account-exists and rate-limited.
+- Members page: "Email" instead of "Email of an existing account" when mail
+  is on, a sent notice, and "Pending invitations" with Withdraw (owner
+  invitations only for owners). `MembersRepository.set` returns
+  member-or-invitation; `invitations()` / `revokeInvitation()`.
+- Verified: typecheck, 50 unit tests; a browser run on the real api + Postgres
+  with `MAIL=smtp` to a local SMTP catcher: invite from the project Members
+  page, the mail received over SMTP with a fragment link, the link opened in
+  a fresh browser (token gone from the URL), password mismatch shown, account
+  created and signed in with the project visible, the link refused a second
+  time, the member listed and nothing pending; the token appears in neither
+  the api nor the Vite log.
 
 ### 2026-09-28 (connected accounts)
 

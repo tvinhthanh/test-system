@@ -24,9 +24,12 @@ export function createSessionStore(
     const challenge = shallowRef<MfaChallenge | null>(null);
     // Switched-on OAuth providers, from the bootstrap.
     const providers = shallowRef<OAuthProvider[]>([]);
+    // Mail is on (bootstrap): teams can invite unknown emails.
+    const invitations = ref(false);
     let bootstrap: Promise<void> | undefined;
     function apply(session: Session) {
       providers.value = session.providers;
+      invitations.value = session.invitations;
       user.value = session.user;
       api.csrfToken = session.csrfToken;
     }
@@ -122,6 +125,18 @@ export function createSessionStore(
     function resumeMfa() {
       challenge.value = { challenge: "", expiresAt: "" };
     }
+    // Accepting an invitation (§11.2): look it up, then set a password and
+    // sign in. Errors stay with the invite page, not the session store.
+    async function lookupInvitation(token: string) {
+      await ensure();
+      return repository.lookupInvitation(token);
+    }
+    async function acceptInvitation(token: string, password: string) {
+      await ensure();
+      apply(await repository.acceptInvitation(token, password));
+      ready.value = true;
+      return !!user.value;
+    }
     function cancelMfa() {
       challenge.value = null;
       error.value = null;
@@ -152,6 +167,9 @@ export function createSessionStore(
       error,
       challenge,
       providers,
+      invitations,
+      lookupInvitation,
+      acceptInvitation,
       ensure,
       login,
       completeMfa,

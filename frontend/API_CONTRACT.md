@@ -59,6 +59,26 @@ the server session. UI clears state only after server confirmation or a 401.
   `DELETE /v1/session/identities/{id}` → 204, or `409 LAST_SIGN_IN` when it is
   the account's only way in (explained in words).
 
+### Invitations by email (§11.2, implemented 2026-09-28)
+
+- The bootstrap carries `invitations: true` when the api has `MAIL=smtp`. The
+  members form then asks for any email and says unknown ones get an
+  invitation.
+- `POST …/members` for an email with no account answers **202**
+  `{invitation:{id,email,role,level,invitedBy,createdAt,expiresAt}}` (a mail
+  went out); `502 MAIL_FAILED` means nothing was created. With mail off it is
+  still `404 USER_NOT_FOUND`.
+- `GET /v1/{projects|workspaces|organizations}/{id}/invitations` lists the
+  open ones; `DELETE …/invitations/{invitationId}` withdraws one (owner
+  invitations only by owners).
+- The mail links to `/invite#<token>`. The page reads the fragment, removes
+  it from the address bar and history, and posts it in a body:
+  `POST /v1/invitations/lookup {token}` → `{email,role,level,scopeName,
+  invitedBy,expiresAt}`; `POST /v1/invitations/accept {token,password}` →
+  session (signed in). `404 INVITATION_NOT_FOUND` (used, withdrawn,
+  expired), `409 ACCOUNT_EXISTS` (the role was added; sign in),
+  `400 INVALID_PASSWORD` (12+ characters), `429` after repeated bad tokens.
+
 ### Two-factor authentication (§11.2, implemented 2026-09-27)
 
 - The session user carries `mfa:{enabled,required}`. `required` means an org

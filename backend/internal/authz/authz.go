@@ -173,6 +173,18 @@ type ExternalIdentity struct {
 	EmailVerified bool
 }
 
+// Invitation is an open invitation to a role on a node, mailed to an email
+// with no account yet (§11.2). The token is never stored or returned again.
+type Invitation struct {
+	ID        string
+	Email     string
+	Scope     ScopeRef
+	Role      Role
+	InvitedBy string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
 // LinkedIdentity is a Google or GitHub sign-in linked to an account.
 type LinkedIdentity struct {
 	ID          string
@@ -285,6 +297,10 @@ var (
 	// ErrLastSignIn: removing this would leave the account no way to sign
 	// in (no password, no other linked provider).
 	ErrLastSignIn = errors.New("authz: the account's last way to sign in")
+	// ErrAccountExists: an invitation was accepted for an email that has an
+	// account by now; the role is granted and that account signs in with its
+	// own password — a link never takes an account over.
+	ErrAccountExists = errors.New("authz: that email has an account; sign in")
 	// ErrLastOwner: the change would leave an organization with no owner.
 	ErrLastOwner = errors.New("authz: an organization keeps at least one owner")
 )
@@ -346,6 +362,21 @@ type Service interface {
 	// anyone else's), audited identity.unlink; ErrLastSignIn when it is the
 	// account's only way in.
 	UnlinkIdentity(ctx context.Context, userID, identityID string) error
+	// Invite makes an invitation for an email with no account (ErrConflict
+	// if it has one), replacing an open one for the same node; the token is
+	// returned once, for the mail. Audited invitation.create.
+	Invite(ctx context.Context, email string, scope ScopeRef, role Role, actor string) (Invitation, string, error)
+	// Invitations lists a node's open invitations, newest first.
+	Invitations(ctx context.Context, scope ScopeRef) ([]Invitation, error)
+	// RevokeInvitation ends an open invitation on scope (audited).
+	RevokeInvitation(ctx context.Context, scope ScopeRef, id, actor string) error
+	// LookupInvitation reads an open invitation by token for the accept page;
+	// unknown tokens count toward the per-IP limit (ErrRateLimited).
+	LookupInvitation(ctx context.Context, token, ip string) (Invitation, error)
+	// AcceptInvitation creates the verified account with password, grants
+	// the role and opens a session; ErrAccountExists when the email has an
+	// account by now (role granted, no session).
+	AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
 	// CompleteMFALogin trades the challenge from Login plus a TOTP or
 	// recovery code for a session. Wrong codes count toward the rate limit
 	// (ErrInvalidCode, then ErrRateLimited); an unknown or expired challenge

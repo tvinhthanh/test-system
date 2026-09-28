@@ -66,6 +66,22 @@ type Config struct {
 	OAuthGoogle OAuthClient
 	OAuthGitHub OAuthClient
 	PublicURL   string
+	// Mail sends invitations (§11.2 "mời member"). MAIL=off (default) or
+	// smtp; with smtp, SMTP_HOST, SMTP_PORT (587), SMTP_USERNAME,
+	// SMTP_PASSWORD, SMTP_FROM and SMTP_TLS=starttls|tls (none: dev only,
+	// for a local catcher like Mailpit). Needs PUBLIC_URL for the links.
+	Mail Mail
+}
+
+// Mail is the outgoing mail switch and SMTP settings.
+type Mail struct {
+	Enabled  bool
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
+	TLS      string // starttls | tls | none
 }
 
 // OAuthClient is one provider's switch and credentials.
@@ -124,6 +140,20 @@ func Load() (Config, error) {
 		p.dst.ClientSecret = os.Getenv("OAUTH_" + p.env + "_CLIENT_SECRET")
 	}
 	c.PublicURL = strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/")
+	switch v := strings.ToLower(getenv("MAIL", "off")); v {
+	case "smtp":
+		c.Mail.Enabled = true
+	case "off":
+	default:
+		return c, fmt.Errorf("MAIL=%q: want off|smtp", v)
+	}
+	c.Mail.Host, c.Mail.Username, c.Mail.Password = os.Getenv("SMTP_HOST"), os.Getenv("SMTP_USERNAME"), os.Getenv("SMTP_PASSWORD")
+	c.Mail.From, c.Mail.TLS = os.Getenv("SMTP_FROM"), strings.ToLower(getenv("SMTP_TLS", "starttls"))
+	if port, err := strconv.Atoi(getenv("SMTP_PORT", "587")); err != nil || port < 1 || port > 65535 {
+		return c, fmt.Errorf("SMTP_PORT: want a port number")
+	} else {
+		c.Mail.Port = port
+	}
 	return c, c.validate()
 }
 
@@ -161,6 +191,23 @@ func (c Config) validate() error {
 	for name, p := range map[string]OAuthClient{"GOOGLE": c.OAuthGoogle, "GITHUB": c.OAuthGitHub} {
 		if p.Enabled && (p.ClientID == "" || p.ClientSecret == "") {
 			errs = append(errs, fmt.Sprintf("OAUTH_%s=on needs OAUTH_%s_CLIENT_ID and OAUTH_%s_CLIENT_SECRET", name, name, name))
+		}
+	}
+	if c.Mail.Enabled {
+		if c.Mail.Host == "" || c.Mail.From == "" || !strings.Contains(c.Mail.From, "@") || strings.ContainsAny(c.Mail.From, "\r\n") {
+			errs = append(errs, "MAIL=smtp needs SMTP_HOST and SMTP_FROM (an address, e.g. \"ATP <no-reply@example.com>\")")
+		}
+		switch c.Mail.TLS {
+		case "starttls", "tls":
+		case "none":
+			if c.Env != "dev" {
+				errs = append(errs, "SMTP_TLS=none is dev-only (a local mail catcher); use starttls or tls")
+			}
+		default:
+			errs = append(errs, fmt.Sprintf("SMTP_TLS=%q: want starttls|tls|none", c.Mail.TLS))
+		}
+		if c.PublicURL == "" {
+			errs = append(errs, "PUBLIC_URL is required when MAIL=smtp (invitation links are built from it)")
 		}
 	}
 	if c.OAuthGoogle.Enabled || c.OAuthGitHub.Enabled {

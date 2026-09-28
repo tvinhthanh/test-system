@@ -351,6 +351,77 @@ paths:
         "409":
           description: "`LAST_SIGN_IN` — link another provider first, or ask an admin to set a password."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/invitations/lookup:
+    post:
+      operationId: lookupInvitation
+      tags: [session]
+      summary: Who is invited to what — for the accept page
+      description: |
+        The token comes from the mailed link `/invite#<token>` (a fragment:
+        never sent to a server, never in an access log) and travels only in
+        this body. Guarded like the login (Origin + double-submit CSRF).
+        Unknown tokens count toward the per-IP login limit.
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [token], properties: { token: { type: string } } } } }
+      responses:
+        "200":
+          description: An open invitation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [email, role, level, scopeName, invitedBy, expiresAt]
+                properties:
+                  email: { type: string, format: email }
+                  role: { type: string, enum: [org_owner, org_admin, workspace_admin, maintainer, member, viewer] }
+                  level: { type: string, enum: [organization, workspace, project] }
+                  scopeName: { type: string, description: "e.g. checkout (Payments)" }
+                  invitedBy: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`INVITATION_NOT_FOUND` — used, withdrawn or older than seven days."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/invitations/accept:
+    post:
+      operationId: acceptInvitation
+      tags: [session]
+      summary: Accept — create the account with a password and sign in
+      description: |
+        Creates the account verified (the mailed link proved the address),
+        grants the invited role and opens a session, answering like
+        `POST /v1/session`. If the email has an account by now, the role is
+        granted and `409 ACCOUNT_EXISTS` asks the person to sign in with it —
+        a link never takes an account over.
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 12 }
+      responses:
+        "200":
+          description: Signed in.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400":
+          description: "`INVALID_PASSWORD` (at least 12 characters) or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`INVITATION_NOT_FOUND`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: "`ACCOUNT_EXISTS` — role granted; sign in."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /v1/session/mfa:
     post:
       operationId: completeMfaLogin
@@ -746,6 +817,114 @@ paths:
         "409":
           description: "`LAST_OWNER`."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/invitations:
+    get:
+      operationId: listProjectInvitations
+      tags: [members]
+      summary: Open invitations to this project, newest first
+      description: Needs `member.manage` on the node. Only when MAIL=smtp are invitations made (by `POST …/members` for an email with no account, answered `202 {invitation}`).
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Open invitations (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Invitation" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/invitations/{invitationId}:
+    delete:
+      operationId: revokeProjectInvitation
+      tags: [members]
+      summary: Withdraw an open invitation — its link stops working
+      description: Audited as `invitation.revoke`. An invitation to be owner is withdrawn only by an owner (`403 OWNER_ONLY`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: invitationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Withdrawn. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/invitations:
+    get:
+      operationId: listWorkspaceInvitations
+      tags: [members]
+      summary: Open invitations to this workspace, newest first
+      description: Needs `member.manage` on the node. Only when MAIL=smtp are invitations made (by `POST …/members` for an email with no account, answered `202 {invitation}`).
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+      responses:
+        "200":
+          description: Open invitations (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Invitation" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/invitations/{invitationId}:
+    delete:
+      operationId: revokeWorkspaceInvitation
+      tags: [members]
+      summary: Withdraw an open invitation — its link stops working
+      description: Audited as `invitation.revoke`. An invitation to be owner is withdrawn only by an owner (`403 OWNER_ONLY`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+        - { name: invitationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Withdrawn. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/invitations:
+    get:
+      operationId: listOrganizationInvitations
+      tags: [members]
+      summary: Open invitations to this organization, newest first
+      description: Needs `member.manage` on the node. Only when MAIL=smtp are invitations made (by `POST …/members` for an email with no account, answered `202 {invitation}`).
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+      responses:
+        "200":
+          description: Open invitations (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Invitation" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/invitations/{invitationId}:
+    delete:
+      operationId: revokeOrganizationInvitation
+      tags: [members]
+      summary: Withdraw an open invitation — its link stops working
+      description: Audited as `invitation.revoke`. An invitation to be owner is withdrawn only by an owner (`403 OWNER_ONLY`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+        - { name: invitationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Withdrawn. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/runs:
     get:
       operationId: listRuns
@@ -2027,6 +2206,7 @@ components:
                 enabled: { type: boolean }
                 required: { type: boolean }
         csrfToken: { type: string }
+        invitations: { type: boolean, description: "Mail is on (MAIL=smtp): adding an email with no account to a team invites it." }
         providers:
           type: array
           description: "OAuth sign-ins switched on in the api's configuration (§11.2); the sign-in page shows a button for each."
@@ -2056,6 +2236,17 @@ components:
         name: { type: string }
         organizationName: { type: string }
         actions: { type: array, items: { $ref: "#/components/schemas/ProjectAction" } }
+    Invitation:
+      type: object
+      required: [id, email, role, level, invitedBy, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [org_owner, org_admin, workspace_admin, maintainer, member, viewer] }
+        level: { type: string, enum: [organization, workspace, project] }
+        invitedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
     Member:
       type: object
       required: [userId, email, role, level, createdAt]

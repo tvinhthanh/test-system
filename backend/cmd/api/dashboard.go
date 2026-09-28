@@ -18,6 +18,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
@@ -57,6 +58,10 @@ type dashboard struct {
 	logger   *slog.Logger
 
 	ratePerMinute int // per signed-in user; 0 = no limit
+	// mailer sends invitations (MAIL=smtp); nil = mail off. publicURL builds
+	// the links.
+	mailer    mail.Sender
+	publicURL string
 }
 
 // routes mounts the dashboard behind a per-user rate limit (§11.6 API4):
@@ -89,6 +94,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.identityOpsRoutes(handle)
 	d.testmgmtRoutes(handle)
 	d.memberRoutes(handle)
+	d.invitationRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
 }

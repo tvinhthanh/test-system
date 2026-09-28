@@ -1,0 +1,235 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/memory"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg/pgtest"
+	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/migrations"
+)
+
+// outbox catches mail instead of sending it; fail makes the next send fail.
+type outbox struct {
+	mu   sync.Mutex
+	sent []mail.Message
+	fail bool
+}
+
+func (o *outbox) Send(_ context.Context, m mail.Message) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.fail {
+		o.fail = false
+		return errors.New("smtp: 451 try later")
+	}
+	o.sent = append(o.sent, m)
+	return nil
+}
+
+func (o *outbox) last(t *testing.T) (mail.Message, string) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.sent) == 0 {
+		t.Fatal("no mail sent")
+	}
+	m := o.sent[len(o.sent)-1]
+	token := regexp.MustCompile(`/invite#(atp_inv_[A-Za-z0-9_-]+)`).FindStringSubmatch(m.Text)
+	if token == nil {
+		t.Fatalf("no invitation link in the mail:\n%s", m.Text)
+	}
+	return m, token[1]
+}
+
+// §11.2 "mời member" with MAIL=smtp: an unknown email is invited, the mail
+// carries a fragment link, accepting makes a verified account with the role
+// and a session; the token is single use, wrong tokens are counted, and a
+// mail that cannot be sent leaves nothing behind.
+func TestInvitations(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	box := &outbox{}
+	prev := newMailer
+	t.Cleanup(func() { newMailer = prev })
+	newMailer = func(cfg config.Config) mail.Sender {
+		if !cfg.Mail.Enabled {
+			return nil
+		}
+		return box
+	}
+	cfg := config.Config{
+		Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false,
+		Mail: config.Mail{Enabled: true}, PublicURL: "https://atp.example",
+	}
+	handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	ten, az := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper))
+	org, _ := ten.CreateOrganization(ctx, "Acme\r\nBcc: eve@evil.example", "acme")
+	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
+	p, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
+	admin, _ := az.CreateUser(ctx, "dana@example.com")
+	_ = az.SetPassword(ctx, admin.ID, "dana passphrase long", "")
+	_ = az.VerifyEmail(ctx, admin.ID)
+	_, _ = az.GrantRole(ctx, admin.ID, authz.ScopeRef{Level: authz.LevelWorkspace, ID: string(ws.ID)}, authz.RoleWorkspaceAdmin)
+	dana := newClient(t, srv)
+	dana.bootstrap()
+	dana.post("/v1/session", map[string]string{"email": "dana@example.com", "password": "dana passphrase long"})
+	dana.csrf, _ = dana.get("/v1/session").body["csrfToken"].(string)
+	if r := dana.get("/v1/session"); r.body["invitations"] != true {
+		t.Errorf("bootstrap with mail on: %s", r.raw)
+	}
+	members := "/v1/projects/" + string(p.ID) + "/members"
+
+	// An unknown email is invited: 202, one mail, a fragment link.
+	r := dana.post(members, map[string]any{"email": "New.Person@Example.com", "role": "member"})
+	if r.code != 202 || r.body["invitation"].(map[string]any)["email"] != "new.person@example.com" {
+		t.Fatalf("invite: %d %s", r.code, r.raw)
+	}
+	msg, token := box.last(t)
+	if msg.To != "new.person@example.com" || strings.ContainsAny(msg.Subject, "\r\n") || !strings.Contains(msg.Text, "https://atp.example/invite#atp_inv_") ||
+		!strings.Contains(msg.Text, "dana@example.com invited you to checkout (Payments) on ATP") || !strings.Contains(msg.Text, "as member") {
+		t.Errorf("mail: %+v", msg)
+	}
+	if r := dana.get("/v1/projects/" + string(p.ID) + "/invitations"); len(r.items()) != 1 {
+		t.Errorf("open invitations: %s", r.raw)
+	}
+
+	// The invitee's side: look up, refuse a weak password, accept, signed in.
+	guest := newClient(t, srv)
+	guest.bootstrap()
+	if r := guest.post("/v1/invitations/lookup", map[string]any{"token": token}); r.code != 200 || r.body["email"] != "new.person@example.com" || r.body["scopeName"] != "checkout (Payments)" || r.body["role"] != "member" {
+		t.Errorf("lookup: %d %s", r.code, r.raw)
+	}
+	if r := guest.post("/v1/invitations/accept", map[string]any{"token": token, "password": "short"}); r.code != 400 || r.errCode() != "INVALID_PASSWORD" {
+		t.Errorf("weak password: %d %s", r.code, r.raw)
+	}
+	if r := guest.post("/v1/invitations/accept", map[string]any{"token": token, "password": "a long enough passphrase"}); r.code != 200 || r.body["user"] == nil {
+		t.Fatalf("accept: %d %s", r.code, r.raw)
+	}
+	guest.csrf, _ = guest.get("/v1/session").body["csrfToken"].(string)
+	if r := guest.get("/v1/projects/" + string(p.ID) + "/runs"); r.code != 200 {
+		t.Errorf("the new member reads the project: %d %s", r.code, r.raw)
+	}
+	if u, _ := az.GetUserByEmail(ctx, "new.person@example.com"); u.EmailVerifiedAt.IsZero() || !u.HasPassword {
+		t.Errorf("new account: %+v", u)
+	}
+	// Single use.
+	other := newClient(t, srv)
+	other.bootstrap()
+	if r := other.post("/v1/invitations/accept", map[string]any{"token": token, "password": "another long passphrase"}); r.code != 404 || r.errCode() != "INVITATION_NOT_FOUND" {
+		t.Errorf("token reused: %d %s", r.code, r.raw)
+	}
+	// Someone with an account is not invited: the role is granted directly.
+	if r := dana.post(members, map[string]any{"email": "new.person@example.com", "role": "viewer"}); r.code != 200 || r.body["role"] != "viewer" {
+		t.Errorf("existing account: %d %s", r.code, r.raw)
+	}
+
+	// Revoke: the link stops working.
+	dana.post(members, map[string]any{"email": "later@example.com", "role": "viewer"})
+	_, t2 := box.last(t)
+	invs := dana.get("/v1/projects/" + string(p.ID) + "/invitations").items()
+	if len(invs) != 1 {
+		t.Fatalf("open invitations: %v", invs)
+	}
+	id := invs[0].(map[string]any)["id"].(string)
+	if r := dana.do("DELETE", "/v1/projects/"+string(p.ID)+"/invitations/"+id, nil, nil); r.code != 204 {
+		t.Errorf("revoke: %d %s", r.code, r.raw)
+	}
+	if r := other.post("/v1/invitations/lookup", map[string]any{"token": t2}); r.code != 404 {
+		t.Errorf("revoked token: %d %s", r.code, r.raw)
+	}
+
+	// A mail that cannot be sent withdraws the invitation.
+	box.fail = true
+	if r := dana.post(members, map[string]any{"email": "bounce@example.com", "role": "viewer"}); r.code != 502 || r.errCode() != "MAIL_FAILED" {
+		t.Errorf("mail failure: %d %s", r.code, r.raw)
+	}
+	if r := dana.get("/v1/projects/" + string(p.ID) + "/invitations"); len(r.items()) != 0 {
+		t.Errorf("invitation left behind after a failed mail: %s", r.raw)
+	}
+
+	// Owner invitations are the owners' (§11.3.1), and the org name — with a
+	// CR/LF in it — never reaches a header.
+	orgMembers := "/v1/organizations/" + string(org.ID) + "/members"
+	if r := dana.post(orgMembers, map[string]any{"email": "boss@example.com", "role": "org_owner"}); r.code != 404 {
+		t.Errorf("workspace admin inviting at the org: %d %s", r.code, r.raw)
+	}
+	_, _ = az.GrantRole(ctx, admin.ID, authz.ScopeRef{Level: authz.LevelOrganization, ID: string(org.ID)}, authz.RoleOrgAdmin)
+	if r := dana.post(orgMembers, map[string]any{"email": "boss@example.com", "role": "org_owner"}); r.code != 403 || r.errCode() != "OWNER_ONLY" {
+		t.Errorf("org admin inviting an owner: %d %s", r.code, r.raw)
+	}
+	if r := dana.post(orgMembers, map[string]any{"email": "ops@example.com", "role": "org_admin"}); r.code != 202 {
+		t.Fatalf("org admin invite: %d %s", r.code, r.raw)
+	}
+	if m, _ := box.last(t); strings.ContainsAny(m.Subject, "\r\n") {
+		t.Errorf("subject from an org name with CR/LF: %q", m.Subject)
+	}
+
+	// Guessing tokens is counted like guessing passwords.
+	g := newClient(t, srv)
+	g.bootstrap()
+	var last resp
+	for i := 0; i < 6; i++ {
+		last = g.post("/v1/invitations/lookup", map[string]any{"token": "atp_inv_guess"})
+	}
+	if last.code != 429 {
+		t.Errorf("sixth wrong token: %d %s", last.code, last.raw)
+	}
+
+	// The record.
+	audit, _ := az.ListAudit(ctx, "", 50)
+	count := map[string]int{}
+	for _, a := range audit {
+		count[a.Action]++
+	}
+	if count["invitation.create"] != 4 || count["invitation.accept"] != 1 || count["invitation.revoke"] != 2 {
+		t.Errorf("audit: %v", count)
+	}
+}
+
+// Mail off: nothing changes — an unknown email is USER_NOT_FOUND.
+func TestInvitationsNeedMail(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false}
+	handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	ten, az := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper))
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
+	p, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
+	u, _ := az.CreateUser(ctx, "dana@example.com")
+	_ = az.SetPassword(ctx, u.ID, "dana passphrase long", "")
+	_ = az.VerifyEmail(ctx, u.ID)
+	_, _ = az.GrantRole(ctx, u.ID, authz.ScopeRef{Level: authz.LevelWorkspace, ID: string(ws.ID)}, authz.RoleWorkspaceAdmin)
+	c := newClient(t, srv)
+	c.bootstrap()
+	c.post("/v1/session", map[string]string{"email": "dana@example.com", "password": "dana passphrase long"})
+	c.csrf, _ = c.get("/v1/session").body["csrfToken"].(string)
+	if r := c.get("/v1/session"); r.body["invitations"] != false {
+		t.Errorf("bootstrap with mail off: %s", r.raw)
+	}
+	if r := c.post("/v1/projects/"+string(p.ID)+"/members", map[string]any{"email": "new@example.com", "role": "member"}); r.code != 404 || r.errCode() != "USER_NOT_FOUND" {
+		t.Errorf("mail off: %d %s", r.code, r.raw)
+	}
+}

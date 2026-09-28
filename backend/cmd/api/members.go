@@ -266,6 +266,13 @@ func (d *dashboard) memberSet(resolve nodeResolver) http.HandlerFunc {
 		// An unverified account may not join an org (§11.2); to the manager it
 		// is the same as no account.
 		u, err := d.authz.GetUserByEmail(r.Context(), email)
+		// No account at all and mail on: invite the address instead (§11.2).
+		if errors.Is(err, authz.ErrNotFound) && d.mailer != nil {
+			if d.ownerOnly(w, r, n, "", role) {
+				d.invite(w, r, n, email, role, d.actor(r, p))
+			}
+			return
+		}
 		if errors.Is(err, authz.ErrNotFound) || (err == nil && u.EmailVerifiedAt.IsZero()) {
 			httpx.WriteError(w, http.StatusNotFound, "USER_NOT_FOUND", "no verified account uses that email", map[string]any{"field": "email"})
 			return

@@ -4,7 +4,7 @@ import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
-import type { Member } from "./membersRepository";
+import type { Invitation, Member } from "./membersRepository";
 import { grantable, type MemberNode, type Role } from "./roles";
 import { useMutation } from "../testmgmt/useMutation";
 import ErrorNote from "../testmgmt/ErrorNote.vue";
@@ -123,13 +123,39 @@ async function add() {
   const role = draft.value.role;
   if (!role) return;
   const email = draft.value.email.trim();
+  sent.value = "";
   const done = await mutation.run("new", (signal) =>
     members.set(node.value, email, role, signal),
   );
   if (done) {
     draft.value = { email: "", role };
-    await refresh();
+    if (done.kind === "invited") {
+      sent.value = done.invitation.email;
+      await refreshInvites();
+    } else await refresh();
   }
+}
+
+// Invitations (mail on, §11.2): an email with no account is invited; the
+// open ones are listed under the members and can be withdrawn.
+const sent = ref("");
+const invites = useResource<Invitation[]>();
+function refreshInvites() {
+  if (!session.invitations || !canManage.value) return Promise.resolve();
+  return invites.load((signal) => members.invitations(node.value, signal));
+}
+watch([node, canManage], refreshInvites, { immediate: true });
+async function withdraw(i: Invitation) {
+  if (confirming.value !== i.id) {
+    confirming.value = i.id;
+    return;
+  }
+  confirming.value = null;
+  const done = await mutation.run(i.id, async (signal) => {
+    await members.revokeInvitation(node.value, i.id, signal);
+    return true;
+  });
+  if (done) await refreshInvites();
 }
 async function pick(m: Member, value: string) {
   const role = offered.value.find((r) => r === value);
@@ -183,7 +209,9 @@ const rowRoles = (m: Member) =>
     @submit.prevent="add"
   >
     <div class="space-y-2">
-      <Label for="member-email">Email of an existing account</Label>
+      <Label for="member-email">{{
+        session.invitations ? "Email" : "Email of an existing account"
+      }}</Label>
       <Input
         id="member-email"
         v-model="draft.email"
@@ -208,6 +236,17 @@ const rowRoles = (m: Member) =>
     <p v-if="draft.role" class="text-muted-foreground text-xs sm:col-span-3">
       {{ label(draft.role) }}: {{ roleHelp[draft.role] }}. Adding someone who is
       already here changes their role here.
+      <template v-if="session.invitations">
+        Someone without an account gets an email invitation, valid seven days.
+      </template>
+    </p>
+    <p
+      v-if="sent"
+      class="invite-sent bg-success-soft text-success border-success/30 rounded-md border px-3 py-2 text-sm sm:col-span-3"
+      role="status"
+    >
+      Invitation sent to <strong class="font-medium">{{ sent }}</strong
+      >. They join when they open the link and choose a password.
     </p>
     <ErrorNote
       v-if="mutation.error.value?.key === 'new'"
@@ -306,4 +345,48 @@ const rowRoles = (m: Member) =>
       </Table>
     </div>
   </AsyncState>
+
+  <section
+    v-if="session.invitations && canManage && invites.data.value?.length"
+    class="pending-invitations mt-6"
+    aria-labelledby="pending-title"
+  >
+    <h2 id="pending-title" class="mb-2 text-sm font-semibold">
+      Pending invitations
+    </h2>
+    <ul class="bg-card divide-y rounded-lg border">
+      <li
+        v-for="i in invites.data.value"
+        :key="i.id"
+        class="flex flex-wrap items-center gap-3 px-4 py-2.5"
+      >
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-medium">{{ i.email }}</span>
+          <span class="text-muted-foreground block text-xs">
+            {{ label(i.role) }} · invited by {{ i.invitedBy }} · expires
+            {{ time(i.expiresAt) }}
+          </span>
+          <ErrorNote
+            v-if="mutation.error.value?.key === i.id"
+            class="mt-2"
+            :error="mutation.error.value.error"
+          />
+        </span>
+        <Button
+          v-if="i.role !== 'org_owner' || canOwners"
+          :variant="confirming === i.id ? 'destructive' : 'ghost'"
+          size="xs"
+          :disabled="mutation.busy.value !== null"
+          :aria-label="
+            confirming === i.id
+              ? `Confirm withdrawing the invitation to ${i.email}`
+              : `Withdraw the invitation to ${i.email}`
+          "
+          @click="withdraw(i)"
+          @blur="confirming = null"
+          >{{ confirming === i.id ? "Confirm" : "Withdraw" }}</Button
+        >
+      </li>
+    </ul>
+  </section>
 </template>
