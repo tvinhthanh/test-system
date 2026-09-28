@@ -143,6 +143,9 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	mailer := newMailer(cfg)
 	web.Invitations = mailer != nil
 	web.DescribeScope = func(ctx context.Context, s authz.ScopeRef) string { return scopeName(ctx, ten, s) }
+	if mailer != nil {
+		web.SendReset = func(to, token string) { sendReset(mailer, cfg.PublicURL, logger, to, token) }
+	}
 	if client, err := outbound.New(10*time.Second, endpoints...); err != nil {
 		logger.Error("oauth sign-in off: provider endpoints", "err", err)
 		web.OAuth = nil

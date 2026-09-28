@@ -377,6 +377,16 @@ type Service interface {
 	// the role and opens a session; ErrAccountExists when the email has an
 	// account by now (role granted, no session).
 	AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
+	// RequestPasswordReset (§11.2) answers alike for known and unknown
+	// emails: it returns (address, token) only when an account exists — the
+	// caller mails it — and ("", "") otherwise. Every request counts toward
+	// 5 per 15 minutes per email and per IP (ErrRateLimited).
+	RequestPasswordReset(ctx context.Context, email, ip string) (to, token string, err error)
+	// ResetPassword spends a reset token: new password, address verified,
+	// every session revoked, audited password.reset. ErrNotFound for an
+	// unknown, used or expired token (counted per IP); ErrInvalid for a
+	// password the policy refuses (the token is not spent).
+	ResetPassword(ctx context.Context, token, password, ip string) error
 	// CompleteMFALogin trades the challenge from Login plus a TOTP or
 	// recovery code for a session. Wrong codes count toward the rate limit
 	// (ErrInvalidCode, then ErrRateLimited); an unknown or expired challenge

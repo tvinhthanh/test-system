@@ -58,6 +58,10 @@ type WebOptions struct {
 	// names a node for the accept page — authz does not know tenancy.
 	Invitations   bool
 	DescribeScope func(ctx context.Context, s ScopeRef) string
+	// SendReset mails a password-reset link (§11.2); nil = reset by email
+	// is off. It must not block: the caller sends in the background so the
+	// answer takes the same time for a known and an unknown email.
+	SendReset func(to, token string)
 }
 
 type sessionKey struct{}
@@ -193,6 +197,7 @@ func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	mfaRoutes(mux, h)
 	oauthRoutes(mux, h)
 	invitationRoutes(mux, h)
+	resetRoutes(mux, h)
 }
 
 type webHandlers struct {
@@ -221,6 +226,8 @@ type sessionResponse struct {
 	Providers []string `json:"providers"`
 	// Invitations: mail is on; adding an unknown email to a team invites it.
 	Invitations bool `json:"invitations"`
+	// PasswordReset: "forgot password" by email is available.
+	PasswordReset bool `json:"passwordReset"`
 }
 
 // session is the bootstrap: who is logged in (if anyone) plus a CSRF
@@ -235,7 +242,7 @@ func (h *webHandlers) session(w http.ResponseWriter, r *http.Request) {
 		csrf = newCSRFToken()
 		h.setCSRFCookie(w, csrf, time.Time{})
 	}
-	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames(), Invitations: h.opts.Invitations}
+	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames(), Invitations: h.opts.Invitations, PasswordReset: h.opts.SendReset != nil}
 	if p, ok := PrincipalFrom(r.Context()); ok && p.Kind == PrincipalUser {
 		if u, err := h.svc.GetUser(r.Context(), p.UserID); err == nil {
 			resp.User = h.userOut(r, u)

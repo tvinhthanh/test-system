@@ -422,6 +422,63 @@ paths:
           description: "`ACCOUNT_EXISTS` — role granted; sign in."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/password/forgot:
+    post:
+      operationId: forgotPassword
+      tags: [session]
+      summary: Ask for a password-reset link by email
+      description: |
+        Always `202` with the same body, whether or not an account uses the
+        email (§11.2); the mail leaves in the background so the time taken
+        does not tell either. Every request counts toward 5 per 15 minutes per
+        email and per IP (`429`). The link is `/reset#<token>` — single use,
+        30 minutes, replaced by a newer request. Only with `MAIL=smtp`
+        (bootstrap `passwordReset`); otherwise `404 PASSWORD_RESET_OFF`.
+        Guarded like the login (Origin + double-submit CSRF).
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [email], properties: { email: { type: string } } } } }
+      responses:
+        "202":
+          description: Taken — a link is on its way if an account uses the email.
+          content: { application/json: { schema: { type: object, properties: { message: { type: string } } } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`PASSWORD_RESET_OFF` — mail is not configured here."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/password/reset:
+    post:
+      operationId: resetPassword
+      tags: [session]
+      summary: Choose a new password with the mailed token
+      description: |
+        Sets the password, marks the address verified, revokes every session
+        and records `password.reset`. Does not sign in — the next sign-in asks
+        for the second factor if MFA is on. Unknown tokens count toward the
+        per-IP limit.
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 12 }
+      responses:
+        "204": { description: Password changed; sign in with it. }
+        "400":
+          description: "`INVALID_PASSWORD` (the token is not spent) or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`RESET_NOT_FOUND` — used, replaced, or older than 30 minutes."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /v1/session/mfa:
     post:
       operationId: completeMfaLogin
@@ -2207,6 +2264,7 @@ components:
                 required: { type: boolean }
         csrfToken: { type: string }
         invitations: { type: boolean, description: "Mail is on (MAIL=smtp): adding an email with no account to a team invites it." }
+        passwordReset: { type: boolean, description: "Forgot-password by email is available (MAIL=smtp)." }
         providers:
           type: array
           description: "OAuth sign-ins switched on in the api's configuration (§11.2); the sign-in page shows a button for each."

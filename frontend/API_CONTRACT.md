@@ -79,6 +79,20 @@ the server session. UI clears state only after server confirmation or a 401.
   expired), `409 ACCOUNT_EXISTS` (the role was added; sign in),
   `400 INVALID_PASSWORD` (12+ characters), `429` after repeated bad tokens.
 
+### Forgot password (§11.2, implemented 2026-09-28)
+
+- The bootstrap carries `passwordReset: true` with `MAIL=smtp`; the sign-in
+  page then shows "Forgot password?" → `/forgot`.
+- `POST /v1/session/password/forgot {email}` → **202** with the same body for
+  any email (never tells whether an account exists); `429` after 5 requests
+  per email or IP in 15 minutes; `404 PASSWORD_RESET_OFF` without mail.
+- The mail links to `/reset#<token>` (30 minutes, single use, replaced by a
+  newer request). The page strips the fragment and posts
+  `POST /v1/session/password/reset {token,password}` → 204;
+  `404 RESET_NOT_FOUND`, `400 INVALID_PASSWORD` (token not spent). Every
+  session is signed out and nobody is signed in: the page sends the person to
+  sign in (MFA still asked if on).
+
 ### Two-factor authentication (§11.2, implemented 2026-09-27)
 
 - The session user carries `mfa:{enabled,required}`. `required` means an org

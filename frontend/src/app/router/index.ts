@@ -17,6 +17,14 @@ export function makeRouter(
         component: () => import("../../features/auth/InvitePage.vue"),
       },
       {
+        path: "/forgot",
+        component: () => import("../../features/auth/PasswordPage.vue"),
+      },
+      {
+        path: "/reset",
+        component: () => import("../../features/auth/PasswordPage.vue"),
+      },
+      {
         path: "/",
         component: () => import("../AppShell.vue"),
         meta: { protected: true },

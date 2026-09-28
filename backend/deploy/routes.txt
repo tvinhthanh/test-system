@@ -82,3 +82,5 @@ GET /v1/workspaces/{workspaceId}/invitations
 DELETE /v1/workspaces/{workspaceId}/invitations/{invitationId}
 GET /v1/organizations/{organizationId}/invitations
 DELETE /v1/organizations/{organizationId}/invitations/{invitationId}
+POST /v1/session/password/forgot
+POST /v1/session/password/reset

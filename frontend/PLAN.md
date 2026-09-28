@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 50 unit tests, production build + bundle gate
+- Latest verification: typecheck, 51 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,19 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-28 (forgot password)
+
+- Session decodes `passwordReset`; the store gains `forgotPassword` /
+  `resetPassword` (token only in the body).
+- `PasswordPage` serves `/forgot` (email → the same "check your email" for
+  anyone) and `/reset` (token from the fragment, stripped from the URL; new
+  password + confirm; used / replaced / expired link explained). Sign-in page
+  shows "Forgot password?" when available.
+- Verified: typecheck, 51 unit tests; a browser run on the real api with
+  `MAIL=smtp` to a local SMTP catcher: forgot → mail over SMTP → link in a
+  fresh browser → new password → signed in with it → link refused again;
+  the token is in neither the api nor the Vite log.
 
 ### 2026-09-28 (invitations by email)
 

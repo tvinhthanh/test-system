@@ -26,10 +26,12 @@ export function createSessionStore(
     const providers = shallowRef<OAuthProvider[]>([]);
     // Mail is on (bootstrap): teams can invite unknown emails.
     const invitations = ref(false);
+    const passwordReset = ref(false);
     let bootstrap: Promise<void> | undefined;
     function apply(session: Session) {
       providers.value = session.providers;
       invitations.value = session.invitations;
+      passwordReset.value = session.passwordReset;
       user.value = session.user;
       api.csrfToken = session.csrfToken;
     }
@@ -137,6 +139,14 @@ export function createSessionStore(
       ready.value = true;
       return !!user.value;
     }
+    async function forgotPassword(email: string) {
+      await ensure();
+      await repository.forgotPassword(email);
+    }
+    async function resetPassword(token: string, password: string) {
+      await ensure();
+      await repository.resetPassword(token, password);
+    }
     function cancelMfa() {
       challenge.value = null;
       error.value = null;
@@ -168,6 +178,9 @@ export function createSessionStore(
       challenge,
       providers,
       invitations,
+      passwordReset,
+      forgotPassword,
+      resetPassword,
       lookupInvitation,
       acceptInvitation,
       ensure,

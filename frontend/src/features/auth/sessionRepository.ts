@@ -23,6 +23,8 @@ export interface Session {
   providers: OAuthProvider[];
   // Mail is on: adding an email with no account to a team invites it.
   invitations: boolean;
+  // Forgot-password by email is available.
+  passwordReset: boolean;
 }
 // A correct password on an account with MFA on: no session yet (202).
 export interface MfaChallenge {
@@ -41,6 +43,7 @@ function parseSession(value: unknown): Session {
     csrfToken: string(json.csrfToken),
     providers,
     invitations: json.invitations === true,
+    passwordReset: json.passwordReset === true,
     user: user
       ? {
           id: string(user.id),
@@ -118,6 +121,15 @@ export class SessionRepository {
         body: { token, password },
       }),
     );
+  }
+  // Forgot password (SPEC §11.2): the answer is the same for any email.
+  async forgotPassword(email: string) {
+    await this.api.request("/v1/session/password/forgot", { body: { email } });
+  }
+  async resetPassword(token: string, password: string) {
+    await this.api.request("/v1/session/password/reset", {
+      body: { token, password },
+    });
   }
   async logout() {
     await this.api.request("/v1/session/logout", { body: {} });

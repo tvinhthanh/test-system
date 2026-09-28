@@ -201,7 +201,15 @@ onMounted(() => {
           />
         </div>
         <div class="space-y-2">
-          <Label for="password">Password</Label>
+          <div class="flex items-baseline justify-between">
+            <Label for="password">Password</Label>
+            <RouterLink
+              v-if="session.passwordReset"
+              to="/forgot"
+              class="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+              >Forgot password?</RouterLink
+            >
+          </div>
           <Input
             id="password"
             v-model="password"

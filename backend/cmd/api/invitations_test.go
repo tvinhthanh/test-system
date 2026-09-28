@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
@@ -231,5 +232,148 @@ func TestInvitationsNeedMail(t *testing.T) {
 	}
 	if r := c.post("/v1/projects/"+string(p.ID)+"/members", map[string]any{"email": "new@example.com", "role": "member"}); r.code != 404 || r.errCode() != "USER_NOT_FOUND" {
 		t.Errorf("mail off: %d %s", r.code, r.raw)
+	}
+}
+
+// waitMail waits for the n-th mail (the reset mail leaves in the background).
+func (o *outbox) waitMail(t *testing.T, n int) mail.Message {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		o.mu.Lock()
+		if len(o.sent) >= n {
+			m := o.sent[n-1]
+			o.mu.Unlock()
+			return m
+		}
+		o.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("mail %d never arrived", n)
+	return mail.Message{}
+}
+
+func (o *outbox) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.sent)
+}
+
+var resetLink = regexp.MustCompile(`/reset#(atp_rst_[A-Za-z0-9_-]+)`)
+
+// §11.2 forgot password: the same answer for known and unknown emails, a
+// single-use 30-minute link, every session revoked, 5 requests per email
+// per 15 minutes, off without mail.
+func TestPasswordReset(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	box := &outbox{}
+	prev := newMailer
+	t.Cleanup(func() { newMailer = prev })
+	newMailer = func(cfg config.Config) mail.Sender {
+		if !cfg.Mail.Enabled {
+			return nil
+		}
+		return box
+	}
+	cfg := config.Config{
+		Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false,
+		Mail: config.Mail{Enabled: true}, PublicURL: "https://atp.example",
+	}
+	handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	az := authz.New(db, []byte(cfg.TokenPepper))
+	u, _ := az.CreateUser(ctx, "rita@example.com")
+	_ = az.SetPassword(ctx, u.ID, "the old passphrase", "")
+	_ = az.VerifyEmail(ctx, u.ID)
+	signIn := func(pw string) (*client, resp) {
+		c := newClient(t, srv)
+		c.bootstrap()
+		return c, c.post("/v1/session", map[string]string{"email": "rita@example.com", "password": pw})
+	}
+	old, r := signIn("the old passphrase")
+	if r.code != 200 {
+		t.Fatalf("login: %d", r.code)
+	}
+	anon := newClient(t, srv)
+	anon.bootstrap()
+	if r := anon.get("/v1/session"); r.body["passwordReset"] != true {
+		t.Errorf("bootstrap: %s", r.raw)
+	}
+
+	// Known and unknown emails get the same answer; only one gets a mail.
+	unknown := anon.post("/v1/session/password/forgot", map[string]any{"email": "nobody@example.com"})
+	known := anon.post("/v1/session/password/forgot", map[string]any{"email": " Rita@Example.com "})
+	if unknown.code != 202 || known.code != 202 || unknown.raw != known.raw {
+		t.Errorf("answers differ: %d %s / %d %s", unknown.code, unknown.raw, known.code, known.raw)
+	}
+	m := box.waitMail(t, 1)
+	first := resetLink.FindStringSubmatch(m.Text)
+	if m.To != "rita@example.com" || first == nil || !strings.Contains(m.Text, "https://atp.example/reset#atp_rst_") {
+		t.Fatalf("reset mail: %+v", m)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if box.count() != 1 {
+		t.Errorf("mails: %d, want 1 (none for the unknown email)", box.count())
+	}
+	// Asking again replaces the link.
+	anon.post("/v1/session/password/forgot", map[string]any{"email": "rita@example.com"})
+	second := resetLink.FindStringSubmatch(box.waitMail(t, 2).Text)
+	if r := anon.post("/v1/session/password/reset", map[string]any{"token": first[1], "password": "a brand new passphrase"}); r.code != 404 || r.errCode() != "RESET_NOT_FOUND" {
+		t.Errorf("replaced link: %d %s", r.code, r.raw)
+	}
+	// A weak password spends nothing; a good one resets and signs everyone out.
+	if r := anon.post("/v1/session/password/reset", map[string]any{"token": second[1], "password": "short"}); r.code != 400 || r.errCode() != "INVALID_PASSWORD" {
+		t.Errorf("weak password: %d %s", r.code, r.raw)
+	}
+	if r := anon.post("/v1/session/password/reset", map[string]any{"token": second[1], "password": "a brand new passphrase"}); r.code != 204 {
+		t.Fatalf("reset: %d %s", r.code, r.raw)
+	}
+	if r := old.get("/v1/projects"); r.code != 401 {
+		t.Errorf("old session after reset: %d", r.code)
+	}
+	if _, r := signIn("the old passphrase"); r.code != 401 {
+		t.Errorf("old password after reset: %d", r.code)
+	}
+	if _, r := signIn("a brand new passphrase"); r.code != 200 {
+		t.Errorf("new password: %d %s", r.code, r.raw)
+	}
+	if r := anon.post("/v1/session/password/reset", map[string]any{"token": second[1], "password": "yet another passphrase"}); r.code != 404 {
+		t.Errorf("link used twice: %d %s", r.code, r.raw)
+	}
+
+	// Five requests per email per 15 minutes, counted whether or not the
+	// account exists (so the limit tells nothing either).
+	flood := newClient(t, srv)
+	flood.bootstrap()
+	var last resp
+	for i := 0; i < 6; i++ {
+		last = flood.post("/v1/session/password/forgot", map[string]any{"email": "ghost@example.com"})
+	}
+	if last.code != 429 {
+		t.Errorf("sixth request: %d %s", last.code, last.raw)
+	}
+	audit, _ := az.ListAudit(ctx, "", 20)
+	found := false
+	for _, a := range audit {
+		found = found || (a.Action == "password.reset" && a.Actor == "rita@example.com")
+	}
+	if !found {
+		t.Errorf("no password.reset audit: %+v", audit)
+	}
+
+	// Mail off: no reset by email, and the page is told.
+	cfg.Mail.Enabled = false
+	h2, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	off := httptest.NewServer(h2)
+	t.Cleanup(off.Close)
+	c := newClient(t, off)
+	if r := c.bootstrap(); r.body["passwordReset"] != false {
+		t.Errorf("bootstrap with mail off: %s", r.raw)
+	}
+	if r := c.post("/v1/session/password/forgot", map[string]any{"email": "rita@example.com"}); r.code != 404 || r.errCode() != "PASSWORD_RESET_OFF" {
+		t.Errorf("forgot with mail off: %d %s", r.code, r.raw)
 	}
 }

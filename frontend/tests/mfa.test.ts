@@ -194,3 +194,30 @@ it("lists linked sign-ins and explains why the last one stays", async () => {
     "This is your only way to sign in",
   );
 });
+
+it("asks for a reset link and spends the token only in request bodies", async () => {
+  const calls: { path: string; body: unknown }[] = [];
+  const s = store(
+    vi.fn<Transport>(async (input, init) => {
+      const path = String(input);
+      if (init?.method === "POST") {
+        calls.push({ path, body: JSON.parse(String(init.body)) });
+        return path.endsWith("/forgot")
+          ? json({ message: "x" }, 202)
+          : new Response(null, { status: 204 });
+      }
+      return json({ user: null, csrfToken: "c", passwordReset: true });
+    }),
+  );
+  await s.ensure();
+  expect(s.passwordReset).toBe(true);
+  await s.forgotPassword("a@x.io");
+  await s.resetPassword("atp_rst_x", "a long enough passphrase");
+  expect(calls).toEqual([
+    { path: "/v1/session/password/forgot", body: { email: "a@x.io" } },
+    {
+      path: "/v1/session/password/reset",
+      body: { token: "atp_rst_x", password: "a long enough passphrase" },
+    },
+  ]);
+});
