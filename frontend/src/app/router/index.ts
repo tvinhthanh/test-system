@@ -111,6 +111,10 @@ export function makeRouter(
             component: () => import("../../features/members/MembersPage.vue"),
           },
           {
+            path: "team/organizations/:organization/usage",
+            component: () => import("../../features/billing/UsagePage.vue"),
+          },
+          {
             path: "team/workspaces/:workspace",
             component: () => import("../../features/members/MembersPage.vue"),
           },

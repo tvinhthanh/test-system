@@ -845,6 +845,58 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/meter:
+    get:
+      operationId: getOrgMeter
+      tags: [members]
+      summary: The §10.6 shadow meter of an organization — counted daily, never charged (QĐ-13)
+      description: |
+        Org owners only (billing is the owner's, §11.3.1). One row per UTC day
+        up to yesterday, summed over the organization's projects: active tests
+        (stable ids with a result in 30 days, merged folded into their
+        target), raw distinct client fingerprints, identity corrections
+        (merge, undo, split, review decisions), runs, results, stored
+        artifact bytes. `drift` = |growth(active) − growth(raw)| against
+        the previous recorded day; a day above `driftLimit` is flagged.
+        `ready` only after `requiredDays` recorded days with no flagged
+        one — until then the active-test count is not a billing meter, and
+        `reasons` says why.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 366, default: 28 } }
+      responses:
+        "200":
+          description: The recorded days, oldest first, and the verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days, ready, reasons, requiredDays, driftLimit]
+                properties:
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      required: [day, activeTests, rawFingerprints, corrections, runs, results, artifactBytes, drift, flagged]
+                      properties:
+                        day: { type: string, format: date }
+                        activeTests: { type: integer }
+                        rawFingerprints: { type: integer }
+                        corrections: { type: integer }
+                        runs: { type: integer }
+                        results: { type: integer }
+                        artifactBytes: { type: integer, format: int64 }
+                        drift: { type: number }
+                        flagged: { type: boolean }
+                  ready: { type: boolean }
+                  reasons: { type: array, items: { type: string } }
+                  requiredDays: { type: integer, example: 28 }
+                  driftLimit: { type: number, example: 0.02 }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/organizations/{organizationId}/members:
     get:
       operationId: listOrganizationMembers

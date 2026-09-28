@@ -413,6 +413,34 @@ export function createFixtureTransport(): Transport {
         })),
         nextCursor: null,
       });
+    // §10.6 shadow meter: 12 steady days and one merge wave, so the page
+    // shows a flagged day and a "not yet" verdict offline.
+    if (/^\/v1\/organizations\/[^/]+\/meter$/.test(path)) {
+      const days = Array.from({ length: 12 }, (_, i) => {
+        const active = 1180 + i * 6 - (i >= 9 ? 38 : 0);
+        return {
+          day: new Date(Date.UTC(2026, 8, 16 + i)).toISOString().slice(0, 10),
+          activeTests: active,
+          rawFingerprints: 1204 + i * 6,
+          corrections: i === 9 ? 38 : i % 4 === 0 ? 1 : 0,
+          runs: 14 + (i % 3),
+          results: 1850 + i * 20,
+          artifactBytes: Math.round((11.5 + i * 0.2) * 1024 ** 3),
+          drift: i === 9 ? 0.0322 : i === 0 ? 0 : 0.0001,
+          flagged: i === 9,
+        };
+      });
+      return response({
+        days,
+        ready: false,
+        reasons: [
+          "12 of 28 days recorded",
+          "1 day(s) where identity changes moved the active-test count more than 2% away from the raw fingerprints",
+        ],
+        requiredDays: 28,
+        driftLimit: 0.02,
+      });
+    }
     const team = path.match(
       /^\/v1\/(organizations|workspaces)\/[^/]+\/members(?:\/[^/]+)?$/,
     );

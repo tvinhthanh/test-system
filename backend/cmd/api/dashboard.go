@@ -16,6 +16,7 @@ import (
 
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
@@ -65,6 +66,8 @@ type dashboard struct {
 	publicURL string
 	// imports runs JUnit backfill through the ingest pipeline (imports.go).
 	imports ingest.Deps
+	// meter reads the §10.6 shadow meter (meter.go).
+	meter billing.Service
 }
 
 // routes mounts the dashboard behind a per-user rate limit (§11.6 API4):
@@ -100,6 +103,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.invitationRoutes(handle)
 	d.importRoutes(handle)
 	d.roiRoutes(handle)
+	d.meterRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
 }

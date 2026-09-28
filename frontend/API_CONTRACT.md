@@ -340,6 +340,17 @@ contain it.
 
 Every grant and revoke is recorded server-side with the session user as actor.
 
+### Shadow meter (§10.6, QĐ-13, implemented 2026-09-28)
+
+`GET /v1/organizations/{organizationId}/meter?days=28` (1–366, ending
+yesterday), org owners only (org admin 403, another org 404):
+`{days: [{day, activeTests, rawFingerprints, corrections, runs, results,
+artifactBytes, drift, flagged}], ready, reasons: string[], requiredDays: 28,
+driftLimit: 0.02}`, oldest day first. Nothing is charged; `ready` says
+whether active tests could be the billing unit and `reasons` says why not.
+Team → an owner's organization row has a "Usage" link to
+`/team/organizations/:organization/usage`.
+
 ### Workspaces and organizations (Team screens)
 
 - `GET /v1/member-scopes` → `{items:[{level,id,name,organizationName,actions}]}`:

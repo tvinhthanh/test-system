@@ -73,6 +73,7 @@ GET /v1/workspaces/{workspaceId}/members
 POST /v1/workspaces/{workspaceId}/members
 DELETE /v1/workspaces/{workspaceId}/members/{userId}
 GET /v1/organizations/{organizationId}/members
+GET /v1/organizations/{organizationId}/meter
 POST /v1/organizations/{organizationId}/members
 DELETE /v1/organizations/{organizationId}/members/{userId}
 GET /v1/session/oauth/{provider}/start

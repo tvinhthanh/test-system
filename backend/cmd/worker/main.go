@@ -19,6 +19,7 @@ import (
 
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
@@ -30,6 +31,7 @@ import (
 	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/s3"     // OBJSTORE=s3
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
+	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 )
@@ -77,6 +79,9 @@ func main() {
 		_, err := flk.RecomputeRun(ctx, projectID, string(runID))
 		return err
 	}
+	// §10.6 shadow meter (QĐ-13): yesterday is recorded once, by the first
+	// sweep that finds it missing; counted, never charged.
+	meter := billing.New(db, meterSource{query.New(db)})
 	artJobs := artifact.NewJobs(artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: artifact.New(db, store, res), Metrics: reg, Logger: logger})
 
 	metricsMux := http.NewServeMux()
@@ -118,6 +123,16 @@ func main() {
 			if err := artJobs.Sweep(ctx); err != nil {
 				logger.Error("artifact sweep", "err", err)
 			}
+			yesterday := time.Now().UTC().AddDate(0, 0, -1)
+			if done, err := meter.Recorded(ctx, yesterday); err != nil {
+				logger.Error("meter", "err", err)
+			} else if !done {
+				if n, err := meter.Record(ctx, yesterday); err != nil {
+					logger.Error("meter", "day", yesterday.Format("2006-01-02"), "err", err)
+				} else {
+					logger.Info("meter recorded", "day", yesterday.Format("2006-01-02"), "projects", n)
+				}
+			}
 			// Finished jobs older than JOB_RETENTION go, a bounded batch per sweep
 			// (§14.1 T5: the queue table must not grow with history).
 			if n, err := q.Prune(ctx, cfg.JobRetention, 5000); err != nil {
@@ -147,4 +162,21 @@ func main() {
 	defer cancel()
 	_ = metricsSrv.Shutdown(shutdownCtx)
 	db.Close()
+}
+
+// meterSource adapts query's read model to billing.Source (§6.9.4: billing
+// reads no other module's tables).
+type meterSource struct{ q query.Service }
+
+func (m meterSource) MeterFacts(ctx context.Context, day time.Time) ([]billing.Facts, error) {
+	rows, err := m.q.MeterFacts(ctx, day)
+	out := make([]billing.Facts, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, billing.Facts{
+			ProjectID: r.ProjectID, OrgID: r.OrgID, ActiveTests: r.ActiveTests, RawFingerprints: r.RawFingerprints,
+			Merges: r.Merges, UndoMerges: r.UndoMerges, Splits: r.Splits, ReviewDecisions: r.ReviewDecisions,
+			Runs: r.Runs, Results: r.Results, ArtifactBytes: r.ArtifactBytes,
+		})
+	}
+	return out, err
 }

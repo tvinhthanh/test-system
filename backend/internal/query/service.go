@@ -654,3 +654,68 @@ func (s *service) ROIFacts(ctx context.Context, projectID string, from, to time.
 	f.FlakyRetry = time.Duration(retryMs) * time.Millisecond
 	return f, nil
 }
+
+// MeterFacts: one row per project (projects with no activity included, as
+// zeros — a day that drops to nothing is a fact too). Active tests fold a
+// merged identity into the one it was merged into, so a merge moves the
+// count exactly as a bill would see it; raw fingerprints are the distinct
+// clientTestIds reporters sent over the same 30 days.
+func (s *service) MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, error) {
+	d := day.UTC()
+	start := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 1)
+	from := end.AddDate(0, 0, -30)
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		WITH window_results AS (
+			SELECT r.project_id, t.stable_test_id, t.client_test_id
+			  FROM test_results t JOIN runs r ON r.id = t.run_id
+			 WHERE r.started_at >= $1 AND r.started_at < $3
+		), active AS (
+			SELECT w.project_id,
+			       count(DISTINCT coalesce(i.merged_into_id, i.id)) AS active_tests,
+			       count(DISTINCT w.client_test_id) AS raw_fingerprints
+			  FROM window_results w LEFT JOIN test_identities i ON i.id = w.stable_test_id
+			 GROUP BY w.project_id
+		), corrections AS (
+			SELECT project_id,
+			       count(*) FILTER (WHERE action = 'merge') AS merges,
+			       count(*) FILTER (WHERE action = 'undo_merge') AS undo_merges,
+			       count(*) FILTER (WHERE action = 'split') AS splits
+			  FROM identity_audit WHERE at >= $2 AND at < $3 GROUP BY project_id
+		), reviews AS (
+			SELECT project_id, count(*) AS decisions
+			  FROM review_queue_items WHERE decided_at >= $2 AND decided_at < $3 GROUP BY project_id
+		), volume AS (
+			SELECT r.project_id, count(DISTINCT r.id) AS runs, count(t.id) AS results
+			  FROM runs r LEFT JOIN test_results t ON t.run_id = r.id
+			 WHERE r.started_at >= $2 AND r.started_at < $3 GROUP BY r.project_id
+		), storage AS (
+			SELECT project_id, sum(coalesce(actual_bytes, declared_bytes)) AS bytes
+			  FROM artifacts WHERE status = 'verified' AND expires_at > $3 AND created_at < $3 GROUP BY project_id
+		)
+		SELECT p.id, w.org_id,
+		       coalesce(a.active_tests, 0), coalesce(a.raw_fingerprints, 0),
+		       coalesce(c.merges, 0), coalesce(c.undo_merges, 0), coalesce(c.splits, 0), coalesce(rv.decisions, 0),
+		       coalesce(v.runs, 0), coalesce(v.results, 0), coalesce(st.bytes, 0)
+		  FROM projects p JOIN workspaces w ON w.id = p.workspace_id
+		  LEFT JOIN active a ON a.project_id = p.id
+		  LEFT JOIN corrections c ON c.project_id = p.id
+		  LEFT JOIN reviews rv ON rv.project_id = p.id
+		  LEFT JOIN volume v ON v.project_id = p.id
+		  LEFT JOIN storage st ON st.project_id = p.id
+		 ORDER BY p.id`, from, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MeterFacts
+	for rows.Next() {
+		var m MeterFacts
+		if err := rows.Scan(&m.ProjectID, &m.OrgID, &m.ActiveTests, &m.RawFingerprints, &m.Merges, &m.UndoMerges, &m.Splits,
+			&m.ReviewDecisions, &m.Runs, &m.Results, &m.ArtifactBytes); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}

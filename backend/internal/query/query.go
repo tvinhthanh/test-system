@@ -149,6 +149,16 @@ type ROIFacts struct {
 	MarkedFlaky         int
 }
 
+// MeterFacts is one project's §10.6 shadow-meter counts for one UTC day
+// (QĐ-13); billing stores and judges them.
+type MeterFacts struct {
+	ProjectID, OrgID                            string
+	ActiveTests, RawFingerprints                int
+	Merges, UndoMerges, Splits, ReviewDecisions int
+	Runs, Results                               int
+	ArtifactBytes                               int64
+}
+
 // TrendBucket is §8.7's "failure category trends".
 type TrendBucket struct {
 	Week     time.Time `json:"week"`     // start of the ISO week, UTC
@@ -179,6 +189,8 @@ type Service interface {
 
 	Triage(ctx context.Context, projectID string, since time.Time) (TriageMetrics, error)
 	ROIFacts(ctx context.Context, projectID string, from, to time.Time) (ROIFacts, error)
+	// MeterFacts measures every project for the UTC day holding day.
+	MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, error)
 	CategoryTrend(ctx context.Context, projectID string, since time.Time) ([]TrendBucket, error)
 
 	// GateEvidence is what the §6.8.4 release gate judges: the newest

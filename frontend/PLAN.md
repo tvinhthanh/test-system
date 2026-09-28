@@ -255,6 +255,16 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-28 (shadow meter, QĐ-13)
+
+- `/team/organizations/:organization/usage` "Usage (shadow meter)", linked
+  from Team for org owners: the §10.6 verdict first (ready, or the reasons),
+  the latest day (active tests, raw fingerprints, runs, storage), then every
+  day with its identity changes and drift, flagged days marked.
+- `MeterRepository` (strict decode: negative drift or a non-boolean flag is
+  refused — it caught a non-integer byte count in the fixture), fixture with
+  a merge-wave day; `meter.test.ts`.
+
 ### 2026-09-28 (ROI, QĐ-13)
 
 - `/p/:project/roi` "Return on triage" (nav "ROI"): month picker; coverage,

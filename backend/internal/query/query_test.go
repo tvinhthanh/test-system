@@ -10,6 +10,7 @@ import (
 
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg/pgtest"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
@@ -28,6 +29,7 @@ type fixture struct {
 	payID   string // stable id of the payment test
 	res     results.Service
 	tri     triage.Service
+	db      *pg.DB
 }
 
 // build makes a project with N finished runs through the real write
@@ -43,7 +45,7 @@ func build(t *testing.T, n int) fixture {
 	pa, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
 	pb, _ := ten.CreateProject(ctx, ws.ID, "search", "")
 	env, _ := ten.EnsureEnvironment(ctx, pa.ID, "staging")
-	f := fixture{q: query.New(db), project: string(pa.ID), other: string(pb.ID), env: env, res: res, tri: tri}
+	f := fixture{q: query.New(db), project: string(pa.ID), other: string(pb.ID), env: env, res: res, tri: tri, db: db}
 	now := time.Now().UTC()
 	ident := func(file, leaf string) json.RawMessage {
 		b, _ := json.Marshal(map[string]any{"framework": "playwright", "filePath": file, "titlePath": []string{"Checkout", leaf}})
@@ -334,5 +336,64 @@ func TestROIFacts(t *testing.T) {
 	}
 	if other, _ := f.q.ROIFacts(ctx, f.other, now.Add(-24*time.Hour), now.Add(time.Hour)); other != (query.ROIFacts{}) {
 		t.Errorf("another project: %+v", other)
+	}
+}
+
+// §10.6 shadow meter facts (QĐ-13): every project, zeros included; a merge
+// lowers the active count while the raw fingerprints stay — exactly the
+// movement billing must notice.
+func TestMeterFacts(t *testing.T) {
+	f := build(t, 3)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	find := func(rows []query.MeterFacts, id string) query.MeterFacts {
+		for _, r := range rows {
+			if r.ProjectID == id {
+				return r
+			}
+		}
+		t.Fatalf("project %s missing from %+v", id, rows)
+		return query.MeterFacts{}
+	}
+	// Runs are 1–3 hours old: count those that started today (UTC).
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	runsToday := 0
+	for _, r := range f.runs {
+		if !r.StartedAt.Before(today) {
+			runsToday++
+		}
+	}
+
+	rows, err := f.q.MeterFacts(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := find(rows, f.project)
+	if a.ActiveTests != 2 || a.RawFingerprints != 2 || a.Runs != runsToday || a.Results != 2*runsToday || a.OrgID == "" {
+		t.Errorf("project A: %+v (runs today %d)", a, runsToday)
+	}
+	if b := find(rows, f.other); b != (query.MeterFacts{ProjectID: f.other, OrgID: a.OrgID}) {
+		t.Errorf("idle project B must be all zeros: %+v", b)
+	}
+
+	// Merge the cart identity into the payment one, as identity would.
+	var cart string
+	if err := f.db.Q(ctx).QueryRow(ctx, `SELECT id FROM test_identities WHERE project_id = $1 AND id <> $2`, f.project, f.payID).Scan(&cart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Q(ctx).Exec(ctx, `UPDATE test_identities SET status = 'merged', merged_into_id = $2 WHERE id = $1`, cart, f.payID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Q(ctx).Exec(ctx, `INSERT INTO identity_audit (project_id, action, subject_id, target_id, actor, at) VALUES ($1, 'merge', $2, $3, 'alice', now())`, f.project, cart, f.payID); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = f.q.MeterFacts(ctx, now)
+	if a := find(rows, f.project); a.ActiveTests != 1 || a.RawFingerprints != 2 || a.Merges != 1 {
+		t.Errorf("after a merge: %+v — active must drop, raw must not", a)
+	}
+	// A day long before: nothing active, nothing counted.
+	old, _ := f.q.MeterFacts(ctx, now.AddDate(0, 0, -90))
+	if a := find(old, f.project); a.ActiveTests != 0 || a.Runs != 0 || a.Merges != 0 {
+		t.Errorf("90 days ago: %+v", a)
 	}
 }

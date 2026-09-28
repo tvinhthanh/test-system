@@ -53,6 +53,7 @@ import (
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
@@ -252,6 +253,25 @@ func main() {
 		project, days := fs.String("project", "", "project id"), fs.Int("days", 90, "window")
 		parse(fs)
 		out, err = dash.CategoryTrend(ctx, *project, time.Now().Add(-time.Duration(*days)*24*time.Hour))
+	case "meter record":
+		// §10.6 shadow meter: the worker records yesterday by itself; this
+		// fills a day it missed (or re-measures one — a day is replaced, never doubled).
+		day := fs.String("day", "", "UTC day YYYY-MM-DD (default yesterday)")
+		parse(fs)
+		d := time.Now().UTC().AddDate(0, 0, -1)
+		if *day != "" {
+			if d, err = time.Parse("2006-01-02", *day); err != nil {
+				fail(1, fmt.Errorf("-day: want YYYY-MM-DD"))
+			}
+		}
+		var n int
+		n, err = billing.New(db, meterSource{dash}).Record(ctx, d)
+		out = map[string]any{"day": d.Format("2006-01-02"), "projects": n}
+	case "meter report":
+		org, days := fs.String("org", "", "organization id"), fs.Int("days", 28, "window, ending yesterday")
+		parse(fs)
+		to := time.Now().UTC().AddDate(0, 0, -1)
+		out, err = billing.New(db, meterSource{dash}).Report(ctx, *org, to.AddDate(0, 0, -(*days-1)), to)
 	case "review decide":
 		id, decision, actor := fs.String("id", "", "review item id"), fs.String("decision", "", "merged|kept"), fs.String("actor", "", "who (email)")
 		parse(fs)
@@ -276,6 +296,22 @@ func fail(code int, err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|user mfa-reset|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|user mfa-reset|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend|meter record|meter report> [flags]")
 	os.Exit(2)
+}
+
+// meterSource adapts query to billing.Source (as in cmd/worker).
+type meterSource struct{ q query.Service }
+
+func (m meterSource) MeterFacts(ctx context.Context, day time.Time) ([]billing.Facts, error) {
+	rows, err := m.q.MeterFacts(ctx, day)
+	out := make([]billing.Facts, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, billing.Facts{
+			ProjectID: r.ProjectID, OrgID: r.OrgID, ActiveTests: r.ActiveTests, RawFingerprints: r.RawFingerprints,
+			Merges: r.Merges, UndoMerges: r.UndoMerges, Splits: r.Splits, ReviewDecisions: r.ReviewDecisions,
+			Runs: r.Runs, Results: r.Results, ArtifactBytes: r.ArtifactBytes,
+		})
+	}
+	return out, err
 }

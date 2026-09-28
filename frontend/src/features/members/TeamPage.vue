@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Building2, ChevronRight, FolderTree, Users } from "@lucide/vue";
+import { Building2, ChevronRight, FolderTree, Gauge, Users } from "@lucide/vue";
 import { computed, onMounted } from "vue";
 import { useServices } from "../../app/providers/services";
 import EmptyState from "../../shared/EmptyState.vue";
@@ -27,10 +27,10 @@ const href = (s: (typeof scopes.value)[number]) =>
     description="You are not an admin of any organization or workspace."
   />
   <ul v-else class="team-scopes bg-card divide-y rounded-lg border">
-    <li v-for="s in scopes" :key="s.id">
+    <li v-for="s in scopes" :key="s.id" class="flex items-center">
       <RouterLink
         :to="href(s)"
-        class="hover:bg-accent flex items-center gap-3 px-4 py-3 transition-colors"
+        class="hover:bg-accent flex min-w-0 flex-1 items-center gap-3 px-4 py-3 transition-colors"
       >
         <component
           :is="s.level === 'organization' ? Building2 : FolderTree"
@@ -57,6 +57,13 @@ const href = (s: (typeof scopes.value)[number]) =>
           aria-hidden="true"
         />
       </RouterLink>
+      <!-- The §10.6 shadow meter: billing is the owner's (§11.3.1). -->
+      <RouterLink
+        v-if="s.level === 'organization' && s.actions.includes('org.manage')"
+        :to="`${href(s)}/usage`"
+        class="text-muted-foreground hover:text-foreground team-usage inline-flex items-center gap-1.5 px-4 text-sm"
+        ><Gauge :size="15" aria-hidden="true" />Usage</RouterLink
+      >
     </li>
   </ul>
 </template>
