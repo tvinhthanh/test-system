@@ -25,26 +25,35 @@ const (
 	resetPrefix = "atp_rst_"
 )
 
-func (s *service) RequestPasswordReset(ctx context.Context, email, ip string) (string, string, error) {
-	e, ok := normalizeEmail(email)
+// CountPasswordResetRequest is the part of "forgot password" a request waits
+// for: the limit, identical work for any email. Every request counts,
+// whether or not an account exists — otherwise the limit itself would tell
+// the two apart.
+func (s *service) CountPasswordResetRequest(ctx context.Context, email, ip string) error {
 	keys := []string{"reset-ip:" + ip}
-	if ok {
+	if e, ok := normalizeEmail(email); ok {
 		keys = append(keys, "reset-email:"+e)
 	}
 	for _, k := range keys {
 		if locked, err := s.checkLoginLimit(ctx, k); err != nil {
-			return "", "", err
+			return err
 		} else if locked {
-			return "", "", ErrRateLimited
+			return ErrRateLimited
 		}
 	}
-	// Every request counts, whether or not the account exists — otherwise
-	// the limit itself would tell the two apart.
 	for _, k := range keys {
 		if err := s.recordLoginFailure(ctx, k); err != nil {
-			return "", "", err
+			return err
 		}
 	}
+	return nil
+}
+
+// IssuePasswordReset is the part that differs between a known and an
+// unknown email (a lookup, a write), so it runs after the answer has gone:
+// the time a request takes says nothing (28-09 review, finding 5).
+func (s *service) IssuePasswordReset(ctx context.Context, email string) (string, string, error) {
+	e, ok := normalizeEmail(email)
 	if !ok {
 		return "", "", nil
 	}

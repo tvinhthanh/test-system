@@ -1,20 +1,31 @@
 package authz
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 )
 
 // Forgot password over HTTP (§11.2), before any session — guarded like the
-// login. Both answers are the same for a known and an unknown email: the
-// mail, when there is one, leaves in the background (WebOptions.SendReset),
-// so neither the body nor the time taken tells them apart. The mailed link
+// login. Both answers are the same for a known and an unknown email: only
+// the limit runs before the answer; the lookup, the token and the mail
+// (WebOptions.SendReset) run after it, so neither the body nor the time
+// taken tells them apart. The mailed link
 // is /reset#<token>; the token only travels in a body.
 //
 //	POST /v1/session/password/forgot {email}           → 202, always
 //	POST /v1/session/password/reset  {token, password} → 204
+
+func (h *webHandlers) logger() *slog.Logger {
+	if h.opts.Logger != nil {
+		return h.opts.Logger
+	}
+	return slog.Default()
+}
 
 func resetRoutes(mux httpx.Mux, h *webHandlers) {
 	mux.Handle("POST /v1/session/password/forgot", http.HandlerFunc(h.passwordForgot))
@@ -32,7 +43,7 @@ func (h *webHandlers) passwordForgot(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "PASSWORD_RESET_OFF", "password reset by email is not set up here; ask an admin", nil)
 		return
 	}
-	to, token, err := h.svc.RequestPasswordReset(r.Context(), req.Email, clientIP(r))
+	err := h.svc.CountPasswordResetRequest(r.Context(), req.Email, clientIP(r))
 	switch {
 	case errors.Is(err, ErrRateLimited):
 		w.Header().Set("Retry-After", "900")
@@ -43,9 +54,19 @@ func (h *webHandlers) passwordForgot(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "authentication temporarily unavailable", nil)
 		return
 	}
-	if token != "" {
-		h.opts.SendReset(to, token)
-	}
+	// Whatever differs between a known and an unknown email — the lookup, the
+	// token write, the mail — happens after the answer, on its own clock.
+	go func(email string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		to, token, err := h.svc.IssuePasswordReset(ctx, email)
+		if err == nil && token != "" {
+			err = h.opts.SendReset(ctx, to, token)
+		}
+		if err != nil {
+			h.logger().Error("password reset", "err", err)
+		}
+	}(req.Email)
 	writeJSON(w, http.StatusAccepted, map[string]string{"message": "if an account uses that email, a link to choose a new password is on its way"})
 }
 

@@ -22,14 +22,19 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/migrations"
 )
 
-// outbox catches mail instead of sending it; fail makes the next send fail.
+// outbox catches mail instead of sending it; fail makes the next send fail;
+// a non-nil gate holds every send until it is closed (a slow SMTP server).
 type outbox struct {
 	mu   sync.Mutex
 	sent []mail.Message
 	fail bool
+	gate chan struct{}
 }
 
 func (o *outbox) Send(_ context.Context, m mail.Message) error {
+	if o.gate != nil {
+		<-o.gate
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.fail {
@@ -307,6 +312,26 @@ func TestPasswordReset(t *testing.T) {
 	if r := anon.get("/v1/session"); r.body["passwordReset"] != true {
 		t.Errorf("bootstrap: %s", r.raw)
 	}
+
+	// The answer never waits for the mail: with the mail server held, a known
+	// email still answers at once. (The lookup and the token write also run
+	// after the answer — the handler only calls CountPasswordResetRequest —
+	// which is structure, not something a timing test can show; 28-09 review,
+	// finding 5.)
+	box.gate = make(chan struct{})
+	started := time.Now()
+	if r := anon.post("/v1/session/password/forgot", map[string]any{"email": "rita@example.com"}); r.code != 202 {
+		t.Fatalf("forgot with the mail server held: %d %s", r.code, r.raw)
+	}
+	if waited := time.Since(started); waited > 2*time.Second {
+		t.Errorf("forgot waited %s for work that depends on the email", waited)
+	}
+	close(box.gate)
+	box.waitMail(t, 1)
+	box.gate = nil
+	box.mu.Lock()
+	box.sent = nil
+	box.mu.Unlock()
 
 	// Known and unknown emails get the same answer; only one gets a mail.
 	unknown := anon.post("/v1/session/password/forgot", map[string]any{"email": "nobody@example.com"})

@@ -377,11 +377,14 @@ type Service interface {
 	// the role and opens a session; ErrAccountExists when the email has an
 	// account by now (role granted, no session).
 	AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
-	// RequestPasswordReset (§11.2) answers alike for known and unknown
-	// emails: it returns (address, token) only when an account exists — the
-	// caller mails it — and ("", "") otherwise. Every request counts toward
-	// 5 per 15 minutes per email and per IP (ErrRateLimited).
-	RequestPasswordReset(ctx context.Context, email, ip string) (to, token string, err error)
+	// CountPasswordResetRequest is what a forgot-password request waits for
+	// (§11.2): 5 per 15 minutes per email and per IP, every request counted,
+	// the same work for any email (ErrRateLimited).
+	CountPasswordResetRequest(ctx context.Context, email, ip string) error
+	// IssuePasswordReset returns (address, token) when an account uses the
+	// email — the caller mails it — and ("", "") otherwise. It differs in
+	// work between the two, so callers run it after the answer has gone.
+	IssuePasswordReset(ctx context.Context, email string) (to, token string, err error)
 	// ResetPassword spends a reset token: new password, address verified,
 	// every session revoked, audited password.reset. ErrNotFound for an
 	// unknown, used or expired token (counted per IP); ErrInvalid for a

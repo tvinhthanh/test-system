@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -195,25 +194,17 @@ func (d *dashboard) invitationRevoke(resolve nodeResolver) http.HandlerFunc {
 	}
 }
 
-// sendReset mails a password-reset link (§11.2) in the background: the
-// forgot-password answer must take the same time whether or not the email
-// has an account, so it never waits for SMTP. A failure is logged — the
-// person can ask again.
-func sendReset(m mail.Sender, publicURL string, logger *slog.Logger, to, token string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		err := m.Send(ctx, mail.Message{
-			To:      to,
-			Subject: "Choose a new ATP password",
-			Text: "Someone asked to reset the password of the ATP account for this address.\n\n" +
-				"Choose a new password here (the link works once, for 30 minutes):\n" +
-				publicURL + "/reset#" + token + "\n\n" +
-				"If it was not you, ignore this email: your password stays as it is.\n" +
-				"Resetting signs out every session; two-factor authentication, if on, stays on.\n",
-		})
-		if err != nil {
-			logger.Error("password reset mail", "err", err)
-		}
-	}()
+// sendReset mails a password-reset link (§11.2). authz calls it after the
+// forgot-password answer has gone (so SMTP time never shows in the answer)
+// and logs what it returns — the person can ask again.
+func sendReset(ctx context.Context, m mail.Sender, publicURL, to, token string) error {
+	return m.Send(ctx, mail.Message{
+		To:      to,
+		Subject: "Choose a new ATP password",
+		Text: "Someone asked to reset the password of the ATP account for this address.\n\n" +
+			"Choose a new password here (the link works once, for 30 minutes):\n" +
+			publicURL + "/reset#" + token + "\n\n" +
+			"If it was not you, ignore this email: your password stays as it is.\n" +
+			"Resetting signs out every session; two-factor authentication, if on, stays on.\n",
+	})
 }

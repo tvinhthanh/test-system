@@ -142,9 +142,12 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// node through tenancy.
 	mailer := newMailer(cfg)
 	web.Invitations = mailer != nil
+	web.Logger = logger
 	web.DescribeScope = func(ctx context.Context, s authz.ScopeRef) string { return scopeName(ctx, ten, s) }
 	if mailer != nil {
-		web.SendReset = func(to, token string) { sendReset(mailer, cfg.PublicURL, logger, to, token) }
+		web.SendReset = func(ctx context.Context, to, token string) error {
+			return sendReset(ctx, mailer, cfg.PublicURL, to, token)
+		}
 	}
 	if client, err := outbound.New(10*time.Second, endpoints...); err != nil {
 		logger.Error("oauth sign-in off: provider endpoints", "err", err)

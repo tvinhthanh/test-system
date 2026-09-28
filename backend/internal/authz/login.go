@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -59,9 +60,10 @@ type WebOptions struct {
 	Invitations   bool
 	DescribeScope func(ctx context.Context, s ScopeRef) string
 	// SendReset mails a password-reset link (§11.2); nil = reset by email
-	// is off. It must not block: the caller sends in the background so the
-	// answer takes the same time for a known and an unknown email.
-	SendReset func(to, token string)
+	// is off. It is called after the answer has gone, so it may take its
+	// time. Logger records what fails there (nil: slog.Default).
+	SendReset func(ctx context.Context, to, token string) error
+	Logger    *slog.Logger
 }
 
 type sessionKey struct{}
