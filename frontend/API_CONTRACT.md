@@ -141,6 +141,27 @@ or skipped results occupy the remainder. Duration is nullable while running.
 `passed` plus positive `flakyCount` must display an amber warning. Unknown
 statuses get neutral text, never an inferred success.
 
+### JUnit import (§6.8.5, QĐ-13, implemented 2026-09-28)
+
+`POST /v1/projects/{projectId}/imports/junit?environment=&framework=&branch=&commit=&startedAt=`
+with the report as the raw body (`Content-Type: application/xml`, ≤ 20 MiB),
+CSRF like any mutation. Needs `project.configure` in the project's
+`actions[]` — the Runs page shows "Import JUnit" only then. `201` a new
+run, `200` the same report again (`created: false`, nothing added):
+
+```json
+{ "runId":"uuid", "localRunId":"uuid", "created":true, "tests":3, "attempts":5,
+  "duplicates":0, "status":"failed", "flakyCount":1,
+  "startedAt":"2026-03-02T09:15:00Z", "finishedAt":"2026-03-02T09:15:04Z" }
+```
+
+Errors the form explains in its own words: `INVALID_JUNIT` (the server's
+message says what — e.g. no date: give `startedAt`; `ApiError.detail`
+carries it), `INVALID_PAYLOAD`, `RUN_CONFLICT` (409), `REPORT_TOO_LARGE`
+(413). The run is dated from the report, so it sorts into history, not to
+the top of the list. CI imports the same way with a token:
+`POST /v1/imports/junit` (`project:ingest`).
+
 ## Results
 
 `GET /v1/projects/{projectId}/runs/{runId}/results?limit=50&cursor=...` returns:

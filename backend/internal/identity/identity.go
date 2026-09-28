@@ -37,6 +37,10 @@ type Signals struct {
 // the algorithm.
 func (s Signals) Fingerprint() string { return toMatch(s).Fingerprint() }
 
+// ClientTestID is "ct_" + the first 16 bytes of the fingerprint — what a
+// reporter implementing §9.2 sends; importers (JUnit) use it the same way.
+func (s Signals) ClientTestID() string { return toMatch(s).ClientTestID() }
+
 // Ref is one test to resolve: an opaque key the caller wants back (ingest
 // uses clientTestId) plus its signals.
 type Ref struct {

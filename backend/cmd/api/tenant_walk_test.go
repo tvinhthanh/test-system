@@ -186,13 +186,16 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/members":           map[string]any{"email": "a@alpha.example", "role": "viewer"},
 		"POST /v1/workspaces/{workspaceId}/members":       map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},
 		"POST /v1/organizations/{organizationId}/members": map[string]any{"email": "a@alpha.example", "role": "org_admin"},
+		// JUnit upload: the tenant check runs before the body is read.
+		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.
 	exempt := map[string]bool{
 		"GET /healthz": true, "GET /v1/session": true, "POST /v1/session": true, "POST /v1/session/logout": true,
 		"GET /v1/projects": true, "POST /v1/runs": true, "POST /v1/artifacts": true,
-		"GET /v1/member-scopes": true, // per user; asserted below
+		"POST /v1/imports/junit": true, // the token names the project, like POST /v1/runs; asserted below
+		"GET /v1/member-scopes":  true, // per user; asserted below
 		// MFA acts on the signed-in user only; asserted in mfa_test.go.
 		"POST /v1/session/mfa": true, "GET /v1/session/mfa": true, "POST /v1/session/mfa/setup": true,
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
@@ -295,6 +298,18 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	r = rep.do("POST", "/v1/runs", map[string]any{"localRunId": localRunA, "environmentKey": "ci", "trigger": map[string]any{"ref": "refs/heads/main", "commitSha": "b1"}, "startedAt": time.Now().UTC().Format(time.RFC3339)}, map[string]string{"Authorization": "Bearer " + b.token})
 	if r.code != 201 || r.body["runId"] == runA {
 		t.Errorf("B run with A's localRunId: %d %s", r.code, r.raw)
+	}
+	// A JUnit report imported with B's token under A's localRunId: that id
+	// is now B's own reporter run (just above), which an import never adds
+	// to — and A's run is out of reach either way.
+	report := []byte(`<testsuite name="walk" timestamp="2026-03-02T09:15:00"><testcase name="walks" classname="com.walk.WalkTest"/></testsuite>`)
+	r = rep.do("POST", "/v1/imports/junit?localRunId="+localRunA, report, map[string]string{"Authorization": "Bearer " + b.token, "Content-Type": "application/xml"})
+	if r.code != 409 || r.errCode() != "RUN_CONFLICT" || strings.Contains(r.raw, runA) {
+		t.Errorf("B JUnit import with A's localRunId: %d %s", r.code, r.raw)
+	}
+	r = rep.do("POST", "/v1/imports/junit", report, map[string]string{"Authorization": "Bearer " + b.token, "Content-Type": "application/xml"})
+	if r.code != 201 || r.body["runId"] == runA {
+		t.Errorf("B JUnit import: %d %s", r.code, r.raw)
 	}
 	if r := a.user.get(baseA + "/runs"); len(r.items()) != 1 {
 		t.Errorf("A sees %d runs after B reused the localRunId: %s", len(r.items()), r.raw)

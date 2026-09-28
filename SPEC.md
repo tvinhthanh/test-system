@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.30 · **Ngày:** 28-09-2026 · **Trạng thái:** 12 ADR đã chốt (QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09, quản lý member ở cả ba tầng qua UI, MFA TOTP cho org owner và đăng nhập Google/GitHub (bật/tắt bằng cấu hình) từ 27-09, mời qua email và quên mật khẩu (SMTP, bật/tắt) từ 28-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
+> **Phiên bản:** v3.31 · **Ngày:** 28-09-2026 · **Trạng thái:** 13 ADR đã chốt (QĐ-13 28-09: JUnit backfill, ROI, shadow meter build sẵn; QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09, quản lý member ở cả ba tầng qua UI, MFA TOTP cho org owner và đăng nhập Google/GitHub (bật/tắt bằng cấu hình) từ 27-09, mời qua email và quên mật khẩu (SMTP, bật/tắt) từ 28-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -147,14 +147,14 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 | Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối) + UI một nút mỗi verdict, ghi chú; ✅ **evidence 22-09**: `manual_evidence` vào enum §8.4 (migration 0014, N64), upload multipart qua api `POST …/executions/{id}/evidence` (cap 20 MB, sniff nội dung, plan closed → 409), đọc lại qua `GET …/artifacts/{id}/content`; UI: kẹp giấy trên hàng đã có verdict, ảnh hiện thumbnail, file khác là link; live-check bước 14 upload thật và kiểm thumbnail decode | `internal/artifact` (`PutEvidence`), `cmd/api/testmgmt.go`, `frontend/…/PlanDetailPage.vue` |
 | Automation mapping `TestCaseAutomationLink` | ✅ trỏ `TestIdentity.id`, kiểm qua contract của identity: khác project → 404, merged/retired → 409; case thành `automated` ở link đầu | test module + `cmd/api/api_test.go` |
 | Requirement mapping v0 + coverage | ✅ `requirement_coverage`, `coveredBy` trên requirement, p0 coverage tính cho gate | cùng trên |
-| Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; JUnit backfill **chưa** | `internal/testmgmt/csv.go` |
+| Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; ✅ **JUnit backfill 28-09 (QĐ-13)**: token + dashboard, một file = một run qua pipeline reporter, idempotent, Surefire flaky/rerun thành attempt; UI nút "Import JUnit" trên trang Runs cho maintainer+; live-check CI upload thật | `internal/testmgmt/csv.go`, `internal/ingest/junit.go` |
 | Importer TestRail | — đúng luật §6.8.5: chỉ khi có khách nêu tên | |
 | Release + quality gate + API cho CI | ✅ 5 rule khai báo, mức riêng từng rule, verdict máy đọc, override ghi tên, `GET /v1/releases/{id}/gate` cho token `project:read`; ngưỡng 3 % là `[ASSUMPTION]` trong `testmgmt.DefaultPolicy`. UI: trang release hiện 5 rule (mức, áp dụng, chi tiết), nút Evaluate, quyết định Approve/Block/Ship kèm ghi chú, cảnh báo override có tên người, snippet curl cho CI | `internal/testmgmt/gate.go`, `frontend/…/ReleaseDetailPage.vue` |
 | ROI dashboard | — cần baseline TTRC đo được (§6.8.3 #3); không có baseline thì không có màn hình | |
 
 Cross-tenant walk (§14.3) nay phân loại 70 route và đi 55 route tài nguyên (27-09: 2 route OAuth miễn vì là điều hướng ẩn danh, có test riêng; route member ba tầng, fixture `userId`/`workspaceId`/`organizationId`; route MFA và `member-scopes` miễn vì chỉ theo người dùng, có test riêng) với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
 
-**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); (OAuth và MFA đã làm 27-09); JUnit backfill (importer thứ hai — luật §6.8.5: chỉ khi có khách nêu tên); ROI (chờ baseline); export/import CSV cho review (không cần nữa vì UI đã có). **Postgres TLS ✅ 28-09** (compose chạy `APP_ENV=prod` nguyên trạng: `cmd/pgtls`, `hostssl` only, client `verify-full`; config prod đòi `verify-full`/`verify-ca`). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), pentest trước khách trả tiền đầu tiên (§11.6).
+**Chưa làm, và vì sao:** `billing` shadow meter (§10.6 — chỉ có nghĩa khi có partner đẩy dữ liệu thật); (OAuth và MFA đã làm 27-09); ROI (QĐ-13: đang xây, không baseline thì "chưa đủ dữ liệu"); JUnit backfill đã làm 28-09 (QĐ-13); export/import CSV cho review (không cần nữa vì UI đã có). **Postgres TLS ✅ 28-09** (compose chạy `APP_ENV=prod` nguyên trạng: `cmd/pgtls`, `hostssl` only, client `verify-full`; config prod đòi `verify-full`/`verify-ca`). **Cần hạ tầng, không phải code:** soak 24–72 h với S3 trên host riêng (T5), ingest 100 đồng thời đo trên server (T2), pentest trước khách trả tiền đầu tiên (§11.6).
 
 ---
 
@@ -365,13 +365,28 @@ Biên triển khai     Caddy (TLS, phục vụ `frontend/dist`, proxy `/v1`) tr�
 
 1. **Gate sản phẩm không đổi.** Gate-0 (26-10), Gate-1, Gate-1.5 giữ nguyên sáu, bốn, bốn điều kiện. Code P2 không phải bằng chứng ở gate nào — QĐ-11 #2 áp nguyên văn.
 2. **Ba luật §6.8.6 cưỡng chế từ commit đầu:** link chỉ trỏ `TestIdentity.id`; manual execution không tạo `Run`; gate **đọc** Intelligence Plane, không tính lại flaky/TTRC. Cái thứ ba thi hành bằng interface `Evidence` phía người dùng (§6.9.4) — `testmgmt` không import `results`/`flaky`/`triage`, và `test/arch` giữ số domain import ≤ 3.
-3. **Importer thứ hai chỉ khi có khách nêu tên** (§6.8.5). CSV là importer duy nhất được build sẵn.
-4. **ROI không hiện khi không có baseline đo được** (§6.8.3 #3). Không có màn hình ROI trước khi có số Phase 0.
+3. **Importer thứ hai chỉ khi có khách nêu tên** (§6.8.5). CSV là importer duy nhất được build sẵn. *(Lật cho JUnit XML bởi QĐ-13, 28-09.)*
+4. **ROI không hiện khi không có baseline đo được** (§6.8.3 #3). Không có màn hình ROI trước khi có số Phase 0. *(QĐ-13: màn hình được xây; không baseline thì nó nói "chưa đủ dữ liệu".)*
 5. **Ngưỡng gate là `[ASSUMPTION]`** (§6.8.4): 3 % flaky, p0 coverage giảm — giữ ở một chỗ (`testmgmt.DefaultPolicy`), hiệu chỉnh bằng dữ liệu partner, không bằng cảm giác.
 
 **Hệ quả tới văn bản:** §4.1 dòng P2, §6.8 câu mở đầu, §6.9.2, §6.9.5, §6.9.11, §11.3.2 (hành động P2), §0.5.
 
-### 1.13 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
+### 1.13 QĐ-13 — Build sẵn JUnit backfill, màn hình ROI và billing shadow meter ✅ CHỐT *(chủ dự án quyết 28-09-2026)*
+
+**Quyết định:** lật ba điều kiện "chờ bằng chứng" cho phần **code**: QĐ-12 #3 / §6.8.5 (importer thứ hai chỉ khi có khách nêu tên) cho **JUnit XML**; QĐ-12 #4 (không màn hình ROI trước số Phase 0) cho **màn hình ROI §6.8.3**; §10.6 (shadow meter chỉ có nghĩa khi partner đẩy dữ liệu thật) cho **billing shadow meter**. Như QĐ-11 và QĐ-12: code xây ngay, gate sản phẩm không đổi.
+
+**Lý do:** mọi phần code khác của P2 đã xong và các gate còn lại chờ hạ tầng (§0.5); chủ dự án chọn dùng thời gian đó cho ba mục này thay vì để trống.
+
+**Điều kiện ràng buộc — luật cũ đổi hình, không biến mất:**
+
+1. **JUnit đi đúng đường của reporter** (§8.4): một file thành một run qua create → events → finish, tier-1/tier-2 identity, flaky fold, TTRC — không bảng riêng, không đường tắt. Identity namespace riêng (`framework`, mặc định `junit`), không `paramSignature` trừ phần `[...]` cuối tên (§6.8.5 "cẩn thận identity"). Import lại cùng file = cùng run (idempotent), và không bao giờ ghi thêm vào run do reporter tạo. TestRail/Xray vẫn theo luật §6.8.5 cũ.
+2. **ROI giữ nguyên ba quy tắc §6.8.3:** hiện kèm `triage_coverage` và `untriaged_rate`; chỉ **giờ**, tiền chỉ khi EM tự nhập đơn giá; **không có baseline đo được thì màn hình nói "chưa đủ dữ liệu"**, không tự dựng baseline. Baseline do người nhập, gắn nhãn `retrospective`/`prospective` (§5.4) và tên người nhập.
+3. **Shadow meter chỉ đếm, không tính tiền, không chặn** (§10.6): usage theo project/tháng; không có ngưỡng nào dừng ingest vì con số này.
+4. **Không phải bằng chứng ở gate nào** — QĐ-11 #2 áp nguyên văn.
+
+**Hệ quả tới văn bản:** §6.8.3, §6.8.5, §10.6, §0.5, QĐ-12 #3/#4 (chú thích lật).
+
+### 1.14 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
 
 | **Câu hỏi** | **Quyết định** | **Ghi chú** |
 | ------------------------------------ | ------------------------ | ------------------------------------------------------- |
@@ -1285,7 +1300,9 @@ Không import được thì chi phí chuyển đổi quá cao, P2 vô nghĩa. Nh
 | TestRail | TB | API ổn định, mapping field nhiều |
 | Xray / Zephyr | Cao | Gắn chặt Jira, mô hình dữ liệu khác hẳn |
 
-**Quy tắc:** chỉ build importer thứ hai trở đi khi có **khách cụ thể yêu cầu**, không build sẵn cho tương lai.
+**Quy tắc:** chỉ build importer thứ hai trở đi khi có **khách cụ thể yêu cầu**, không build sẵn cho tương lai. *(QĐ-13 lật riêng cho JUnit XML.)*
+
+**JUnit XML như đã cài (28-09, QĐ-13):** `POST /v1/imports/junit` (token `project:ingest`, cho CI/script backfill từng file) và `POST /v1/projects/{id}/imports/junit` (dashboard, `project.configure`), cùng `ingest.ImportJUnit`: một file → một run qua create → events → finish như reporter, nên identity tier 1/2, flaky fold, TTRC chạy y hệt. `<testcase>` → một result: `file` (hoặc classname đổi `.` thành `/`) là file, phần classname ngoài file là describe, `[...]` cuối tên là `paramSignature`; `<failure>`/`<error>` → failed (timed_out nếu tên/type nói timeout), `<skipped>` → skipped; Surefire `<flakyFailure>` → attempt fail trước lần pass (outcome flaky, N36), `<rerunFailure>` → thêm attempt fail. Thời gian lấy từ `timestamp` của testsuite (không zone = UTC) cộng dồn `time`; file không có ngày thì bắt buộc `startedAt` — lịch sử không được mang ngày hôm nay. `localRunId` suy từ nội dung file + environment + framework → import lại là cùng run; `localRunId` của run do reporter tạo → 409 `RUN_CONFLICT`. XML: `encoding/xml` không DTD/entity ngoài (XXE, billion laughs bị từ chối — có test), ≤ 20 MiB.
 
 #### 6.8.6 Ranh giới với plane khác
 

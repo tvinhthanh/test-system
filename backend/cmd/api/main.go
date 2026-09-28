@@ -121,10 +121,11 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 
 	mux := httpx.NewRouter()
 	mux.Handle("GET /healthz", httpx.Health())
-	ingest.Routes(mux, ingest.Deps{
+	ingestDeps := ingest.Deps{
 		DB: db, Queue: queue.New(db), Tenancy: ten, Authz: az, Results: res, Identity: idn,
 		Metrics: reg, Logger: logger,
-	})
+	}
+	ingest.Routes(mux, ingestDeps)
 	artifact.Routes(mux, artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: art, Metrics: reg, Logger: logger})
 
 	// Dashboard: cookie sessions (§11.2) and the read model (§6.9.5).
@@ -164,7 +165,7 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
 	qry := query.New(db)
 	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
-	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL}).routes(mux)
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it

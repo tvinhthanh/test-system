@@ -5,7 +5,8 @@
 // command instead of a one-off script.
 //
 // Prerequisites (see backend/GATES.md "Tái lập" or backend/deploy/README.md):
-//   - api + worker running with a tenant, a member user and at least one
+//   - api + worker running with a tenant, a member or maintainer user (a
+//     maintainer also exercises the JUnit upload) and at least one
 //     finished run with a failure (e.g. `npm run example` in reporter/playwright)
 //   - the UI served in live mode with /v1 forwarded to the api:
 //       `npm run dev` (Vite proxy → 127.0.0.1:8080) or the Caddy of deploy/compose.yml
@@ -171,6 +172,62 @@ await step("runs page renders real runs with a status", async () => {
     throw new Error("no run status rendered: " + text.slice(0, 300));
   await page.screenshot({ path: "test-results/live-runs.png", fullPage: true });
 });
+
+await step(
+  "JUnit import follows project.configure; a maintainer's upload becomes a run (§6.8.5, QĐ-13)",
+  async () => {
+    const actions = await page.evaluate(async (id) => {
+      const r = await fetch("/v1/projects?limit=100", {
+        credentials: "same-origin",
+      });
+      const body = await r.json();
+      return body.items.find((p) => p.id === id)?.actions ?? [];
+    }, project);
+    const configure = actions.includes("project.configure");
+    const button = page.getByRole("button", { name: "Import JUnit" });
+    await button
+      .waitFor({ state: "visible", timeout: configure ? 10000 : 1500 })
+      .catch(() => undefined);
+    if (configure !== (await button.count()) > 0)
+      throw new Error(
+        `actions ${JSON.stringify(actions)} but ${await button.count()} Import JUnit button(s)`,
+      );
+    if (!configure) return;
+    // A report no earlier run of this check has sent: its own date and test.
+    const stamp = Date.now();
+    const at = new Date(stamp - 86400000).toISOString().slice(0, 19);
+    const xml = `<?xml version="1.0"?>
+<testsuite name="com.acme.LiveCheckTest" timestamp="${at}">
+  <testcase name="imports_${stamp}" classname="com.acme.LiveCheckTest" time="0.2"/>
+  <testcase name="fails_${stamp}" classname="com.acme.LiveCheckTest" time="0.3"><failure message="expected 1 but was 2" type="AssertionError"/></testcase>
+</testsuite>`;
+    await button.click();
+    await page.setInputFiles("#junit-file", {
+      name: "live-check.xml",
+      mimeType: "text/xml",
+      buffer: Buffer.from(xml),
+    });
+    await page.fill("#junit-branch", "live-check");
+    const answer = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname.endsWith("/imports/junit") &&
+        r.request().method() === "POST",
+      { timeout: 15000 },
+    );
+    await page.getByRole("button", { name: "Import", exact: true }).click();
+    if ((await answer).status() !== 201)
+      throw new Error("import answered " + (await answer).status());
+    await page
+      .locator(".junit-result")
+      .waitFor({ state: "visible", timeout: 10000 });
+    await page.screenshot({ path: "test-results/live-junit-import.png" });
+    await page.getByRole("link", { name: "Open the run" }).click();
+    await page
+      .getByText(`fails_${stamp}`)
+      .first()
+      .waitFor({ state: "visible", timeout: 10000 });
+  },
+);
 
 await step(
   "Members link follows the server's member.manage action (§11.3.2)",

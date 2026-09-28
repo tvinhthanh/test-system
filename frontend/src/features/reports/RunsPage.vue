@@ -8,6 +8,8 @@ import {
   Search,
 } from "@lucide/vue";
 import { useRuns } from "./useRuns";
+import { useProjectPermission } from "./useProjectPermission";
+import JUnitImportSheet from "./JUnitImportSheet.vue";
 import { duration, short, time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import EmptyState from "../../shared/EmptyState.vue";
@@ -42,6 +44,8 @@ const {
   first,
   clear,
 } = useRuns();
+// Backfilling history is configuring the project (maintainer and up).
+const canImport = useProjectPermission("project.configure");
 const statuses = ["running", "passed", "failed", "error", "cancelled"];
 const runPath = (id: string) =>
   `/p/${encodeURIComponent(project.value)}/runs/${encodeURIComponent(id)}`;
@@ -52,6 +56,7 @@ const runPath = (id: string) =>
     title="Test runs"
     description="Execution results across your environments, most recent first."
   >
+    <JUnitImportSheet v-if="canImport" :project="project" @imported="refresh" />
     <Button
       variant="outline"
       size="icon-sm"

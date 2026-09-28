@@ -141,6 +141,58 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
 
   # ---- artifacts (§7.7, §10.4) ------------------------------------------------
+  /v1/imports/junit:
+    post:
+      operationId: importJUnit
+      tags: [ingest]
+      summary: Backfill one JUnit XML report as a historic run (§6.8.5, QĐ-13)
+      description: |
+        The report becomes one finished run through the reporter's own
+        pipeline (§8.4, tier-1/2 identity, flaky fold, TTRC) — for CI or a
+        script importing history file by file. Needs a `project:ingest`
+        token scoped to one project; counts toward that token's rate limit.
+        Maps each `<testcase>` to one result: `file` (or classname with dots as
+        slashes) is the file, classname beyond the file the describes, a
+        trailing `[...]` in the name the parameters; `<failure>`/`<error>` →
+        failed (timed_out when it names a timeout), `<skipped>` → skipped;
+        Surefire `<flakyFailure>` → earlier failed attempts of a flaky pass,
+        `<rerunFailure>` → more failed attempts. Times come from the
+        testsuite timestamp (UTC when zoneless) plus case durations.
+      security: [{ ingestToken: [] }]
+      parameters:
+        - { name: environment, in: query, schema: { type: string, default: ci }, description: "Environment key (a slug); created if new." }
+        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest… Keep one per suite so its history stays one set of tests." }
+        - { name: branch, in: query, schema: { type: string } }
+        - { name: commit, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: startedAt, in: query, schema: { type: string, format: date-time }, description: "Required only when no testsuite has a timestamp — history must not be dated today." }
+        - { name: localRunId, in: query, schema: { type: string, format: uuid }, description: "Default: derived from the report and the environment, so importing the same file again is the same run." }
+      requestBody:
+        required: true
+        content:
+          application/xml: { schema: { type: string, description: "A JUnit XML report: <testsuites> or <testsuite>, ≤ 20 MiB." } }
+      responses:
+        "201":
+          description: A new historic run, finished; its tier-2 resolve is queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/JUnitImportResult" } } }
+        "200":
+          description: "This report was imported before (same localRunId): nothing added, `created: false`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/JUnitImportResult" } } }
+        "400":
+          description: "`INVALID_JUNIT` — not a JUnit report, no date, a nameless testcase (the message says where); `INVALID_PAYLOAD` — a bad option."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`RUN_CONFLICT` — the localRunId is a run a reporter created; an import never adds to it."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: "`REPORT_TOO_LARGE` — over 20 MiB; split the report by suite."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "415":
+          description: "`UNSUPPORTED_MEDIA_TYPE` — send application/xml."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/artifacts:
     post:
       operationId: declareArtifact
@@ -1598,6 +1650,57 @@ paths:
         "413":
           description: "`PAYLOAD_TOO_LARGE` — the sheet is over 8 MiB."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/imports/junit:
+    post:
+      operationId: uploadJUnit
+      tags: [ingest]
+      summary: Upload one JUnit XML report from the dashboard as a historic run (§6.8.5, QĐ-13)
+      description: |
+        The same import as `POST /v1/imports/junit`, for a person: needs
+        `project.configure` (maintainer and up) — writing run history is
+        configuring the project; a member triages runs, never makes them.
+        Maps each `<testcase>` to one result: `file` (or classname with dots as
+        slashes) is the file, classname beyond the file the describes, a
+        trailing `[...]` in the name the parameters; `<failure>`/`<error>` →
+        failed (timed_out when it names a timeout), `<skipped>` → skipped;
+        Surefire `<flakyFailure>` → earlier failed attempts of a flaky pass,
+        `<rerunFailure>` → more failed attempts. Times come from the
+        testsuite timestamp (UTC when zoneless) plus case durations.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: environment, in: query, schema: { type: string, default: ci }, description: "Environment key (a slug); created if new." }
+        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest… Keep one per suite so its history stays one set of tests." }
+        - { name: branch, in: query, schema: { type: string } }
+        - { name: commit, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: startedAt, in: query, schema: { type: string, format: date-time }, description: "Required only when no testsuite has a timestamp — history must not be dated today." }
+        - { name: localRunId, in: query, schema: { type: string, format: uuid }, description: "Default: derived from the report and the environment, so importing the same file again is the same run." }
+      requestBody:
+        required: true
+        content:
+          application/xml: { schema: { type: string, description: "A JUnit XML report: <testsuites> or <testsuite>, ≤ 20 MiB." } }
+      responses:
+        "201":
+          description: A new historic run, finished; its tier-2 resolve is queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/JUnitImportResult" } } }
+        "200":
+          description: "This report was imported before (same localRunId): nothing added, `created: false`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/JUnitImportResult" } } }
+        "400":
+          description: "`INVALID_JUNIT` — not a JUnit report, no date, a nameless testcase (the message says where); `INVALID_PAYLOAD` — a bad option."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`RUN_CONFLICT` — the localRunId is a run a reporter created; an import never adds to it."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: "`REPORT_TOO_LARGE` — over 20 MiB; split the report by suite."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "415":
+          description: "`UNSUPPORTED_MEDIA_TYPE` — send application/xml."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/projects/{projectId}/test-cases/{testCaseId}:
     get:
       operationId: getTestCase
@@ -2087,6 +2190,20 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
+    JUnitImportResult:
+      type: object
+      required: [runId, localRunId, created, tests, attempts, duplicates, status, flakyCount, startedAt, finishedAt]
+      properties:
+        runId: { type: string, format: uuid }
+        localRunId: { type: string, format: uuid }
+        created: { type: boolean, description: "false: this report was imported before." }
+        tests: { type: integer, description: "Testcases in the report." }
+        attempts: { type: integer, description: "Attempts stored now (0 on a re-import)." }
+        duplicates: { type: integer, description: "Attempts already stored by an earlier import." }
+        status: { type: string, enum: [passed, failed, error, cancelled, running, queued] }
+        flakyCount: { type: integer }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
     Error:
       type: object
       required: [error]

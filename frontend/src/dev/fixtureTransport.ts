@@ -228,6 +228,24 @@ export function createFixtureTransport(): Transport {
         ],
         nextCursor: null,
       });
+    // JUnit upload: always "imported" into the first fixture run, so the
+    // sheet's result and its link can be seen offline.
+    if (/^\/v1\/projects\/[^/]+\/imports\/junit$/.test(path))
+      return response(
+        {
+          runId: runIds[0],
+          localRunId: "44444444-4444-8444-8444-444444444444",
+          created: true,
+          tests: 3,
+          attempts: 5,
+          duplicates: 0,
+          status: "failed",
+          flakyCount: 1,
+          startedAt: "2026-03-02T09:15:00Z",
+          finishedAt: "2026-03-02T09:15:04Z",
+        },
+        201,
+      );
     const match = path.match(
       /^\/v1\/projects\/(commerce|platform)\/runs(?:\/([^/]+))?(\/results)?$/,
     );

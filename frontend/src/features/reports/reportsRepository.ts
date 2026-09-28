@@ -319,6 +319,25 @@ function params(values: Record<string, string>) {
   ).toString();
 }
 
+// What an import may say about the run (all optional; the server defaults
+// environment to ci and framework to junit, and dates the run from the
+// report — startedAt only for a report that carries no timestamp).
+export interface JUnitImportOptions {
+  environment?: string;
+  framework?: string;
+  branch?: string;
+  commit?: string;
+  startedAt?: string;
+}
+export interface JUnitImportResult {
+  runId: string;
+  created: boolean;
+  tests: number;
+  attempts: number;
+  status: string;
+  flakyCount: number;
+  startedAt: string;
+}
 export class ReportsRepository {
   constructor(private api: ApiClient) {}
   async projects(cursor: string, signal: AbortSignal) {
@@ -522,5 +541,42 @@ export class ReportsRepository {
       ),
     );
     return d.string(x.newIdentityId);
+  }
+  // JUnit XML backfill (SPEC §6.8.5, QĐ-13): one report becomes one historic
+  // run through the ingest pipeline; the file goes as its own bytes. Same
+  // report again → the same run, created: false.
+  async importJUnit(
+    projectId: string,
+    file: Blob,
+    options: JUnitImportOptions,
+    signal: AbortSignal,
+  ) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(projectId)}/imports/junit?${params(
+          Object.fromEntries(
+            Object.entries(options).filter(
+              (entry): entry is [string, string] =>
+                typeof entry[1] === "string",
+            ),
+          ),
+        )}`,
+        {
+          signal,
+          body: file,
+          contentType: "application/xml",
+          timeoutMs: 120000,
+        },
+      ),
+    );
+    return {
+      runId: d.string(x.runId),
+      created: d.boolean(x.created),
+      tests: d.integer(x.tests),
+      attempts: d.integer(x.attempts),
+      status: d.string(x.status),
+      flakyCount: d.integer(x.flakyCount),
+      startedAt: d.date(x.startedAt),
+    } satisfies JUnitImportResult;
   }
 }

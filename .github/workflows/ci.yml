@@ -178,7 +178,9 @@ jobs:
           WS=$($C ws create -org "$ORG" -name Payments | jid ID)
           PROJ=$($C project create -ws "$WS" -name checkout | jid ID)
           USER_ID=$($C user create -email alice@example.com -password 'correct horse battery staple' -verified | jid ID)
-          $C role grant -user "$USER_ID" -level project -scope "$PROJ" -role member >/dev/null
+          # maintainer: every member right plus project.configure, so the live
+          # check exercises the JUnit upload, not only its absence.
+          $C role grant -user "$USER_ID" -level project -scope "$PROJ" -role maintainer >/dev/null
           TOK=$($C token issue -project "$PROJ" -name ci | jid Plaintext)
           test -n "$PROJ" && test -n "$TOK"
           echo "::add-mask::$TOK"

@@ -57,7 +57,9 @@ type resp struct {
 func (c *client) do(method, path string, body any, headers map[string]string) resp {
 	c.t.Helper()
 	var buf bytes.Buffer
-	if body != nil {
+	if raw, ok := body.([]byte); ok {
+		buf.Write(raw) // a non-JSON body (a JUnit report); the caller sets Content-Type
+	} else if body != nil {
 		_ = json.NewEncoder(&buf).Encode(body)
 	}
 	req, _ := http.NewRequest(method, c.srv.URL+path, &buf)

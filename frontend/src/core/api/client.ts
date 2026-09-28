@@ -4,6 +4,10 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly requestId?: string,
+    // The server's own message, for the few answers where it tells the
+    // person what to change (a JUnit report with no date); `message` stays
+    // the generic one everywhere else.
+    readonly detail?: string,
   ) {
     super(message);
   }
@@ -16,13 +20,15 @@ export type Transport = (
 // method defaults to POST when a body is given, GET otherwise; PATCH and
 // DELETE (Test Management) are state-changing and carry the CSRF token too.
 // A FormData body goes as multipart/form-data (the browser sets the
-// boundary); anything else is JSON. timeoutMs overrides the client default
+// boundary); a Blob (a File) goes as its own bytes with contentType (or the
+// Blob's type); anything else is JSON. timeoutMs overrides the client default
 // for a request that moves a file rather than a few kilobytes.
 export type RequestOptions = {
   signal?: AbortSignal;
   body?: unknown;
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   timeoutMs?: number;
+  contentType?: string;
 };
 
 const statusMessage = (status: number) =>
@@ -77,6 +83,12 @@ export class ApiClient {
     this.pending.add(controller);
     const multipart =
       typeof FormData !== "undefined" && options.body instanceof FormData;
+    const blob = typeof Blob !== "undefined" && options.body instanceof Blob;
+    const contentType = blob
+      ? options.contentType ||
+        (options.body as Blob).type ||
+        "application/octet-stream"
+      : "application/json";
     try {
       const response = await this.transport(path, {
         method,
@@ -86,14 +98,16 @@ export class ApiClient {
           Accept: "application/json",
           ...(mutation ? { "X-CSRF-Token": this.csrfToken! } : {}),
           ...(options.body !== undefined && !multipart
-            ? { "Content-Type": "application/json" }
+            ? { "Content-Type": contentType }
             : {}),
         },
         ...(options.body !== undefined
           ? {
               body: multipart
                 ? (options.body as FormData)
-                : JSON.stringify(options.body),
+                : blob
+                  ? (options.body as Blob)
+                  : JSON.stringify(options.body),
             }
           : {}),
       });
@@ -112,18 +126,15 @@ export class ApiClient {
           );
       }
       if (!response.ok) {
-        const code =
-          isRecord(json) &&
-          isRecord(json.error) &&
-          typeof json.error.code === "string"
-            ? json.error.code
-            : "HTTP_ERROR";
+        const error = isRecord(json) && isRecord(json.error) ? json.error : {};
+        const code = typeof error.code === "string" ? error.code : "HTTP_ERROR";
         if (response.status === 401) this.onUnauthorized?.();
         throw new ApiError(
           response.status,
           code,
           statusMessage(response.status),
           response.headers.get("x-request-id") ?? undefined,
+          typeof error.message === "string" ? error.message : undefined,
         );
       }
       if (epoch !== this.epoch || controller.signal.aborted)

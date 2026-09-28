@@ -64,4 +64,6 @@ func Routes(mux httpx.Mux, d Deps) {
 	mux.Handle("POST /v1/runs", wrap("runs", h.createRun))
 	mux.Handle("POST /v1/runs/{localRunId}/events", wrap("events", h.appendEvents))
 	mux.Handle("POST /v1/runs/{localRunId}/finish", wrap("finish", h.finishRun))
+	// JUnit XML backfill (§6.8.5, QĐ-13): one report, one historic run.
+	mux.Handle("POST /v1/imports/junit", wrap("junit", h.importJUnit))
 }

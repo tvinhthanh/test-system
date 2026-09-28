@@ -255,6 +255,20 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-28 (JUnit import, QĐ-13)
+
+- Runs page: "Import JUnit" (only with `project.configure`) opens a sheet —
+  file, environment, framework, branch, a run date for reports without one;
+  shows "Imported" / "Already imported" with a link to the run and refreshes
+  the list.
+- `ApiClient` sends a `Blob` body as its own bytes (`contentType` option)
+  and keeps the server's message as `ApiError.detail` (the generic
+  `message` is unchanged elsewhere). `ReportsRepository.importJUnit`.
+- Fixture transport answers the upload offline. Tests: `junit-import.test.ts`
+  (bytes not JSON, query, detail kept, bad answer refused).
+- live-check step: follows `actions[]`; a maintainer uploads a real report
+  and opens the new run. CI seeds the account as maintainer so the upload runs.
+
 ### 2026-09-28 (forgot password)
 
 - Session decodes `passwordReset`; the store gains `forgotPassword` /
