@@ -54,6 +54,10 @@ the server session. UI clears state only after server confirmation or a 401.
     conflict|disabled|unavailable`, each shown in plain words.
 - No account is created: the provider's verified email must match an existing
   verified account here (the first sign-in links them).
+- Security page, "Connected accounts": `GET /v1/session/identities` →
+  `{items:[{id,provider,email,createdAt,lastLoginAt}]}` (own links only);
+  `DELETE /v1/session/identities/{id}` → 204, or `409 LAST_SIGN_IN` when it is
+  the account's only way in (explained in words).
 
 ### Two-factor authentication (§11.2, implemented 2026-09-27)
 

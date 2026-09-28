@@ -10,6 +10,7 @@ import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
 import { MembersRepository } from "./features/members/membersRepository";
 import { TeamAccess } from "./features/members/teamAccess";
 import { MfaRepository } from "./features/account/mfaRepository";
+import { IdentitiesRepository } from "./features/account/identitiesRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
 import "./shared/theme.css";
@@ -47,6 +48,7 @@ async function start() {
     members,
     teamAccess,
     mfa: new MfaRepository(api),
+    identities: new IdentitiesRepository(api),
     fixture,
   });
   app.use(router);

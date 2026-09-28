@@ -5,6 +5,7 @@ import { ApiClient, type Transport } from "../src/core/api/client";
 import { SessionRepository } from "../src/features/auth/sessionRepository";
 import { createSessionStore } from "../src/features/auth/sessionStore";
 import { MfaRepository } from "../src/features/account/mfaRepository";
+import { IdentitiesRepository } from "../src/features/account/identitiesRepository";
 import { makeRouter } from "../src/app/router";
 
 // The guard is under test, not the pages: stub the ones the router loads so
@@ -166,4 +167,30 @@ it("finishes an OAuth sign-in's code step with the challenge the api holds in it
   s.resumeMfa();
   expect(await s.completeMfa("123456")).toBe(true);
   expect(bodies).toEqual([{ challenge: "", code: "123456" }]);
+});
+
+it("lists linked sign-ins and explains why the last one stays", async () => {
+  const api = new ApiClient(async (_input, init) =>
+    init?.method === "DELETE"
+      ? json({ error: { code: "LAST_SIGN_IN", message: "x" } }, 409)
+      : json({
+          items: [
+            {
+              id: "i1",
+              provider: "google",
+              email: "a@x.io",
+              createdAt: "2026-09-01T00:00:00Z",
+              lastLoginAt: null,
+            },
+          ],
+          nextCursor: null,
+        }),
+  );
+  api.csrfToken = "c";
+  const repo = new IdentitiesRepository(api);
+  const signal = new AbortController().signal;
+  expect((await repo.list(signal))[0]?.provider).toBe("google");
+  await expect(repo.unlink("i1", signal)).rejects.toThrow(
+    "This is your only way to sign in",
+  );
 });

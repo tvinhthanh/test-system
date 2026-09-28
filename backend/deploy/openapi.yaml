@@ -307,6 +307,50 @@ paths:
         - { name: error, in: query, schema: { type: string } }
       responses:
         "303": { description: Into the app, to the code step, or back to the sign-in page with a reason. }
+  /v1/session/identities:
+    get:
+      operationId: listLinkedIdentities
+      tags: [session]
+      summary: The Google / GitHub sign-ins linked to the signed-in account
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: Oldest first; only the caller's own.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, provider, email, createdAt, lastLoginAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            provider: { type: string, enum: [google, github] }
+                            email: { type: string, description: The provider's address when linked. }
+                            createdAt: { type: string, format: date-time }
+                            lastLoginAt: { type: [string, "null"], format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/session/identities/{identityId}:
+    delete:
+      operationId: unlinkIdentity
+      tags: [session]
+      summary: Unlink one of the caller's provider sign-ins
+      description: Audited as `identity.unlink`. Refused when it is the account's only way to sign in (no password, no other provider).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Unlinked. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`LAST_SIGN_IN` — link another provider first, or ask an admin to set a password."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/session/mfa:
     post:
       operationId: completeMfaLogin

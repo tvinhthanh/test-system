@@ -206,6 +206,34 @@ func TestOAuthSignIn(t *testing.T) {
 		t.Errorf("github sign-in: %s %s", loc, r.raw)
 	}
 
+	// Linked sign-ins: each person sees and unlinks only their own, and the
+	// last way in (alice has no password) stays.
+	_, ac := signIn("github", fakeUser{sub: "5150", email: "alice@example.com", verified: true}, "", nil)
+	ids := ac.get("/v1/session/identities")
+	if len(ids.items()) != 2 {
+		t.Fatalf("alice's identities: %s", ids.raw)
+	}
+	byProvider := map[string]string{}
+	for _, it := range ids.items() {
+		m := it.(map[string]any)
+		byProvider[m["provider"].(string)] = m["id"].(string)
+	}
+	if r := c.do("DELETE", "/v1/session/identities/"+byProvider["google"], nil, nil); r.code != 404 {
+		t.Errorf("bob unlinking alice's google: %d %s", r.code, r.raw)
+	}
+	if r := ac.do("DELETE", "/v1/session/identities/"+byProvider["google"], nil, nil); r.code != 204 {
+		t.Errorf("unlink google: %d %s", r.code, r.raw)
+	}
+	if r := ac.do("DELETE", "/v1/session/identities/"+byProvider["github"], nil, nil); r.code != 409 || r.errCode() != "LAST_SIGN_IN" {
+		t.Errorf("unlink the last way in: %d %s", r.code, r.raw)
+	}
+	if r := ac.get("/v1/session/identities"); len(r.items()) != 1 {
+		t.Errorf("after unlinking: %s", r.raw)
+	}
+	if r := newClient(t, srv).get("/v1/session/identities"); r.code != 401 {
+		t.Errorf("identities without a session: %d", r.code)
+	}
+
 	// Who is refused, and how the page is told.
 	for name, tc := range map[string]struct {
 		provider string
@@ -264,14 +292,13 @@ func TestOAuthSignIn(t *testing.T) {
 
 	// Every link is on the record.
 	audit, _ := az.ListAudit(ctx, "", 50)
-	links := 0
+	count := map[string]int{}
 	for _, a := range audit {
-		if a.Action == "identity.link" {
-			links++
-		}
+		count[a.Action]++
 	}
-	if links != 2 {
-		t.Errorf("identity.link rows: %d, want 2 (alice/google, bob/github)", links)
+	// alice/google, bob/github, alice/github, alice/google again after unlinking.
+	if count["identity.link"] != 4 || count["identity.unlink"] != 1 {
+		t.Errorf("identity audit: %v", count)
 	}
 }
 

@@ -191,6 +191,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
 		// OAuth sign-in: anonymous browser navigations, asserted in oauth_test.go.
 		"GET /v1/session/oauth/{provider}/start": true, "GET /v1/session/oauth/{provider}/callback": true,
+		"GET /v1/session/identities": true, "DELETE /v1/session/identities/{identityId}": true, // the caller's own; oauth_test.go
 	}
 	param := regexp.MustCompile(`\{([a-zA-Z]+)\}`)
 	fill := func(path string, ids map[string]string) string {

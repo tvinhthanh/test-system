@@ -72,3 +72,5 @@ POST /v1/organizations/{organizationId}/members
 DELETE /v1/organizations/{organizationId}/members/{userId}
 GET /v1/session/oauth/{provider}/start
 GET /v1/session/oauth/{provider}/callback
+GET /v1/session/identities
+DELETE /v1/session/identities/{identityId}

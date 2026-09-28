@@ -54,7 +54,7 @@ draft was removed on 2026-09-18.
   evidence (§6.8.2): files uploaded from the plan page as multipart, stored as
   `manual_evidence` artifacts, shown as thumbnails/links per row.
 - Last reviewed: 2026-09-22.
-- Latest verification: typecheck, 48 unit tests, production build + bundle gate
+- Latest verification: typecheck, 49 unit tests, production build + bundle gate
   (+ vendored trace viewer copied to `dist/trace/`), `scripts/live-check.mjs`
   against the real api (also run by the CI `e2e` job on the compose stack);
   backend `go test ./...` green on Postgres.
@@ -254,6 +254,16 @@ pagination helper, status badge, or fixture layer without first checking these
 files and updating this plan.
 
 ## Change Log
+
+### 2026-09-28 (connected accounts)
+
+- Security page: "Connected accounts" (`LinkedAccounts.vue`,
+  `IdentitiesRepository`) lists the Google / GitHub sign-ins linked to the
+  account with a two-step Disconnect; `LAST_SIGN_IN` explained; empty state
+  says how to link (sign in with a provider using the same verified email).
+  Fixture: one GitHub link, bootstrap providers.
+- Verified: typecheck, 49 unit tests, screenshots light 1280 / dark 390,
+  disconnect → empty state in fixture; backend `oauth_test.go`.
 
 ### 2026-09-27 (Google / GitHub sign-in)
 

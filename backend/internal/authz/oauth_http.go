@@ -24,6 +24,8 @@ import (
 //
 //	GET /v1/session/oauth/{provider}/start?redirect=/p/…  → 302 to the provider
 //	GET /v1/session/oauth/{provider}/callback?code&state  → 303 into the app
+//	GET    /v1/session/identities                 → the caller's linked sign-ins
+//	DELETE /v1/session/identities/{identityId}    → unlink (not the last way in)
 //
 // The state, the PKCE verifier and the landing path travel in one short-
 // lived cookie signed with a key derived from the pepper — nothing is
@@ -40,6 +42,8 @@ const (
 func oauthRoutes(mux httpx.Mux, h *webHandlers) {
 	mux.Handle("GET /v1/session/oauth/{provider}/start", http.HandlerFunc(h.oauthStart))
 	mux.Handle("GET /v1/session/oauth/{provider}/callback", http.HandlerFunc(h.oauthCallback))
+	mux.Handle("GET /v1/session/identities", http.HandlerFunc(h.identities))
+	mux.Handle("DELETE /v1/session/identities/{identityId}", http.HandlerFunc(h.unlinkIdentity))
 }
 
 func (h *webHandlers) provider(name string) *OAuthProvider {
@@ -185,5 +189,53 @@ func (h *webHandlers) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	default:
 		httpx.Cause(r.Context(), err)
 		oauthFail(w, r, "unavailable")
+	}
+}
+
+type identityDTO struct {
+	ID          string     `json:"id"`
+	Provider    string     `json:"provider"`
+	Email       string     `json:"email"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	LastLoginAt *time.Time `json:"lastLoginAt"`
+}
+
+// identities lists the caller's own links — never anyone else's.
+func (h *webHandlers) identities(w http.ResponseWriter, r *http.Request) {
+	p, ok := sessionUserFor(w, r)
+	if !ok {
+		return
+	}
+	ids, err := h.svc.Identities(r.Context(), p.UserID)
+	if err != nil {
+		h.codeErr(w, r, err)
+		return
+	}
+	out := make([]identityDTO, 0, len(ids))
+	for _, li := range ids {
+		d := identityDTO{ID: li.ID, Provider: li.Provider, Email: li.Email, CreatedAt: li.CreatedAt}
+		if !li.LastLoginAt.IsZero() {
+			last := li.LastLoginAt
+			d.LastLoginAt = &last
+		}
+		out = append(out, d)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "nextCursor": nil})
+}
+
+func (h *webHandlers) unlinkIdentity(w http.ResponseWriter, r *http.Request) {
+	p, ok := sessionUserFor(w, r)
+	if !ok {
+		return
+	}
+	switch err := h.svc.UnlinkIdentity(r.Context(), p.UserID, r.PathValue("identityId")); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "no such linked sign-in on your account", nil)
+	case errors.Is(err, ErrLastSignIn):
+		httpx.WriteError(w, http.StatusConflict, "LAST_SIGN_IN", "this is your only way to sign in; link another provider first, or ask an admin to set a password", nil)
+	default:
+		h.codeErr(w, r, err)
 	}
 }

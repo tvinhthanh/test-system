@@ -37,6 +37,15 @@ function run(i: number) {
   };
 }
 
+let fixtureIdentities = [
+  {
+    id: "identity-1",
+    provider: "github",
+    email: "alex@example.test",
+    createdAt: "2026-09-01T08:00:00Z",
+    lastLoginAt: "2026-09-26T07:12:00Z",
+  },
+];
 let fixtureMembers = [
   { email: "alex@example.test", level: "workspace", role: "workspace_admin" },
   { email: "jordan@example.test", level: "project", role: "maintainer" },
@@ -76,6 +85,7 @@ export function createFixtureTransport(): Transport {
       if (init?.method === "POST") sessionStorage.setItem(sessionKey, "in");
       return response({
         csrfToken: marker,
+        providers: ["google", "github"],
         user: signedIn || init?.method === "POST" ? user : null,
       });
     }
@@ -93,6 +103,14 @@ export function createFixtureTransport(): Transport {
     if (path === "/v1/session/logout") {
       sessionStorage.setItem(sessionKey, "out");
       return response({});
+    }
+    // Linked sign-ins: one GitHub; the preview user also has a password.
+    if (path.startsWith("/v1/session/identities")) {
+      if (init?.method === "DELETE") {
+        fixtureIdentities = [];
+        return new Response(null, { status: 204 });
+      }
+      return response({ items: fixtureIdentities, nextCursor: null });
     }
     // §11.2 MFA, off until "turned on" with any six digits.
     if (path.startsWith("/v1/session/mfa")) {

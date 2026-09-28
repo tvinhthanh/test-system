@@ -173,6 +173,15 @@ type ExternalIdentity struct {
 	EmailVerified bool
 }
 
+// LinkedIdentity is a Google or GitHub sign-in linked to an account.
+type LinkedIdentity struct {
+	ID          string
+	Provider    string
+	Email       string // as the provider reported it when linked
+	CreatedAt   time.Time
+	LastLoginAt time.Time // zero until used after linking
+}
+
 // Membership grants a role at a node; it inherits down the tree.
 type Membership struct {
 	ID        string
@@ -273,6 +282,9 @@ var (
 	// ErrNoAccount: an OAuth identity that is not linked and whose verified
 	// email matches no verified account (no self-signup, §11.2).
 	ErrNoAccount = errors.New("authz: no account for that identity")
+	// ErrLastSignIn: removing this would leave the account no way to sign
+	// in (no password, no other linked provider).
+	ErrLastSignIn = errors.New("authz: the account's last way to sign in")
 	// ErrLastOwner: the change would leave an organization with no owner.
 	ErrLastOwner = errors.New("authz: an organization keeps at least one owner")
 )
@@ -328,6 +340,12 @@ type Service interface {
 	// already has a different identity at that provider. Like Login it
 	// returns *MFARequired when the account has MFA on.
 	LoginWithIdentity(ctx context.Context, id ExternalIdentity, meta SessionMeta) (session Session, secret string, err error)
+	// Identities lists the provider sign-ins linked to a user, oldest first.
+	Identities(ctx context.Context, userID string) ([]LinkedIdentity, error)
+	// UnlinkIdentity removes one of the user's own links (ErrNotFound for
+	// anyone else's), audited identity.unlink; ErrLastSignIn when it is the
+	// account's only way in.
+	UnlinkIdentity(ctx context.Context, userID, identityID string) error
 	// CompleteMFALogin trades the challenge from Login plus a TOTP or
 	// recovery code for a session. Wrong codes count toward the rate limit
 	// (ErrInvalidCode, then ErrRateLimited); an unknown or expired challenge

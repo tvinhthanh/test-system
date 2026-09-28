@@ -341,3 +341,65 @@ func (s *service) LoginWithIdentity(ctx context.Context, id ExternalIdentity, me
 	}
 	return s.openSession(ctx, userID, meta)
 }
+
+func (s *service) Identities(ctx context.Context, userID string) ([]LinkedIdentity, error) {
+	if !isUUID(userID) {
+		return nil, ErrNotFound
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT id, provider, email, created_at, last_login_at FROM user_identities
+		 WHERE user_id = $1 ORDER BY created_at, id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LinkedIdentity{}
+	for rows.Next() {
+		var li LinkedIdentity
+		var last *time.Time
+		if err := rows.Scan(&li.ID, &li.Provider, &li.Email, &li.CreatedAt, &last); err != nil {
+			return nil, err
+		}
+		if last != nil {
+			li.LastLoginAt = last.UTC()
+		}
+		li.CreatedAt = li.CreatedAt.UTC()
+		out = append(out, li)
+	}
+	return out, rows.Err()
+}
+
+func (s *service) UnlinkIdentity(ctx context.Context, userID, identityID string) error {
+	if !isUUID(userID) || !isUUID(identityID) {
+		return ErrNotFound
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		// Lock the user's row so two unlinks cannot both leave "one other way".
+		var email string
+		var hasPassword bool
+		err := s.db.Q(ctx).QueryRow(ctx,
+			`SELECT email, password_hash IS NOT NULL FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&email, &hasPassword)
+		if err != nil {
+			return mapErr(err)
+		}
+		var provider string
+		err = s.db.Q(ctx).QueryRow(ctx,
+			`DELETE FROM user_identities WHERE id = $1 AND user_id = $2 RETURNING provider`, identityID, userID).Scan(&provider)
+		if errors.Is(err, pg.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !hasPassword {
+			var left int
+			if err := s.db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM user_identities WHERE user_id = $1`, userID).Scan(&left); err != nil {
+				return err
+			}
+			if left == 0 {
+				return ErrLastSignIn // the DELETE rolls back with the transaction
+			}
+		}
+		return s.audit(ctx, "identity.unlink", "user", userID, "", "", email, map[string]any{"provider": provider, "identity_id": identityID})
+	})
+}
