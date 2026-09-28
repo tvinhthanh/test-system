@@ -106,6 +106,21 @@ id (`flaky.RecomputeRun`) — cùng thứ tự thì transaction sau chỉ xếp 
 đi đường `ON CONFLICT`. Harness giờ khẳng định `last_error IS NULL` cho mọi job:
 re-run chỉ được đến từ lease hết hạn. Thời gian kịch bản 14–20 s → 4 s.
 
+**Lỗi thật thứ hai, do CI bắt (28-09):** hai test trên đỏ chập chờn trên CI từ
+22-09 (local ≈ 1/5 lần khi chạy cả `./...`). Harness giờ in, khi `WaitFor` hết
+giờ, các job chưa xong (trạng thái, số lần, lease còn lại, `last_error`) và
+đuôi log của từng process — nhờ vậy thấy ngay: `pg_terminate_backend` giết
+connection giữa job, handler lỗi, rồi **`Queue.Fail` lấy phải một connection
+chết khác trong pool** → `record failure … 57P01`, job nằm `running` đến hết
+lease 2 phút. Không mất dữ liệu (lease cứu), nhưng một lần DB restart làm run
+treo 2 phút chưa resolve. Sửa: worker ghi lỗi thử lại tối đa 4 lần (100–300 ms;
+pool đã thay connection chết) — `queue.Worker.fail`. Test kill-worker có thêm
+một race của chính test: câu `Claim` của worker vừa bị giết có thể vẫn đang
+chạy trên server và commit lease mới *sau* khi test "tua" lease cũ. Mỗi process
+của harness giờ có `application_name` riêng (`atp-<schema>-api|worker`) và
+`Harness.Terminate(w)` kết thúc backend của worker chết (chờ tới 5 s) trước
+khi tua. Sau sửa: `go test ./...` 8 lần liên tiếp xanh.
+
 Unit/integration test cho phần còn lại (Postgres thật):
 
 | Kịch bản §14.3 | Test | Ghi chú |

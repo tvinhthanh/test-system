@@ -306,7 +306,7 @@ paths:
         - { name: state, in: query, schema: { type: string } }
         - { name: error, in: query, schema: { type: string } }
       responses:
-        "303": { description: Into the app, to the code step, or back to the sign-in page with a reason. }
+        "303": { description: "Into the app, to the code step, or back to the sign-in page with a reason." }
   /v1/session/identities:
     get:
       operationId: listLinkedIdentities

@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import AtpReporter, { Client, EventQueue, stripHar } from "../src/index";
+
+// The machine's own path style: path.relative in the reporter is native, so
+// a Windows literal would only strip on Windows.
+const REPO = resolve("/repo");
 
 // A fake platform: enough of §7.2 to see what the reporter sends. Every
 // request is recorded; `down` makes it refuse connections to model an
@@ -85,7 +89,7 @@ function fakeResult(status: string, retry = 0, attachments: any[] = [], error?: 
 }
 
 function fakeConfig(): any {
-  return { rootDir: "C:\\repo", version: "1.63.0" };
+  return { rootDir: REPO, version: "1.63.0" };
 }
 
 test("a run streams begin → events → artifacts → finish, and never throws", async () => {
@@ -101,8 +105,8 @@ test("a run streams begin → events → artifacts → finish, and never throws"
     const client = new Client({ url: srv.url, token: "atp_ing_t", sleep: async () => {} });
     const r = new AtpReporter({ url: srv.url, token: "atp_ing_t", environment: "staging", spoolDir: spool, _client: client });
     r.onBegin(fakeConfig(), {} as any);
-    const t1 = fakeTest("C:\\repo\\tests\\checkout\\payment.spec.ts", ["Checkout", "declines expired card"]);
-    const t2 = fakeTest("C:\\repo\\tests\\checkout\\payment.spec.ts", ["Checkout", "accepts valid card"]);
+    const t1 = fakeTest(join(REPO, "tests", "checkout", "payment.spec.ts"), ["Checkout", "declines expired card"]);
+    const t2 = fakeTest(join(REPO, "tests", "checkout", "payment.spec.ts"), ["Checkout", "accepts valid card"]);
     t2.outcome = () => "flaky";
     const err = { message: "expected 402", stack: "at payment.spec.ts:12", snippet: "expect(x)" };
     r.onTestEnd(t1, fakeResult("passed"));
@@ -167,8 +171,8 @@ test("total outage: events are spooled, the run is not failed", async () => {
     const client = new Client({ url: srv.url, token: "atp_ing_t", sleep: async () => {}, timeoutMs: 200 });
     const r = new AtpReporter({ url: srv.url, token: "atp_ing_t", spoolDir: spool, _client: client });
     r.onBegin(fakeConfig(), {} as any);
-    r.onTestEnd(fakeTest("C:\\repo\\a.spec.ts", ["a"]), fakeResult("passed"));
-    r.onTestEnd(fakeTest("C:\\repo\\b.spec.ts", ["b"]), fakeResult("failed"));
+    r.onTestEnd(fakeTest(join(REPO, "a.spec.ts"), ["a"]), fakeResult("passed"));
+    r.onTestEnd(fakeTest(join(REPO, "b.spec.ts"), ["b"]), fakeResult("failed"));
     await r.onEnd({ status: "failed" } as any); // must resolve, not reject
     const files = readdirSync(spool);
     assert.equal(files.length, 1);

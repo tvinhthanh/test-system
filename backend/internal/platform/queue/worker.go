@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -121,7 +122,7 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		}
 		return true, nil
 	}
-	dead, ferr := w.Queue.Fail(ctx, job.ID, herr)
+	dead, ferr := w.fail(ctx, job.ID, herr)
 	if ferr != nil {
 		return true, fmt.Errorf("record failure of %s: %w (handler error: %v)", job.ID, ferr, herr)
 	}
@@ -133,6 +134,25 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		w.Logger.Warn("job failed, will retry", "kind", w.Kind, "job", job.ID, "key", job.Key, "attempt", job.Attempts, "err", herr)
 	}
 	return true, nil
+}
+
+// fail records the handler's error, trying a few times. When the database
+// dropped the connections (a restart, a failover), the handler failed on
+// one and the pool may hand Fail another dead one; a single try would leave
+// the job `running` until its lease expires — minutes of a run unresolved
+// for a blip the pool heals in milliseconds (§14.3 "restart kết nối DB").
+func (w *Worker) fail(ctx context.Context, id string, cause error) (dead bool, err error) {
+	for attempt := 0; ; attempt++ {
+		dead, err = w.Queue.Fail(ctx, id, cause)
+		if err == nil || errors.Is(err, ErrNotFound) || attempt == 3 {
+			return dead, err
+		}
+		select {
+		case <-ctx.Done():
+			return dead, err
+		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+		}
+	}
 }
 
 // Drain processes jobs until none is runnable — for tests and one-shot

@@ -150,6 +150,10 @@ func TestKillWorkerMidJobThenRecover(t *testing.T) {
 	w := h.StartWorker()
 	h.WaitFor("worker to complete a job", 20*time.Second, func() bool { return h.JobsByStatus()["done"] >= 1 })
 	w.Kill()
+	// The dead worker's last statement can still be running on the server —
+	// a Claim that would commit a fresh 2-min lease after the expiry below
+	// (the CI failure of 27/28-09). Its backends go first.
+	h.Terminate(w)
 	mid := h.JobsByStatus()
 	t.Logf("killed worker mid-drain: %v", mid)
 	if mid["done"] == runs {

@@ -99,7 +99,7 @@ func (r Resp) Str(key string) string {
 // hold right now — the number a connection leak makes climb.
 func (h *Harness) Connections() int {
 	h.T.Helper()
-	return h.Count(`SELECT count(*) FROM pg_stat_activity WHERE application_name = $1`, h.appName)
+	return h.Count(`SELECT count(*) FROM pg_stat_activity WHERE starts_with(application_name, $1)`, h.appName+"-")
 }
 
 // Schema is the search_path schema this harness's world lives in.

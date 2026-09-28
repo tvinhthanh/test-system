@@ -108,6 +108,7 @@ type Harness struct {
 	apiMetric string
 	wrkMetric string
 	logDir    string
+	procs     []*Proc // every process started, for the timeout report
 }
 
 // New builds the world. Every process it starts is killed in t.Cleanup.
@@ -215,10 +216,13 @@ type Proc struct {
 	done chan struct{}
 }
 
-func (h *Harness) env() []string {
+// env is a process's environment. Each process tags its connections
+// with its own application_name (atp-<schema>-<name>) so a scenario can
+// tell a killed worker's backends from the api's.
+func (h *Harness) env(name string) []string {
 	env := append(os.Environ(),
 		"APP_ENV=dev",
-		"DATABASE_URL="+h.DBURL,
+		"DATABASE_URL="+strings.Replace(h.DBURL, "application_name="+h.appName, "application_name="+h.appName+"-"+name, 1),
 		"TOKEN_PEPPER="+Pepper,
 		"OBJSTORE=memory",
 		"COOKIE_SECURE=false",
@@ -235,7 +239,7 @@ func (h *Harness) start(name, bin, metricsAddr string) *Proc {
 		h.T.Fatal(err)
 	}
 	cmd := exec.Command(bin)
-	cmd.Env = append(h.env(), "METRICS_ADDR="+metricsAddr)
+	cmd.Env = append(h.env(name), "METRICS_ADDR="+metricsAddr)
 	cmd.Stdout, cmd.Stderr = f, f
 	if err := cmd.Start(); err != nil {
 		h.T.Fatalf("start %s: %v", name, err)
@@ -243,6 +247,7 @@ func (h *Harness) start(name, bin, metricsAddr string) *Proc {
 	p := &Proc{Name: name, cmd: cmd, log: f, path: logPath, done: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(p.done) }()
 	h.T.Cleanup(func() { p.Kill() })
+	h.procs = append(h.procs, p)
 	// Ready when the metrics listener answers — both binaries bring it up
 	// last, after the DB ping.
 	deadline := time.Now().Add(20 * time.Second)
@@ -442,7 +447,7 @@ func LocalRun(n int) string { return fmt.Sprintf("0198c3e1-7b1a-7c3d-9e4f-%012x"
 // tests' connections on the same database are left alone.
 func (h *Harness) DropConnections() int {
 	h.T.Helper()
-	return h.Count(`SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = $1 AND pid <> pg_backend_pid()`, h.appName)
+	return h.Count(`SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE starts_with(application_name, $1) AND pid <> pg_backend_pid()`, h.appName+"-")
 }
 
 // ---- invariants by SQL ----
@@ -488,7 +493,42 @@ func (h *Harness) WaitFor(what string, d time.Duration, cond func() bool) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	h.T.Fatalf("timed out after %s waiting for %s", d, what)
+	h.T.Fatalf("timed out after %s waiting for %s\n%s", d, what, h.report())
+}
+
+// report is what a timeout needs to be diagnosed from a CI log alone: the
+// unfinished jobs and the end of every process's log.
+func (h *Harness) report() string {
+	var b strings.Builder
+	rows, err := h.DB.Q(h.Ctx).Query(h.Ctx, `
+		SELECT kind, status, attempts, coalesce(to_char(leased_until - now(), 'MI:SS'), '-'), coalesce(last_error, '')
+		  FROM jobs WHERE status NOT IN ('done') ORDER BY created_at LIMIT 20`)
+	if err != nil {
+		fmt.Fprintf(&b, "jobs: %v\n", err)
+	} else {
+		b.WriteString("unfinished jobs (kind status attempts lease-left last_error):\n")
+		for rows.Next() {
+			var kind, status, lease, lastErr string
+			var attempts int
+			_ = rows.Scan(&kind, &status, &attempts, &lease, &lastErr)
+			fmt.Fprintf(&b, "  %s %s %d %s %q\n", kind, status, attempts, lease, lastErr)
+		}
+		rows.Close()
+	}
+	for _, p := range h.procs {
+		fmt.Fprintf(&b, "--- %s (alive=%v), last lines:\n%s\n", p.Name, p.Alive(), p.Tail())
+	}
+	return b.String()
+}
+
+// Terminate ends the database backends a process left behind and waits
+// (up to 5 s each) until they are gone. A killed process's statement can
+// still be running on the server — a Claim that commits a fresh lease
+// after the scenario expired the old ones; this is the server noticing the
+// dead client, made deterministic.
+func (h *Harness) Terminate(p *Proc) int {
+	h.T.Helper()
+	return h.Count(`SELECT count(*) FILTER (WHERE pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE application_name = $1`, h.appName+"-"+p.Name)
 }
 
 // JobsByStatus counts the jobs table by status.
