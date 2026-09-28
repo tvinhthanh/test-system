@@ -119,7 +119,7 @@ một race của chính test: câu `Claim` của worker vừa bị giết có th
 chạy trên server và commit lease mới *sau* khi test "tua" lease cũ. Mỗi process
 của harness giờ có `application_name` riêng (`atp-<schema>-api|worker`) và
 `Harness.Terminate(w)` kết thúc backend của worker chết (chờ tới 5 s) trước
-khi tua. Sau sửa: `go test ./...` 8 lần liên tiếp xanh.
+khi tua. Sau sửa: `go test ./...` 8 lần liên tiếp xanh. Job `e2e` (bị skip suốt thời gian đỏ) chạy lại và bắt thêm một lỗi UI: sidebar hỏi `GET /v1/member-scopes` ngay sau sign out → 401 — giờ chỉ hỏi khi có user.
 
 Unit/integration test cho phần còn lại (Postgres thật):
 

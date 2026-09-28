@@ -23,10 +23,13 @@ const { session, projectAccess, teamAccess } = useServices();
 const route = useRoute();
 // "Team" only for admins of an organization or workspace; asked again on
 // navigation and when the MFA flags change, until it answers (an owner is
-// refused until enrolled).
+// refused until enrolled). Never once signed out: the sidebar outlives the
+// session for a tick, and an anonymous ask is a 401 (CI live check, 28-09).
 watch(
   () => [route.path, session.user?.mfa?.enabled],
-  () => void teamAccess.ensure(),
+  () => {
+    if (session.user) void teamAccess.ensure();
+  },
   { immediate: true },
 );
 const team = computed(() => teamAccess.scopes.length > 0);
