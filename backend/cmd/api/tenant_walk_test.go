@@ -188,6 +188,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/organizations/{organizationId}/members": map[string]any{"email": "a@alpha.example", "role": "org_admin"},
 		// JUnit upload: the tenant check runs before the body is read.
 		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
+		// ROI baseline (§6.8.3, QĐ-13): a valid measurement, so only the tenant check refuses.
+		"POST /v1/projects/{projectId}/roi/baselines": map[string]any{"kind": "retrospective", "failures": 10, "medianMinutes": 180, "periodFrom": "2026-08-01", "periodTo": "2026-08-14"},
 	}
 	// Routes with no tenant resource in the path — each one's tenant
 	// property is asserted separately below, none is simply skipped.

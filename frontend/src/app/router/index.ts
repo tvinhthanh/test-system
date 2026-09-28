@@ -38,6 +38,10 @@ export function makeRouter(
             component: () => import("../../features/reports/OverviewPage.vue"),
           },
           {
+            path: "p/:project/roi",
+            component: () => import("../../features/testmgmt/RoiPage.vue"),
+          },
+          {
             path: "p/:project/runs",
             component: () => import("../../features/reports/RunsPage.vue"),
           },

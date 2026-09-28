@@ -255,6 +255,21 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-28 (ROI, QĐ-13)
+
+- `/p/:project/roi` "Return on triage" (nav "ROI"): month picker; coverage,
+  untriaged, TTRC vs baseline first; "Not enough data" empty state without a
+  baseline; hours saved and hours on flaky with their arithmetic in the note;
+  an optional hourly rate that turns hours into money in the note only and is
+  kept nowhere; baseline history; "Record a baseline" sheet for
+  `project.configure`.
+- Number inputs: v-model hands back numbers — the forms accept both (a
+  live-check failure found it). Architecture test gets a 30 s timeout (it
+  parses every file; 5.4 s under load broke the 5 s default).
+- Tests: `roi.test.ts` (null stays null, negative savings, bad kind refused,
+  POST body, labels, rate). live-check: fresh stack → "Not enough data" →
+  maintainer records → hours → money appears only after a rate is typed.
+
 ### 2026-09-28 (JUnit import, QĐ-13)
 
 - Runs page: "Import JUnit" (only with `project.configure`) opens a sheet —

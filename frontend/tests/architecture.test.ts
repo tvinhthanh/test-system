@@ -64,4 +64,6 @@ it("UI cannot import HTTP/repositories or render raw HTML; core cannot depend on
     inspect(source);
   }
   expect(errors).toEqual([]);
-});
+  // Parses every source file with the TypeScript compiler: ~5 s on a busy
+  // laptop, past vitest's 5 s default (28-09) — a rule, not a speed test.
+}, 30000);

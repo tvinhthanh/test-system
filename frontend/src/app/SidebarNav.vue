@@ -7,6 +7,7 @@ import {
   Gauge,
   GitBranch,
   LogOut,
+  Scale,
   ShieldCheck,
   UserCog,
   Users,
@@ -42,6 +43,12 @@ const items = computed(() =>
           label: "Overview",
           icon: Gauge,
           active: route.path.endsWith("/overview"),
+        },
+        {
+          to: `/p/${p.value}/roi`,
+          label: "ROI",
+          icon: Scale,
+          active: route.path.endsWith("/roi"),
         },
         {
           to: `/p/${p.value}/runs`,

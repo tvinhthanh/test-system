@@ -1701,6 +1701,83 @@ paths:
         "415":
           description: "`UNSUPPORTED_MEDIA_TYPE` — send application/xml."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/roi:
+    get:
+      operationId: getROI
+      tags: [testmgmt]
+      summary: ROI for one calendar month, in hours (§6.8.3, QĐ-13)
+      description: |
+        Measured from TriageEvent and attempts, never estimated. Rule 1:
+        `triageCoverage` and `untriagedRate` always come with it. Rule 2:
+        hours only — money is the reader's rate, applied client-side. Rule 3:
+        `savedHours` is null (and `baseline` null) until a measured §5.4
+        baseline exists — the screen says "not enough data". savedHours = Σ
+        (baseline median − TTRC) over triaged failures, negative when slower.
+        flakyHours = CI time of attempts that failed before a flaky pass, plus
+        markedFlaky × the baseline's investigation time when it was measured.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: month, in: query, schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }, description: "YYYY-MM (UTC); default the current month; not in the future." }
+      responses:
+        "200":
+          description: The month's ROI.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ROI" } } }
+        "400": { $ref: "#/components/responses/InvalidCursor" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/roi/baselines:
+    get:
+      operationId: listTTRCBaselines
+      tags: [testmgmt]
+      summary: Measured TTRC baselines, newest first (§5.4)
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Append-only history; the newest prospective applies, else the newest retrospective.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/TTRCBaseline" } }
+                  nextCursor: { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addTTRCBaseline
+      tags: [testmgmt]
+      summary: Record a measured TTRC baseline (§5.4) — needs project.configure
+      description: A correction is a new row; nothing is edited or deleted. The session user is recorded as enteredBy.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, failures, medianMinutes, periodFrom, periodTo]
+              properties:
+                kind: { type: string, enum: [retrospective, prospective] }
+                failures: { type: integer, minimum: 1 }
+                medianMinutes: { type: number, minimum: 1 }
+                p90Minutes: { type: number, description: "≥ medianMinutes" }
+                rerunPassRate: { type: number, minimum: 0, maximum: 1 }
+                flakyInvestigationMinutes: { type: number, minimum: 0 }
+                periodFrom: { type: string, format: date }
+                periodTo: { type: string, format: date, description: "Not in the future: a baseline is measured." }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        "201":
+          description: Recorded.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TTRCBaseline" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/test-cases/{testCaseId}:
     get:
       operationId: getTestCase
@@ -2190,6 +2267,42 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
+    TTRCBaseline:
+      type: object
+      required: [id, kind, failures, medianMinutes, p90Minutes, rerunPassRate, flakyInvestigationMinutes, periodFrom, periodTo, note, enteredBy, enteredAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [retrospective, prospective] }
+        failures: { type: integer }
+        medianMinutes: { type: number }
+        p90Minutes: { type: [number, "null"] }
+        rerunPassRate: { type: [number, "null"] }
+        flakyInvestigationMinutes: { type: [number, "null"] }
+        periodFrom: { type: string, format: date }
+        periodTo: { type: string, format: date }
+        note: { type: string }
+        enteredBy: { type: string }
+        enteredAt: { type: string, format: date-time }
+    ROI:
+      type: object
+      required: [month, from, to, failures, triaged, triageCoverage, untriagedRate, ttrcMedianMinutes, baseline, savedHours, flakyHours, flakyRetryHours, markedFlaky, investigationCounted, fewTriaged, minTriaged]
+      properties:
+        month: { type: string, example: "2026-09" }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        failures: { type: integer }
+        triaged: { type: integer }
+        triageCoverage: { type: number }
+        untriagedRate: { type: number }
+        ttrcMedianMinutes: { type: [number, "null"] }
+        baseline: { oneOf: [{ $ref: "#/components/schemas/TTRCBaseline" }, { type: "null" }] }
+        savedHours: { type: [number, "null"], description: "null: no measured baseline — not enough data." }
+        flakyHours: { type: number }
+        flakyRetryHours: { type: number }
+        markedFlaky: { type: integer }
+        investigationCounted: { type: boolean }
+        fewTriaged: { type: boolean, description: "Fewer than minTriaged triaged failures: shown, with a warning." }
+        minTriaged: { type: integer }
     JUnitImportResult:
       type: object
       required: [runId, localRunId, created, tests, attempts, duplicates, status, flakyCount, startedAt, finishedAt]

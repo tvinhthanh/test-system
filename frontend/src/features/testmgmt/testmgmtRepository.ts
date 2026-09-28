@@ -327,6 +327,98 @@ export interface TestCaseInput {
   automationStatus?: AutomationStatus;
 }
 
+// ---- ROI (SPEC §6.8.3, QĐ-13) ----
+// Hours measured from triage events against a measured §5.4 baseline;
+// `savedHours` is null until one exists ("not enough data"), never a
+// default. Money is the reader's rate, applied on the page, never sent.
+export type BaselineKind = "retrospective" | "prospective";
+export interface Baseline {
+  id: string;
+  kind: BaselineKind;
+  failures: number;
+  medianMinutes: number;
+  p90Minutes: number | null;
+  rerunPassRate: number | null;
+  flakyInvestigationMinutes: number | null;
+  periodFrom: string;
+  periodTo: string;
+  note: string;
+  enteredBy: string;
+  enteredAt: string;
+}
+export interface BaselineInput {
+  kind: BaselineKind;
+  failures: number;
+  medianMinutes: number;
+  p90Minutes?: number;
+  rerunPassRate?: number;
+  flakyInvestigationMinutes?: number;
+  periodFrom: string;
+  periodTo: string;
+  note?: string;
+}
+export interface Roi {
+  month: string;
+  failures: number;
+  triaged: number;
+  triageCoverage: number;
+  untriagedRate: number;
+  ttrcMedianMinutes: number | null;
+  baseline: Baseline | null;
+  savedHours: number | null;
+  flakyHours: number;
+  flakyRetryHours: number;
+  markedFlaky: number;
+  investigationCounted: boolean;
+  fewTriaged: boolean;
+  minTriaged: number;
+}
+// Any finite number (savedHours may be negative: slower than before).
+function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : d.invalid();
+}
+const nullableNum = (value: unknown) => (value === null ? null : num(value));
+function baseline(value: unknown): Baseline {
+  const x = d.record(value);
+  const kind = d.string(x.kind);
+  if (kind !== "retrospective" && kind !== "prospective") return d.invalid();
+  return {
+    id: d.string(x.id),
+    kind,
+    failures: d.integer(x.failures),
+    medianMinutes: num(x.medianMinutes),
+    p90Minutes: nullableNum(x.p90Minutes),
+    rerunPassRate: nullableNum(x.rerunPassRate),
+    flakyInvestigationMinutes: nullableNum(x.flakyInvestigationMinutes),
+    periodFrom: d.string(x.periodFrom),
+    periodTo: d.string(x.periodTo),
+    note: d.string(x.note),
+    enteredBy: d.string(x.enteredBy),
+    enteredAt: d.date(x.enteredAt),
+  };
+}
+function roi(value: unknown): Roi {
+  const x = d.record(value);
+  return {
+    month: d.string(x.month),
+    failures: d.integer(x.failures),
+    triaged: d.integer(x.triaged),
+    triageCoverage: num(x.triageCoverage),
+    untriagedRate: num(x.untriagedRate),
+    ttrcMedianMinutes: nullableNum(x.ttrcMedianMinutes),
+    baseline: x.baseline === null ? null : baseline(x.baseline),
+    savedHours: nullableNum(x.savedHours),
+    flakyHours: num(x.flakyHours),
+    flakyRetryHours: num(x.flakyRetryHours),
+    markedFlaky: d.integer(x.markedFlaky),
+    investigationCounted: d.boolean(x.investigationCounted),
+    fewTriaged: d.boolean(x.fewTriaged),
+    minTriaged: d.integer(x.minTriaged),
+  };
+}
+
 export class TestmgmtRepository {
   constructor(private api: ApiClient) {}
 
@@ -615,5 +707,33 @@ export class TestmgmtRepository {
   // shown on the release page so nobody has to guess it.
   ciGateUrl(origin: string, releaseId: string) {
     return `${origin}/v1/releases/${enc(releaseId)}/gate`;
+  }
+
+  // ---- ROI ----
+  async roi(projectId: string, month: string, signal: AbortSignal) {
+    return roi(
+      await this.api.request(`${scope(projectId)}/roi?${params({ month })}`, {
+        signal,
+      }),
+    );
+  }
+  async baselines(projectId: string, signal: AbortSignal) {
+    return items(
+      await this.api.request(`${scope(projectId)}/roi/baselines`, { signal }),
+      baseline,
+      100,
+    );
+  }
+  async addBaseline(
+    projectId: string,
+    input: BaselineInput,
+    signal: AbortSignal,
+  ) {
+    return baseline(
+      await this.api.request(`${scope(projectId)}/roi/baselines`, {
+        signal,
+        body: input,
+      }),
+    );
   }
 }

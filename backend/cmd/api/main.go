@@ -202,7 +202,8 @@ var oauthProviders = func(cfg config.Config) []*authz.OAuthProvider {
 	return out
 }
 
-// gateEvidence adapts query's read model to testmgmt.Evidence.
+// gateEvidence adapts query's read model to testmgmt.Evidence (the gate and
+// ROI, §6.8.3–4).
 type gateEvidence struct{ q query.Service }
 
 func (g gateEvidence) LatestFinishedRun(ctx context.Context, projectID, branch string) (testmgmt.RunEvidence, bool, error) {
@@ -215,4 +216,9 @@ func (g gateEvidence) LatestFinishedRun(ctx context.Context, projectID, branch s
 		out.Results = append(out.Results, testmgmt.ResultEvidence{ResultID: r.ResultID, StableTestID: r.StableTestID, FinalStatus: r.FinalStatus, Triaged: r.Triaged})
 	}
 	return out, true, nil
+}
+
+func (g gateEvidence) ROIFacts(ctx context.Context, projectID string, from, to time.Time) (testmgmt.ROIFacts, error) {
+	f, err := g.q.ROIFacts(ctx, projectID, from, to)
+	return testmgmt.ROIFacts{Failures: f.Failures, Triaged: f.Triaged, TTRCSum: f.TTRCSum, TTRCMedian: f.TTRCMedian, FlakyRetry: f.FlakyRetry, MarkedFlaky: f.MarkedFlaky}, err
 }

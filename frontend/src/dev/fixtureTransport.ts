@@ -37,6 +37,21 @@ function run(i: number) {
   };
 }
 
+// One prospective baseline (§5.4) for the ROI page.
+const fixtureBaseline = {
+  id: "55555555-5555-4555-8555-555555555555",
+  kind: "prospective",
+  failures: 14,
+  medianMinutes: 180,
+  p90Minutes: 1560,
+  rerunPassRate: 0.3,
+  flakyInvestigationMinutes: 25,
+  periodFrom: "2026-08-01",
+  periodTo: "2026-08-14",
+  note: "Two weeks, four-cell form",
+  enteredBy: "em@acme.example",
+  enteredAt: "2026-08-15T09:00:00Z",
+};
 let fixtureIdentities = [
   {
     id: "identity-1",
@@ -227,6 +242,32 @@ export function createFixtureTransport(): Transport {
           },
         ],
         nextCursor: null,
+      });
+    // ROI (§6.8.3): one measured baseline, so the page shows hours offline;
+    // a new baseline is echoed back.
+    if (/^\/v1\/projects\/[^/]+\/roi\/baselines$/.test(path))
+      return init?.method === "POST"
+        ? response({ ...fixtureBaseline, id: crypto.randomUUID() }, 201)
+        : response({ items: [fixtureBaseline], nextCursor: null });
+    if (/^\/v1\/projects\/[^/]+\/roi$/.test(path))
+      return response({
+        month:
+          url.searchParams.get("month") || new Date().toISOString().slice(0, 7),
+        from: "2026-09-01T00:00:00Z",
+        to: "2026-10-01T00:00:00Z",
+        failures: 42,
+        triaged: 31,
+        triageCoverage: 31 / 42,
+        untriagedRate: 11 / 42,
+        ttrcMedianMinutes: 52,
+        baseline: fixtureBaseline,
+        savedHours: 61.4,
+        flakyHours: 6.2,
+        flakyRetryHours: 3.7,
+        markedFlaky: 6,
+        investigationCounted: true,
+        fewTriaged: false,
+        minTriaged: 10,
       });
     // JUnit upload: always "imported" into the first fixture run, so the
     // sheet's result and its link can be seen offline.

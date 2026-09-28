@@ -162,6 +162,27 @@ carries it), `INVALID_PAYLOAD`, `RUN_CONFLICT` (409), `REPORT_TOO_LARGE`
 the top of the list. CI imports the same way with a token:
 `POST /v1/imports/junit` (`project:ingest`).
 
+### ROI (§6.8.3, QĐ-13, implemented 2026-09-28)
+
+`GET /v1/projects/{projectId}/roi?month=YYYY-MM` (UTC; default current;
+not future → 400 `INVALID_QUERY`), any viewer:
+
+```json
+{ "month":"2026-09", "failures":42, "triaged":31, "triageCoverage":0.74,
+  "untriagedRate":0.26, "ttrcMedianMinutes":52, "baseline":{…}|null,
+  "savedHours":61.4|null, "flakyHours":6.2, "flakyRetryHours":3.7,
+  "markedFlaky":6, "investigationCounted":true, "fewTriaged":false,
+  "minTriaged":10 }
+```
+
+`baseline: null` / `savedHours: null` means "not enough data" — never show
+0 for it. `savedHours` may be negative. Money is never in the API: the page
+multiplies hours by a rate the reader types and keeps nowhere.
+`GET …/roi/baselines` lists; `POST …/roi/baselines` (`project.configure`)
+takes `{kind, failures, medianMinutes, p90Minutes?, rerunPassRate?,
+flakyInvestigationMinutes?, periodFrom, periodTo, note?}` → 201 baseline with
+`enteredBy`.
+
 ## Results
 
 `GET /v1/projects/{projectId}/runs/{runId}/results?limit=50&cursor=...` returns:

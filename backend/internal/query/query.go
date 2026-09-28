@@ -138,6 +138,17 @@ type TriageMetrics struct {
 	HasTTRC, HasFirst bool
 }
 
+// ROIFacts is what §6.8.3 counts over [From, To) (QĐ-13): failures observed
+// in the window, the triaged ones' TTRC (HYPOTHESIS_ACCEPTED − observed,
+// §8.3), CI time burnt on attempts that failed before a flaky pass, and
+// failures marked flaky. Measured only; testmgmt does the arithmetic.
+type ROIFacts struct {
+	Failures, Triaged   int
+	TTRCSum, TTRCMedian time.Duration
+	FlakyRetry          time.Duration
+	MarkedFlaky         int
+}
+
 // TrendBucket is §8.7's "failure category trends".
 type TrendBucket struct {
 	Week     time.Time `json:"week"`     // start of the ISO week, UTC
@@ -167,6 +178,7 @@ type Service interface {
 	IdentityRuns(ctx context.Context, projectID, identityID string, limit int, cursor string) (Page[Run], error)
 
 	Triage(ctx context.Context, projectID string, since time.Time) (TriageMetrics, error)
+	ROIFacts(ctx context.Context, projectID string, from, to time.Time) (ROIFacts, error)
 	CategoryTrend(ctx context.Context, projectID string, since time.Time) ([]TrendBucket, error)
 
 	// GateEvidence is what the §6.8.4 release gate judges: the newest

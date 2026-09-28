@@ -230,6 +230,67 @@ await step(
 );
 
 await step(
+  "ROI: no baseline says so; a measured one recorded by a maintainer turns into hours (§6.8.3, QĐ-13)",
+  async () => {
+    await page.goto(base + "/p/" + project + "/roi");
+    await page.waitForResponse(v1(/^\/v1\/projects\/[^/]+\/roi\?/), {
+      timeout: 10000,
+    });
+    // Coverage first, always (rule 1).
+    await page
+      .locator(".roi-coverage")
+      .waitFor({ state: "visible", timeout: 10000 });
+    const record = page.getByRole("button", { name: "Record a baseline" });
+    const hoursTile = page.getByText("Triage hours saved");
+    // A stack that already has a baseline (a rerun against the same data)
+    // shows hours; a fresh one must say "Not enough data", never a number.
+    if (!(await hoursTile.count())) {
+      await page
+        .locator(".roi-no-baseline")
+        .waitFor({ state: "visible", timeout: 5000 });
+      if (!(await record.count())) return; // not a maintainer: nothing to record
+      await record.first().click();
+      await page.fill("#bl-failures", "12");
+      await page.fill("#bl-median", "3");
+      await page.fill("#bl-invest", "20");
+      await page.fill("#bl-from", "2026-08-01");
+      await page.fill("#bl-to", "2026-08-14");
+      await page.fill("#bl-note", "live-check");
+      await Promise.all([
+        page.waitForResponse(
+          v1(/^\/v1\/projects\/[^/]+\/roi\/baselines$/, 201),
+          {
+            timeout: 10000,
+          },
+        ),
+        page.getByRole("button", { name: "Save baseline" }).click(),
+      ]);
+    }
+    await hoursTile.waitFor({ state: "visible", timeout: 10000 });
+    // Money only from a rate typed here (rule 2): none before, some after.
+    const saved = page.locator(".roi-hours .stat-tile").first();
+    if ((await saved.textContent()).includes("at your rate"))
+      throw new Error("money shown before any rate was typed");
+    await page.fill("#roi-rate", "50");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector(".roi-hours .stat-tile")
+          ?.textContent?.includes("at your rate"),
+      null,
+      { timeout: 5000 },
+    );
+    await page
+      .locator(".roi-baselines")
+      .waitFor({ state: "visible", timeout: 5000 });
+    await page.screenshot({
+      path: "test-results/live-roi.png",
+      fullPage: true,
+    });
+  },
+);
+
+await step(
   "Members link follows the server's member.manage action (§11.3.2)",
   async () => {
     // Whatever role the seed gave this account, the nav must agree with

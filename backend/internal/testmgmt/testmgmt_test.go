@@ -23,10 +23,15 @@ const (
 type fakeEvidence struct {
 	run RunEvidence
 	ok  bool
+	roi ROIFacts
 }
 
 func (f *fakeEvidence) LatestFinishedRun(context.Context, string, string) (RunEvidence, bool, error) {
 	return f.run, f.ok, nil
+}
+
+func (f *fakeEvidence) ROIFacts(context.Context, string, time.Time, time.Time) (ROIFacts, error) {
+	return f.roi, nil
 }
 
 // seedIdentity inserts a TestIdentity row directly — identity owns the

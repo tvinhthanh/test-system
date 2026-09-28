@@ -601,3 +601,56 @@ func (s *service) GateEvidence(ctx context.Context, projectID, branch string) (G
 	}
 	return run, true, rows.Err()
 }
+
+// ROIFacts: two scans, the same shape as Triage — the window's failures
+// joined once to their triage events, and the attempts of the window's
+// flaky passes.
+func (s *service) ROIFacts(ctx context.Context, projectID string, from, to time.Time) (ROIFacts, error) {
+	if !isUUID(projectID) {
+		return ROIFacts{}, ErrNotFound
+	}
+	var f ROIFacts
+	var sum, median *float64
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		WITH failures AS (
+			SELECT t.id, t.failure_observed_at
+			  FROM test_results t JOIN runs r ON r.id = t.run_id
+			 WHERE r.project_id = $1 AND t.failure_observed_at >= $2 AND t.failure_observed_at < $3
+		), marks AS (
+			SELECT e.test_result_id,
+			       min(e.occurred_at) FILTER (WHERE e.type = 'HYPOTHESIS_ACCEPTED') AS accepted_at,
+			       bool_or(e.type = 'MARKED_FLAKY') AS flaky
+			  FROM triage_events e JOIN failures f ON f.id = e.test_result_id
+			 GROUP BY e.test_result_id
+		)
+		SELECT count(*),
+		       count(*) FILTER (WHERE accepted_at IS NOT NULL),
+		       sum(greatest(extract(epoch FROM accepted_at - failure_observed_at), 0)) FILTER (WHERE accepted_at IS NOT NULL),
+		       percentile_cont(0.5) WITHIN GROUP (ORDER BY greatest(extract(epoch FROM accepted_at - failure_observed_at), 0)) FILTER (WHERE accepted_at IS NOT NULL),
+		       count(*) FILTER (WHERE coalesce(flaky, false))
+		  FROM failures f LEFT JOIN marks m ON m.test_result_id = f.id`,
+		projectID, from.UTC(), to.UTC()).Scan(&f.Failures, &f.Triaged, &sum, &median, &f.MarkedFlaky)
+	if err != nil {
+		return ROIFacts{}, err
+	}
+	if sum != nil {
+		f.TTRCSum = time.Duration(*sum * float64(time.Second))
+	}
+	if median != nil {
+		f.TTRCMedian = time.Duration(*median * float64(time.Second))
+	}
+	var retryMs int64
+	err = s.db.Q(ctx).QueryRow(ctx, `
+		SELECT coalesce(sum(a.duration_ms), 0)
+		  FROM test_result_attempts a
+		  JOIN test_results t ON t.id = a.test_result_id
+		  JOIN runs r ON r.id = t.run_id
+		 WHERE r.project_id = $1 AND r.started_at >= $2 AND r.started_at < $3
+		   AND t.final_status = 'flaky_pass' AND a.status IN ('failed', 'timed_out', 'interrupted')`,
+		projectID, from.UTC(), to.UTC()).Scan(&retryMs)
+	if err != nil {
+		return ROIFacts{}, err
+	}
+	f.FlakyRetry = time.Duration(retryMs) * time.Millisecond
+	return f, nil
+}

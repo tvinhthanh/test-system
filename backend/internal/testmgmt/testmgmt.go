@@ -256,7 +256,89 @@ type Evidence interface {
 	// LatestFinishedRun returns the newest finished run of the project, on
 	// the branch when branch != "", and ok=false when there is none.
 	LatestFinishedRun(ctx context.Context, projectID, branch string) (run RunEvidence, ok bool, err error)
+	// ROIFacts is what §6.8.3 counts over [from, to): measured by the
+	// Intelligence Plane from TriageEvent and attempts, never estimated.
+	ROIFacts(ctx context.Context, projectID string, from, to time.Time) (ROIFacts, error)
 }
+
+// ROIFacts are the measured inputs of §6.8.3 for one window.
+type ROIFacts struct {
+	Failures int // failures observed in the window
+	Triaged  int // of them, with an accepted hypothesis (the TTRC stop, §8.3)
+	// TTRCSum and TTRCMedian are over the triaged ones.
+	TTRCSum    time.Duration
+	TTRCMedian time.Duration
+	// FlakyRetry is the CI time spent on attempts that failed before the
+	// test passed (flaky_pass results): §6.8.3's first flaky term.
+	FlakyRetry time.Duration
+	// MarkedFlaky counts failures a person marked flaky in the window.
+	MarkedFlaky int
+}
+
+// ---- ROI (§6.8.3, QĐ-13) ----
+
+type BaselineKind string
+
+const (
+	Retrospective BaselineKind = "retrospective"
+	Prospective   BaselineKind = "prospective"
+)
+
+// Baseline is one §5.4 measurement of TTRC before the platform, entered by
+// a person (append-only; the newest prospective applies, else the newest
+// retrospective).
+type Baseline struct {
+	ID                 string
+	ProjectID          string
+	Kind               BaselineKind
+	Failures           int
+	Median             time.Duration
+	P90                time.Duration // 0 = not given
+	RerunPassRate      *float64
+	FlakyInvestigation time.Duration // 0 = not measured
+	PeriodFrom         time.Time
+	PeriodTo           time.Time
+	Note               string
+	EnteredBy          string
+	EnteredAt          time.Time
+}
+
+type NewBaseline struct {
+	Kind               BaselineKind
+	Failures           int
+	Median             time.Duration
+	P90                time.Duration
+	RerunPassRate      *float64
+	FlakyInvestigation time.Duration
+	PeriodFrom         time.Time
+	PeriodTo           time.Time
+	Note               string
+}
+
+// ROI is §6.8.3 for one month, in hours — never money: an hourly rate is
+// the reader's to apply (rule 2). Saved is nil without a baseline (rule 3:
+// "chưa đủ dữ liệu"); coverage and untriaged rate always travel with it
+// (rule 1).
+type ROI struct {
+	From, To       time.Time
+	Facts          ROIFacts
+	TriageCoverage float64
+	UntriagedRate  float64
+	Baseline       *Baseline
+	// SavedHours = Σ (baseline median − TTRC) over triaged failures; may be
+	// negative (slower than before) and is shown as is.
+	SavedHours *float64
+	// FlakyHours = FlakyRetry + MarkedFlaky × baseline flaky investigation;
+	// InvestigationCounted says whether the second term is in.
+	FlakyHours           float64
+	InvestigationCounted bool
+	// FewTriaged: under ROIMinTriaged triaged failures — the number is shown
+	// with a warning, it is not yet a trend.
+	FewTriaged bool
+}
+
+// ROIMinTriaged is the sample under which ROI is flagged as thin.
+const ROIMinTriaged = 10
 
 // --- inputs ---
 
@@ -397,6 +479,13 @@ type Service interface {
 	// the gate advises, a person decides.
 	Evaluate(ctx context.Context, projectID, id string) (Release, error)
 	Decide(ctx context.Context, projectID, id string, d Decision, actor string) (Release, error)
+	// ROI (§6.8.3, QĐ-13). AddBaseline records a measured baseline (§5.4)
+	// with who entered it; ROI computes one calendar month (UTC) — the month
+	// holding `month`.
+	AddBaseline(ctx context.Context, projectID string, in NewBaseline, actor string) (Baseline, error)
+	Baselines(ctx context.Context, projectID string) ([]Baseline, error)
+	ROI(ctx context.Context, projectID string, month time.Time) (ROI, error)
+
 	// ProjectOfRelease is for the CI gate route, whose URL carries no project:
 	// the caller authorizes against the answer before reading anything.
 	ProjectOfRelease(ctx context.Context, releaseID string) (projectID string, err error)

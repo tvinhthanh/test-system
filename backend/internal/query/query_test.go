@@ -26,6 +26,8 @@ type fixture struct {
 	runs    []results.Run
 	failed  []results.TestResultID
 	payID   string // stable id of the payment test
+	res     results.Service
+	tri     triage.Service
 }
 
 // build makes a project with N finished runs through the real write
@@ -41,7 +43,7 @@ func build(t *testing.T, n int) fixture {
 	pa, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
 	pb, _ := ten.CreateProject(ctx, ws.ID, "search", "")
 	env, _ := ten.EnsureEnvironment(ctx, pa.ID, "staging")
-	f := fixture{q: query.New(db), project: string(pa.ID), other: string(pb.ID), env: env}
+	f := fixture{q: query.New(db), project: string(pa.ID), other: string(pb.ID), env: env, res: res, tri: tri}
 	now := time.Now().UTC()
 	ident := func(file, leaf string) json.RawMessage {
 		b, _ := json.Marshal(map[string]any{"framework": "playwright", "filePath": file, "titlePath": []string{"Checkout", leaf}})
@@ -280,5 +282,57 @@ func TestMetrics(t *testing.T) {
 	}
 	if counts["app_bug"] != 1 || counts["unknown"] != 1 {
 		t.Errorf("trend: %+v", trend)
+	}
+}
+
+// §6.8.3 facts (QĐ-13): the window's failures and their TTRC, the CI time
+// of attempts that failed before a flaky pass, failures marked flaky — and
+// nothing outside the window or the project.
+func TestROIFacts(t *testing.T) {
+	f := build(t, 3)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	// A flaky pass: 1.5 s and 0.5 s failing, then a pass of 0.2 s.
+	run, _, err := f.res.CreateRun(ctx, results.NewRun{ProjectID: f.project, EnvironmentID: string(f.env.ID), LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-0000000000ff", StartedAt: now.Add(-30 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"framework":"playwright","filePath":"tests/flaky.spec.ts","titlePath":["Flaky"]}`)
+	if _, err := f.res.AppendAttempts(ctx, run.ID, []results.AttemptEvent{
+		{Sequence: 1, ClientTestID: "ct_flaky", Attempt: 0, DisplayName: "Flaky", IdentityRaw: raw, Status: results.AttemptFailed, Outcome: results.OutcomeFlaky, DurationMs: 1500},
+		{Sequence: 2, ClientTestID: "ct_flaky", Attempt: 1, DisplayName: "Flaky", IdentityRaw: raw, Status: results.AttemptTimedOut, Outcome: results.OutcomeFlaky, DurationMs: 500},
+		{Sequence: 3, ClientTestID: "ct_flaky", Attempt: 2, DisplayName: "Flaky", IdentityRaw: raw, Status: results.AttemptPassed, Outcome: results.OutcomeFlaky, DurationMs: 200},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.res.FinishRun(ctx, run.ID, now.Add(-29*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	// The second failure (only seen so far) is marked flaky.
+	if _, _, err := f.tri.Record(ctx, triage.Record{ProjectID: f.project, TestResultID: string(f.failed[1]), Type: triage.MarkedFlaky, ActorType: triage.ActorUser, ActorID: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.q.ROIFacts(ctx, f.project, now.Add(-24*time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Failures: the two failed payment results, plus the flaky pass's first
+	// failure — failure_observed_at is set for every result that failed once.
+	if got.Failures != 3 || got.Triaged != 1 || got.MarkedFlaky != 1 {
+		t.Errorf("counts: %+v", got)
+	}
+	if got.TTRCSum < 119*time.Minute || got.TTRCSum > 121*time.Minute || got.TTRCMedian < 119*time.Minute || got.TTRCMedian > 121*time.Minute {
+		t.Errorf("TTRC sum %v median %v, want ≈ 2 h", got.TTRCSum, got.TTRCMedian)
+	}
+	if got.FlakyRetry != 2*time.Second {
+		t.Errorf("flaky retry time %v, want 2 s (the failing attempts only)", got.FlakyRetry)
+	}
+	// A window before any of it, and another project: nothing.
+	if early, _ := f.q.ROIFacts(ctx, f.project, now.Add(-72*time.Hour), now.Add(-48*time.Hour)); early != (query.ROIFacts{}) {
+		t.Errorf("window before the data: %+v", early)
+	}
+	if other, _ := f.q.ROIFacts(ctx, f.other, now.Add(-24*time.Hour), now.Add(time.Hour)); other != (query.ROIFacts{}) {
+		t.Errorf("another project: %+v", other)
 	}
 }
