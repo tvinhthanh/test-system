@@ -101,6 +101,9 @@ const (
 type Principal struct {
 	Kind   PrincipalKind
 	UserID string
+	// SessionID is the browser session a user principal came from — the one
+	// a password change keeps while it signs out every other.
+	SessionID string
 	// Token fields, populated by Authenticate.
 	TokenID     string
 	TokenScope  ScopeRef
@@ -297,6 +300,11 @@ var (
 	// ErrLastSignIn: removing this would leave the account no way to sign
 	// in (no password, no other linked provider).
 	ErrLastSignIn = errors.New("authz: the account's last way to sign in")
+	// ErrNoPassword: the account has no password to change (it signs in
+	// with Google/GitHub only); the emailed reset sets a first one.
+	ErrNoPassword = errors.New("authz: the account has no password")
+	// ErrSamePassword: the new password is the current one.
+	ErrSamePassword = errors.New("authz: the new password is the current one")
 	// ErrAccountExists: an invitation was accepted for an email that has an
 	// account by now; the role is granted and that account signs in with its
 	// own password — a link never takes an account over.
@@ -339,6 +347,12 @@ type Service interface {
 	// user except keepSession ("" revokes all) — §11.2 "đổi password → revoke
 	// mọi session khác".
 	SetPassword(ctx context.Context, userID, password, keepSession string) error
+	// ChangePassword is the signed-in person changing their own password
+	// (§11.2): the current one must be right (rate limited like a login),
+	// the new one valid and different; every other session is revoked and
+	// the change audited. ErrNoPassword for an account that signs in only
+	// with Google/GitHub — it sets a first password by the emailed reset.
+	ChangePassword(ctx context.Context, userID, keepSession, current, next, ip string) error
 
 	// Login checks email + password and opens a session. Every failure is
 	// ErrUnauthenticated — unknown email, wrong password, unverified email —

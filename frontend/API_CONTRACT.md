@@ -79,6 +79,15 @@ the server session. UI clears state only after server confirmation or a 401.
   expired), `409 ACCOUNT_EXISTS` (the role was added; sign in),
   `400 INVALID_PASSWORD` (12+ characters), `429` after repeated bad tokens.
 
+### Change password (§11.2, implemented 2026-09-29)
+
+`POST /v1/session/password {current, password}` with CSRF → `204`: this
+session stays, every other session of the account is signed out. `400
+WRONG_PASSWORD` (current wrong — not a 401, the session is fine), `400
+INVALID_PASSWORD` (under 12 or unchanged), `409 NO_PASSWORD` (Google/GitHub-only
+account: use forgot password), `429` after five wrong tries. Security page →
+"Password".
+
 ### Forgot password (§11.2, implemented 2026-09-28)
 
 - The bootstrap carries `passwordReset: true` with `MAIL=smtp`; the sign-in

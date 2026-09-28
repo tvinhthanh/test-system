@@ -175,6 +175,25 @@ export function createFixtureTransport(): Transport {
         },
         401,
       );
+    // Change password: "wrong" as the current one is refused, anything
+    // else is accepted.
+    if (path === "/v1/session/password") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        current?: string;
+        password?: string;
+      };
+      if (body.current === "wrong")
+        return response(
+          { error: { code: "WRONG_PASSWORD", message: "not right" } },
+          400,
+        );
+      if (String(body.password ?? "").length < 12)
+        return response(
+          { error: { code: "INVALID_PASSWORD", message: "too short" } },
+          400,
+        );
+      return new Response(null, { status: 204 });
+    }
     if (path === "/v1/session/logout") {
       sessionStorage.setItem(sessionKey, "out");
       return response({});
@@ -706,6 +725,22 @@ export function createFixtureTransport(): Transport {
 const tmNow = Date.UTC(2026, 8, 20, 9, 0);
 const iso = (minusMinutes: number) =>
   new Date(tmNow - minusMinutes * 60000).toISOString();
+let tmSuites = [
+  {
+    id: "suite-1",
+    parentId: "",
+    name: "Checkout",
+    cases: 3,
+    createdAt: iso(5000),
+  },
+  {
+    id: "suite-2",
+    parentId: "",
+    name: "Search",
+    cases: 2,
+    createdAt: iso(4000),
+  },
+];
 const tmRequirements = [
   {
     id: "req-1",
@@ -937,36 +972,18 @@ function fixtureTestmgmt(
   };
   switch (kind) {
     case "suites":
-      return method === "POST"
-        ? {
-            body: stamp({
-              id: "suite-new",
-              parentId: "",
-              name: body.name,
-              cases: 0,
-            }),
-            status: 201,
-          }
-        : {
-            body: {
-              items: [
-                {
-                  id: "suite-1",
-                  parentId: "",
-                  name: "Checkout",
-                  cases: 3,
-                  createdAt: iso(5000),
-                },
-                {
-                  id: "suite-2",
-                  parentId: "",
-                  name: "Search",
-                  cases: 2,
-                  createdAt: iso(4000),
-                },
-              ],
-            },
-          };
+      if (method === "POST") {
+        const created: (typeof tmSuites)[number] = {
+          id: `suite-${tmSuites.length + 1}`,
+          parentId: "",
+          name: String(body.name ?? ""),
+          cases: 0,
+          createdAt: iso(0),
+        };
+        tmSuites = [...tmSuites, created];
+        return { body: created, status: 201 };
+      }
+      return { body: { items: tmSuites } };
     case "requirements":
       if (method === "POST")
         return {
@@ -1015,6 +1032,7 @@ function fixtureTestmgmt(
             status: 201,
           };
         const q = (url.searchParams.get("q") ?? "").toLowerCase();
+        const suite = url.searchParams.get("suite");
         const crit = url.searchParams.get("critical");
         const auto = url.searchParams.get("automation");
         return {
@@ -1024,6 +1042,7 @@ function fixtureTestmgmt(
               .filter(
                 (c) =>
                   (!q || c.title.toLowerCase().includes(q)) &&
+                  (!suite || c.suiteId === suite) &&
                   (!crit || String(c.isCritical) === crit) &&
                   (!auto || c.automationStatus === auto),
               )

@@ -247,7 +247,7 @@ func (s *service) AuthenticateSession(ctx context.Context, secret string) (Princ
 	if now.Sub(sess.LastSeenAt) >= sessionTouch {
 		_, _ = s.db.Q(ctx).Exec(ctx, `UPDATE sessions SET last_seen_at = $2 WHERE id = $1`, sess.ID, now)
 	}
-	return Principal{Kind: PrincipalUser, UserID: sess.UserID, MFAEnrollmentRequired: enrol}, sess, nil
+	return Principal{Kind: PrincipalUser, UserID: sess.UserID, SessionID: sess.ID, MFAEnrollmentRequired: enrol}, sess, nil
 }
 
 func (s *service) Logout(ctx context.Context, sessionID string) error {

@@ -474,6 +474,41 @@ paths:
           description: "`ACCOUNT_EXISTS` — role granted; sign in."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/password:
+    post:
+      operationId: changePassword
+      tags: [session]
+      summary: Change your own password; every other session is signed out (§11.2)
+      description: |
+        The current password is checked like a login and under the same limit
+        (5 wrong in 15 min per account and per address → 429 with backoff):
+        a stolen session cannot take the account over by guessing. The
+        session that asked stays signed in; every other one of the account
+        ends. MFA is unchanged. An account that signs in only with Google or
+        GitHub has no password to change → 409 NO_PASSWORD (set a first one
+        with forgot password).
+      security: [{ sessionCookie: [], csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current, password]
+              properties:
+                current: { type: string }
+                password: { type: string, minLength: 12 }
+      responses:
+        "204": { description: Changed; other sessions revoked. }
+        "400":
+          description: "`WRONG_PASSWORD` (current is not right) or `INVALID_PASSWORD` (under 12 characters, or the same as now)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "409":
+          description: "`NO_PASSWORD` — the account signs in with Google/GitHub only."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /v1/session/password/forgot:
     post:
       operationId: forgotPassword

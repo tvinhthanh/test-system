@@ -15,7 +15,7 @@ import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
 import type { Identity } from "../reports/reportsRepository";
 import { automationStatuses, priorities } from "./enums";
-import type { Requirement, Step, TestCase } from "./testmgmtRepository";
+import type { Requirement, Step, Suite, TestCase } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
 import { useProjectPermission } from "../reports/useProjectPermission";
 import { time } from "../../shared/format";
@@ -39,6 +39,7 @@ const base = () => `/p/${encodeURIComponent(project.value)}`;
 
 const tc = useResource<TestCase>();
 const requirements = useResource<Requirement[]>();
+const suites = useResource<Suite[]>();
 function refresh() {
   void tc.load((signal) =>
     testmgmt.testCase(project.value, caseId.value, signal),
@@ -46,12 +47,14 @@ function refresh() {
   void requirements.load((signal) =>
     testmgmt.requirements(project.value, signal),
   );
+  void suites.load((signal) => testmgmt.suites(project.value, signal));
 }
 watch(() => [project.value, caseId.value], refresh, { immediate: true });
 
 // Editable copy of the case; Save sends only what changed.
 const form = ref<{
   title: string;
+  suiteId: string;
   priority: TestCase["priority"];
   isCritical: boolean;
   automationStatus: TestCase["automationStatus"];
@@ -64,6 +67,7 @@ watch(
     form.value = c
       ? {
           title: c.title,
+          suiteId: c.suiteId,
           priority: c.priority,
           isCritical: c.isCritical,
           automationStatus: c.automationStatus,
@@ -80,6 +84,7 @@ const dirty = computed(() => {
   if (!c || !f) return false;
   return (
     f.title !== c.title ||
+    f.suiteId !== c.suiteId ||
     f.priority !== c.priority ||
     f.isCritical !== c.isCritical ||
     f.automationStatus !== c.automationStatus ||
@@ -257,7 +262,25 @@ const label = (s: string) => s.replaceAll("_", " ");
                 :readonly="!canWrite"
               />
             </div>
-            <div class="grid gap-4 sm:grid-cols-3">
+            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="space-y-2">
+                <Label for="case-suite">Suite</Label>
+                <NativeSelect
+                  id="case-suite"
+                  v-model="form.suiteId"
+                  :disabled="!canWrite || suites.loading.value"
+                  class="w-full"
+                >
+                  <option value="">No suite</option>
+                  <option
+                    v-for="s in suites.data.value ?? []"
+                    :key="s.id"
+                    :value="s.id"
+                  >
+                    {{ s.name }}
+                  </option>
+                </NativeSelect>
+              </div>
               <div class="space-y-2">
                 <Label for="case-priority">Priority</Label>
                 <NativeSelect

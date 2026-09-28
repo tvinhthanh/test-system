@@ -200,6 +200,7 @@ func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	oauthRoutes(mux, h)
 	invitationRoutes(mux, h)
 	resetRoutes(mux, h)
+	mux.Handle("POST /v1/session/password", http.HandlerFunc(h.passwordChange))
 }
 
 type webHandlers struct {

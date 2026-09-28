@@ -18,6 +18,7 @@ import AsyncState from "../../shared/AsyncState.vue";
 import PageHeader from "../../shared/PageHeader.vue";
 import QrCode from "./QrCode.vue";
 import LinkedAccounts from "./LinkedAccounts.vue";
+import ChangePassword from "./ChangePassword.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -301,5 +302,6 @@ function downloadCodes() {
       </template>
     </section>
   </AsyncState>
+  <ChangePassword />
   <LinkedAccounts />
 </template>

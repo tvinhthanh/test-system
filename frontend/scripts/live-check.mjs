@@ -57,9 +57,13 @@ page.on("response", (res) => {
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => {
   // Chrome logs its own line for every non-2xx resource; the deliberate
-  // wrong-password 401 below is the one such line allowed, and the /v1
-  // call list at the end asserts no other non-2xx happened.
-  if (m.type() === "error" && !/Failed to load resource:.*401/.test(m.text()))
+  // wrong-password 401 (sign-in) and 400 (change password) below are the
+  // lines allowed, and the /v1 call list at the end asserts no other
+  // non-2xx happened.
+  if (
+    m.type() === "error" &&
+    !/Failed to load resource:.*(401|400)/.test(m.text())
+  )
     errors.push("console: " + m.text());
 });
 
@@ -606,6 +610,48 @@ await step(
   },
 );
 
+await step(
+  "change password from Security: wrong current refused, change and change back; still signed in (§11.2)",
+  async () => {
+    const temp = password + " (live-check)";
+    const change = async (current, next, status) => {
+      await page.fill("#pw-current", current);
+      await page.fill("#pw-new", next);
+      await page.fill("#pw-repeat", next);
+      await Promise.all([
+        page.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname === "/v1/session/password" &&
+            r.status() === status,
+          { timeout: 10000 },
+        ),
+        page.getByRole("button", { name: "Change password" }).click(),
+      ]);
+    };
+    await page.goto(base + "/account/security");
+    await page
+      .locator(".change-password")
+      .waitFor({ state: "visible", timeout: 10000 });
+    // A wrong current password is a 400 shown in the form — the one other
+    // deliberate non-2xx of this script.
+    await change("definitely not the password", temp, 400);
+    await page
+      .getByText("The current password is not right.")
+      .waitFor({ timeout: 5000 });
+    await change(password, temp, 204);
+    await page
+      .locator(".password-changed")
+      .waitFor({ state: "visible", timeout: 5000 });
+    // Back to the real one, so the next run (and the sign-out step) work.
+    await change(temp, password, 204);
+    const me = await page.evaluate(async () => {
+      const r = await fetch("/v1/session", { credentials: "same-origin" });
+      return (await r.json()).user;
+    });
+    if (!me) throw new Error("changing the password signed this session out");
+  },
+);
+
 await step("sign out → session gone, anonymous bootstrap again", async () => {
   const btn = page
     .locator("button[aria-label='Sign out'], button:has-text('Sign out')")
@@ -625,18 +671,21 @@ await browser.close();
 report();
 
 const bad = calls.filter(
-  (c) => !/→ (200|201|204)$/.test(c) && !/POST \/v1\/session → 401$/.test(c),
+  (c) =>
+    !/→ (200|201|204)$/.test(c) &&
+    !/POST \/v1\/session → 401$/.test(c) &&
+    !/POST \/v1\/session\/password → 400$/.test(c),
 );
 if (bad.length) {
   console.log(
-    "\nunexpected statuses (only the deliberate wrong-password 401 is allowed):",
+    "\nunexpected statuses (only the deliberate wrong-password 401 and 400 are allowed):",
   );
   for (const c of bad) console.log("  " + c);
   process.exit(1);
 }
 if (errors.length) process.exit(1);
 console.log(
-  `\n${calls.length} /v1 calls, all 2xx except the deliberate 401; no browser errors.`,
+  `\n${calls.length} /v1 calls, all 2xx except the deliberate wrong-password 401 and 400; no browser errors.`,
 );
 // Wall time per step, browser included: navigation, every /v1 round trip,
 // render until the rows are in the DOM. Run against a project with 10^5–10^6

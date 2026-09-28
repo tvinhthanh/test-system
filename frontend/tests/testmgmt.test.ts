@@ -112,6 +112,25 @@ it("decodes test cases (lists without links, single with links) and refuses bad 
   );
 });
 
+it("lists and creates suites and sends the suite test-case filter", async () => {
+  const transport = vi.fn<Transport>(async (path, init) => {
+    if (init?.method === "POST") {
+      expect(JSON.parse(String(init.body))).toEqual({ name: "Checkout" });
+      return json({ id: "s2", parentId: "", name: "Checkout", cases: 0 }, 201);
+    }
+    if (String(path).includes("/test-cases?")) return json({ items: [] });
+    return json({
+      items: [{ id: "s1", parentId: "", name: "Core", cases: 4 }],
+    });
+  });
+  const r = repo(transport);
+  expect((await r.suites("p", signal()))[0]?.cases).toBe(4);
+  expect((await r.createSuite("p", "Checkout", signal())).id).toBe("s2");
+  await r.testCases("p", { suite: "s/1" }, signal());
+  const url = new URL(String(transport.mock.calls[2]?.[0]), "http://localhost");
+  expect(url.searchParams.get("suite")).toBe("s/1");
+});
+
 it("uses PATCH and DELETE with the CSRF header and maps 403/409/404", async () => {
   const calls: { path: string; init: RequestInit }[] = [];
   const transport = vi.fn<Transport>(async (path, init) => {

@@ -180,6 +180,8 @@ export function createSessionStore(
       invitations,
       passwordReset,
       forgotPassword,
+      changePassword: (current: string, password: string) =>
+        repository.changePassword(current, password),
       resetPassword,
       lookupInvitation,
       acceptInvitation,

@@ -3,6 +3,7 @@ import {
   ChevronRight,
   ClipboardList,
   FileUp,
+  FolderPlus,
   ListFilter,
   Plus,
   RefreshCw,
@@ -14,7 +15,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
 import { automationStatuses, priorities, type Priority } from "./enums";
-import type { TestCase } from "./testmgmtRepository";
+import type { Suite, TestCase } from "./testmgmtRepository";
 import { useMutation } from "./useMutation";
 import { useProjectPermission } from "../reports/useProjectPermission";
 import AsyncState from "../../shared/AsyncState.vue";
@@ -38,10 +39,11 @@ const canWrite = useProjectPermission("testmgmt.write");
 
 // Filters are URL state so a filtered list is a shareable link.
 const q = computed(() => String(route.query.q ?? ""));
+const suite = computed(() => String(route.query.suite ?? ""));
 const automation = computed(() => String(route.query.automation ?? ""));
 const critical = computed(() => String(route.query.critical ?? ""));
 const filtered = computed(
-  () => !!(q.value || automation.value || critical.value),
+  () => !!(q.value || suite.value || automation.value || critical.value),
 );
 function setFilter(patch: Record<string, string>) {
   const query = { ...route.query, ...patch };
@@ -56,12 +58,14 @@ watch(search, (v) => {
 });
 
 const cases = useResource<TestCase[]>();
+const suites = useResource<Suite[]>();
 function refresh() {
   return cases.load((signal) =>
     testmgmt.testCases(
       project.value,
       {
         q: q.value,
+        suite: suite.value,
         automation: automation.value as never,
         critical: critical.value as never,
       },
@@ -69,17 +73,27 @@ function refresh() {
     ),
   );
 }
+function refreshSuites() {
+  return suites.load((signal) => testmgmt.suites(project.value, signal));
+}
 watch(
-  () => [project.value, q.value, automation.value, critical.value],
+  () => [project.value, q.value, suite.value, automation.value, critical.value],
   refresh,
   {
     immediate: true,
   },
 );
+watch(project, refreshSuites, { immediate: true });
 
 // Create + import live in two collapsible panels; both end in a refresh.
-const panel = ref<"" | "new" | "import">("");
-const draft = ref({ title: "", priority: "p2" as Priority, isCritical: false });
+const panel = ref<"" | "new" | "suite" | "import">("");
+const draft = ref({
+  title: "",
+  suiteId: "",
+  priority: "p2" as Priority,
+  isCritical: false,
+});
+const suiteName = ref("");
 const csv = ref("");
 const report = ref<null | Awaited<ReturnType<typeof testmgmt.importCsv>>>(null);
 const mutation = useMutation();
@@ -88,9 +102,25 @@ async function create() {
     testmgmt.createTestCase(project.value, { ...draft.value }, signal),
   );
   if (created) {
-    draft.value = { title: "", priority: "p2", isCritical: false };
+    draft.value = {
+      title: "",
+      suiteId: "",
+      priority: "p2",
+      isCritical: false,
+    };
     panel.value = "";
     await router.push(`${base()}/cases/${encodeURIComponent(created.id)}`);
+  }
+}
+async function createSuite() {
+  const created = await mutation.run("suite", (signal) =>
+    testmgmt.createSuite(project.value, suiteName.value.trim(), signal),
+  );
+  if (created) {
+    suiteName.value = "";
+    await refreshSuites();
+    draft.value.suiteId = created.id;
+    panel.value = "new";
   }
 }
 async function importSheet() {
@@ -118,6 +148,13 @@ const label = (s: string) => s.replaceAll("_", " ");
   >
     <Button
       v-if="canWrite"
+      :variant="panel === 'suite' ? 'secondary' : 'outline'"
+      size="sm"
+      @click="panel = panel === 'suite' ? '' : 'suite'"
+      ><FolderPlus />New suite</Button
+    >
+    <Button
+      v-if="canWrite"
       :variant="panel === 'import' ? 'secondary' : 'outline'"
       size="sm"
       @click="panel = panel === 'import' ? '' : 'import'"
@@ -142,8 +179,33 @@ const label = (s: string) => s.replaceAll("_", " ");
   <TmTabs :project="project" current="cases" />
 
   <form
+    v-if="canWrite && panel === 'suite'"
+    class="bg-card mb-5 grid gap-4 rounded-lg border p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+    @submit.prevent="createSuite"
+  >
+    <div class="space-y-2">
+      <Label for="new-suite-name">Suite name</Label>
+      <Input
+        id="new-suite-name"
+        v-model="suiteName"
+        required
+        maxlength="200"
+        placeholder="Checkout"
+      />
+    </div>
+    <Button type="submit" size="sm" :disabled="mutation.busy.value !== null"
+      >Create suite</Button
+    >
+    <ErrorNote
+      v-if="mutation.error.value?.key === 'suite'"
+      class="sm:col-span-2"
+      :error="mutation.error.value.error"
+    />
+  </form>
+
+  <form
     v-if="canWrite && panel === 'new'"
-    class="bg-card mb-5 grid gap-4 rounded-lg border p-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto_auto] sm:items-end"
+    class="bg-card mb-5 grid gap-4 rounded-lg border p-4 md:grid-cols-[minmax(0,1fr)_minmax(10rem,16rem)_8rem_auto_auto] md:items-end"
     @submit.prevent="create"
   >
     <div class="space-y-2">
@@ -155,6 +217,20 @@ const label = (s: string) => s.replaceAll("_", " ");
         maxlength="500"
         placeholder="What the tester checks"
       />
+    </div>
+    <div class="space-y-2">
+      <Label for="new-suite">Suite</Label>
+      <NativeSelect
+        id="new-suite"
+        v-model="draft.suiteId"
+        class="w-full"
+        :disabled="suites.loading.value"
+      >
+        <option value="">No suite</option>
+        <option v-for="s in suites.data.value ?? []" :key="s.id" :value="s.id">
+          {{ s.name }}
+        </option>
+      </NativeSelect>
     </div>
     <div class="space-y-2">
       <Label for="new-priority">Priority</Label>
@@ -175,7 +251,7 @@ const label = (s: string) => s.replaceAll("_", " ");
     >
     <ErrorNote
       v-if="mutation.error.value?.key === 'new'"
-      class="sm:col-span-4"
+      class="md:col-span-5"
       :error="mutation.error.value.error"
     />
   </form>
@@ -246,7 +322,7 @@ const label = (s: string) => s.replaceAll("_", " ");
   </form>
 
   <form
-    class="mb-4 flex flex-col gap-3 md:flex-row md:items-end"
+    class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1fr)_minmax(10rem,14rem)_12rem_9rem_auto] xl:items-end"
     role="search"
     @submit.prevent
   >
@@ -264,6 +340,20 @@ const label = (s: string) => s.replaceAll("_", " ");
         placeholder="Search title or key…"
         maxlength="200"
       />
+    </label>
+    <label class="flex flex-col gap-1.5 text-xs font-medium">
+      <span class="text-muted-foreground">Suite</span>
+      <NativeSelect
+        class="w-full"
+        :model-value="suite"
+        :disabled="suites.loading.value"
+        @update:model-value="setFilter({ suite: $event })"
+      >
+        <option value="">All suites</option>
+        <option v-for="s in suites.data.value ?? []" :key="s.id" :value="s.id">
+          {{ s.name }} ({{ s.cases }})
+        </option>
+      </NativeSelect>
     </label>
     <label class="flex flex-col gap-1.5 text-xs font-medium">
       <span class="text-muted-foreground">Automation</span>
@@ -297,7 +387,7 @@ const label = (s: string) => s.replaceAll("_", " ");
       type="button"
       @click="
         search = '';
-        setFilter({ q: '', automation: '', critical: '' });
+        setFilter({ q: '', suite: '', automation: '', critical: '' });
       "
       ><ListFilter />Clear</Button
     >

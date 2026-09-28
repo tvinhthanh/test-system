@@ -255,6 +255,16 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-29 (change password)
+
+- Security page "Password": current + new twice; this browser stays signed
+  in, others are signed out; wrong current, too short, OAuth-only and rate
+  limit each explained. `SessionRepository.changePassword`, store method,
+  fixture, `password.test.ts` (a WRONG_PASSWORD 400 never triggers the
+  sign-out handler).
+- live-check: wrong current → 400 shown, change, change back, still signed
+  in; the one extra allowed non-2xx is that deliberate 400.
+
 ### 2026-09-28 (shadow meter, QĐ-13)
 
 - `/team/organizations/:organization/usage` "Usage (shadow meter)", linked

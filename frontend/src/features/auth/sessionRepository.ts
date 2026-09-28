@@ -131,6 +131,13 @@ export class SessionRepository {
       body: { token, password },
     });
   }
+  // §11.2: the signed-in person changes their own password; other
+  // sessions end, this one stays.
+  async changePassword(current: string, password: string) {
+    await this.api.request("/v1/session/password", {
+      body: { current, password },
+    });
+  }
   async logout() {
     await this.api.request("/v1/session/logout", { body: {} });
   }
