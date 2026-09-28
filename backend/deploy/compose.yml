@@ -10,9 +10,12 @@
 # Every image is pinned to a version. Application containers run as the
 # distroless `nonroot` user with a read-only root filesystem, no
 # capabilities and no-new-privileges; nothing but Caddy publishes a port.
-# Postgres speaks plaintext inside the compose network, which is why this is
-# APP_ENV=staging: prod refuses sslmode=disable (config) and needs a TLS
-# database (managed Postgres or a TLS-enabled server) — see deploy/README.md.
+# Postgres speaks only TLS on the network (§11.5): the one-shot `pgtls`
+# makes a private CA and a server certificate in the `pgtls` volume,
+# pg_hba refuses plaintext, and every client connects with
+# sslmode=verify-full against that CA — so APP_ENV=prod runs on this file as
+# is (config refuses prod without verify-full). A managed Postgres instead:
+# drop `postgres`/`pgtls` and point DATABASE_URL at it — see deploy/README.md.
 
 name: atp
 
@@ -24,7 +27,7 @@ x-app: &app
   env_file: .env
   environment:
     APP_ENV: ${APP_ENV:-staging}
-    DATABASE_URL: postgres://atp:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/atp?sslmode=disable
+    DATABASE_URL: postgres://atp:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/atp?sslmode=verify-full&sslrootcert=/tls/ca.crt
     HTTP_ADDR: ":8080"
     METRICS_ADDR: ":9090"
     OBJSTORE_MEMORY_ADDR: ":9100" # only read when OBJSTORE=memory (dev/CI without a bucket)
@@ -33,6 +36,8 @@ x-app: &app
     # proxy; the client is the address Caddy writes in X-Forwarded-For.
     # Without this every per-IP login limit counts Caddy once for everybody.
     TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
+  volumes:
+    - pgtls:/tls:ro # ca.crt, to check the database's certificate
   read_only: true
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
@@ -42,8 +47,34 @@ x-app: &app
     options: { max-size: "50m", max-file: "5" }
 
 services:
+  # The database's TLS material (cmd/pgtls): creates the CA once, re-issues
+  # the server certificate when it nears expiry or the names change, and
+  # exits. Root, so server.key can be root:70 0640 for Postgres (CAP_CHOWN is
+  # the one capability kept); ca.key never leaves this volume's root-only
+  # file. After a renewal, `docker compose restart postgres`.
+  pgtls:
+    <<: *app
+    entrypoint: ["/app/pgtls", "-dir", "/tls", "-hosts", "postgres,localhost,127.0.0.1", "-group", "70"]
+    user: "0:0"
+    cap_add: [CHOWN]
+    volumes:
+      - pgtls:/tls
+    restart: "no"
+    healthcheck: { disable: true }
+
   postgres:
     image: postgres:17.5-alpine
+    # TLS on, and a pg_hba that accepts network clients only over TLS.
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/tls/server.crt
+      - -c
+      - ssl_key_file=/tls/server.key
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
     environment:
       POSTGRES_USER: atp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
@@ -55,6 +86,11 @@ services:
       LANG: en_US.UTF-8
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - pgtls:/tls:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    depends_on:
+      pgtls:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atp -d atp"]
       interval: 10s
@@ -148,13 +184,14 @@ services:
   backup:
     image: postgres:17.5-alpine
     environment:
-      DATABASE_URL: postgres://atp:${POSTGRES_PASSWORD:?}@postgres:5432/atp?sslmode=disable
+      DATABASE_URL: postgres://atp:${POSTGRES_PASSWORD:?}@postgres:5432/atp?sslmode=verify-full&sslrootcert=/tls/ca.crt
       BACKUP_DIR: /backups
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
     entrypoint: ["/bin/sh", "-c", "while true; do /backup/backup.sh || echo 'backup failed' >&2; sleep 86400; done"]
     volumes:
       - ./backup:/backup:ro
       - backups:/backups
+      - pgtls:/tls:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -162,6 +199,7 @@ services:
 
 volumes:
   pgdata:
+  pgtls:
   promdata:
   backups:
   caddy_data:

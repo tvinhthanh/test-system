@@ -8,6 +8,7 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -178,8 +179,17 @@ func (c Config) validate() error {
 	if !strings.HasPrefix(c.DatabaseURL, "postgres://") && !strings.HasPrefix(c.DatabaseURL, "postgresql://") {
 		errs = append(errs, "DATABASE_URL: want a postgres:// URL")
 	}
-	if c.Env == "prod" && strings.Contains(c.DatabaseURL, "sslmode=disable") {
-		errs = append(errs, "DATABASE_URL: sslmode=disable is not allowed when APP_ENV=prod (§11.5)")
+	// prod talks to Postgres over TLS that checks the server (§11.5): not only
+	// "not disable" — pgx's default (prefer) and require fall back to, or
+	// accept, anyone on the path.
+	if c.Env == "prod" {
+		mode := ""
+		if u, err := url.Parse(c.DatabaseURL); err == nil {
+			mode = u.Query().Get("sslmode")
+		}
+		if mode != "verify-full" && mode != "verify-ca" {
+			errs = append(errs, fmt.Sprintf("DATABASE_URL: sslmode=%q is not allowed when APP_ENV=prod; want verify-full (or verify-ca) with sslrootcert (§11.5)", mode))
+		}
 	}
 	if len(c.TokenPepper) < 32 {
 		errs = append(errs, "TOKEN_PEPPER: want at least 32 bytes")

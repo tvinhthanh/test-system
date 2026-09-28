@@ -280,7 +280,7 @@ Ngoài ra `(project, localRunId)` là duy nhất *theo project*: org B dùng l�
 | API5 Function-level | viewer gọi endpoint maintainer → 403 | bob viewer → `triage-events` 403 ✅; member gọi merge/decide → 403 `FORBIDDEN` ✅ (18-09); **22-09 sáu role §11.3.1**: `TestMatrixMatchesSpec` chép sáu cột §11.3.2 kể cả hàng không bậc thang (`data.delete`: ws_admin ❌, maintainer ✅), `TestMembershipsAgainstPostgres` đi org_owner/org_admin/workspace_admin/maintainer + hợp membership; `api_test` kiểm `actions[]` của member/viewer/maintainer; migration 0015 chạy thật trên DB có hàng P1-min; **27-09** member/maintainer gọi `…/members` → 403 `FORBIDDEN`, ws_admin được (`members_test.go`) |
 | API6 Business flow | đăng ký/mời/quên mật khẩu có rate limit | P1-min **không có** các flow này (user do admin CLI tạo) — N/A, ghi để không quên khi thêm |
 | API7 SSRF | grep: không outbound fetch từ input | **mới**: `TestNoOutboundHTTPFromDomainModules` — `internal/` không dùng `http.Client`/`Get`/`NewRequest` ngoài `platform/objstore` ✅ |
-| API8 Misconfig | checklist config | config từ chối `sslmode=disable`, pepper dev, `COOKIE_SECURE=false` ngoài dev ✅; container non-root/pin/healthcheck + TLS proxy + `.env.example` (`deploy/`, dựng thật 17-09) ✅; `httpx.BrowserPolicy` — `nosniff`, `no-store`, `Referrer-Policy`, `X-Frame-Options`, HSTS khi cookie Secure, CORS chỉ cho `DASHBOARD_ORIGINS` (không bao giờ `*`, preflight từ origin lạ → 403), `TestBrowserPolicyHeadersAndCORS` ✅ |
+| API8 Misconfig | checklist config | config từ chối prod không `sslmode=verify-full|verify-ca` (28-09: trước chỉ chặn `disable`, nên thiếu sslmode = `prefer` lọt qua), pepper dev, `COOKIE_SECURE=false` ngoài dev ✅; container non-root/pin/healthcheck + TLS proxy + `.env.example` (`deploy/`, dựng thật 17-09) ✅; `httpx.BrowserPolicy` — `nosniff`, `no-store`, `Referrer-Policy`, `X-Frame-Options`, HSTS khi cookie Secure, CORS chỉ cho `DASHBOARD_ORIGINS` (không bao giờ `*`, preflight từ origin lạ → 403), `TestBrowserPolicyHeadersAndCORS` ✅ |
 | API9 Inventory | chỉ `/v1/`, diff mỗi release, token `lastUsedAt` | **mới**: `deploy/routes.txt` = inventory, `TestRouteInventoryMatchesFile` fail nếu route mount khác file ✅; `api_tokens.last_used_at` cập nhật ≤ 5 phút/lần ✅. **`deploy/openapi.yaml`** (OpenAPI 3.1, 21 operation, cả hai nửa reporter + dashboard) là nguồn sự thật từ 17-09. Bản nháp đầu bị review (`docs/openapi-contract-reimplementation.md`) bắt 2 lỗi thật — cookie tên `atp_sess` (server đọc `atp_session`; `atp_sess_` chỉ là prefix của *giá trị*) và `sequence` khai `minimum: 1` trong khi validator nhận 0 — sửa 18-09: doc đúng, validator từ chối `sequence <= 0` (`TestEventSequenceBoundary`: thiếu/−1/0 → 400 `INVALID_PAYLOAD` `events[0].sequence`; 1 và 42 nhận; lặp 1 → duplicate, không lưu hai lần), test parse **cấu trúc** bằng `gopkg.in/yaml.v3` (không còn scanner theo indent): `TestOpenAPIMatchesMountedRoutes` hai chiều, `TestOpenAPIBindsSharedLiterals` (cookie = `authz.SessionCookie`, header = `authz.CSRFHeader`, `atp_csrf` được gọi tên, `Event.sequence` minimum 1 và required), `TestOpenAPIIsInternallyConsistent` (144 `$ref` resolve, 21 `operationId` duy nhất); mã lỗi trong doc đối chiếu từng handler (`INVALID_CREDENTIALS`, `AUTH_UNAVAILABLE`, `TOKEN_SCOPE`, `INVALID_QUERY`…); `redocly lint` xanh trong CI; `routes.txt` giữ lại làm inventory phẳng để diff nhanh |
 | API10 Unsafe consumption | LLM trả rác → bị loại | P1.5 (chưa có LLM) — N/A |
 
@@ -362,8 +362,21 @@ thành counter `ingest_events_by_token_total{project,token}` + rule
 event/ngày). `promtool check config` xanh (22 rule), chạy trong CI. Còn ngoài code:
 đăng ký prefix `atp_ing_` với GitHub Secret Scanning khi có user ngoài.
 
-**Còn mở (§11.5, §11.7):** prod cần Postgres có TLS (`APP_ENV=prod` từ chối
-`sslmode=disable`; compose là staging); copy volume `backups` ra khỏi host;
+**Postgres TLS ✅ 28-09:** compose giờ chạy được `APP_ENV=prod` nguyên trạng.
+`cmd/pgtls` (stdlib, trong image) tạo CA riêng + cert server (`postgres`,
+`localhost`, `127.0.0.1`) vào volume `pgtls`, idempotent (giữ CA, cấp lại cert
+khi còn < 30 ngày hoặc đổi tên); `deploy/postgres/pg_hba.conf` chỉ nhận
+`hostssl` + SCRAM, `hostnossl … reject`; api/worker/migrate/admin/backup nối
+`sslmode=verify-full&sslrootcert=/tls/ca.crt`. Kiểm trên Docker Desktop từ volume
+rỗng: 6/6 connection của app là TLSv1.3 (`pg_stat_ssl`); `sslmode=disable` →
+`pg_hba.conf rejects … no encryption`; `verify-full` tới IP container → "does
+not match host name"; `backup.sh` chạy qua TLS; `migrate` dưới `APP_ENV=prod`
+chạy, prod + `sslmode=disable` dừng ngay lúc boot. Lần kiểm đầu bắt một lỗi:
+key `70:70 0600` làm `pgtls` (root không `CAP_DAC_OVERRIDE`) không đọc lại được
+→ cấp cert mới mỗi lần `up`; giờ key là `root:70 0640` (dạng thứ hai Postgres
+chấp nhận).
+
+**Còn mở (§11.5, §11.7):** copy volume `backups` ra khỏi host;
 pentest thuê ngoài trước khách trả phí đầu tiên.
 
 ## T5 — soak ⏳ 17-09-2026: harness chạy sạch 20 phút trên laptop; 24–72 h cần host riêng

@@ -14,7 +14,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -ldflags='-s -w' -o /out/ ./cmd/api ./cmd/worker ./cmd/migrate ./cmd/admin ./cmd/healthcheck
+    go build -ldflags='-s -w' -o /out/ ./cmd/api ./cmd/worker ./cmd/migrate ./cmd/admin ./cmd/healthcheck ./cmd/pgtls
 
 # Stage 2: distroless static — no shell, no package manager, runs as the
 # unprivileged `nonroot` user (uid 65532). The image is the same for api,

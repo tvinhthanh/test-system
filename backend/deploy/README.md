@@ -1,7 +1,8 @@
 # deploy/ — hình dạng triển khai (SPEC §6.1, §11.5)
 
 Một image, mọi binary (`Dockerfile`); một `compose.yml` dựng đủ staging:
-Postgres 17.5 (locale UTF-8 — điều kiện của identity), `migrate` chạy một lần
+Postgres 17.5 (locale UTF-8 — điều kiện của identity; **chỉ nhận TLS**, cert do
+`pgtls` chạy một lần tạo), `migrate` chạy một lần
 rồi thoát, `api`, `worker`, Prometheus với rule §6.4 (`prometheus/alerts.yml`),
 Caddy là listener TLS duy nhất (phục vụ `frontend/dist`, proxy `/v1`), và
 container `backup` chạy `backup/backup.sh` mỗi ngày. Đã dựng và kiểm thật
@@ -40,6 +41,7 @@ chờ nó xong (`service_completed_successfully`) rồi mới lên.
 | TLS mọi nơi + HSTS | Caddy tự lấy cert cho `DOMAIN` (Let's Encrypt; `localhost` → CA nội bộ), http→https; HSTS do api phát (`httpx.BrowserPolicy`, khi `COOKIE_SECURE=true`) |
 | CORS chỉ origin dashboard | `DASHBOARD_ORIGINS` — config từ chối `*` |
 | Không leak stack/SQL | `httpx.Cause` → log một dòng ERROR, client nhận thông điệp chung |
+| TLS tới Postgres | `pgtls` (`cmd/pgtls`) tạo CA + cert server vào volume `pgtls`; `postgres/pg_hba.conf` chỉ `hostssl` + SCRAM; mọi client `sslmode=verify-full&sslrootcert=/tls/ca.crt` |
 | Secrets qua env, có `.env.example` | `deploy/.env.example`; `deploy/.env` bị `.gitignore` |
 | Log có correlation id, không token | access log `request_id`; T3 kiểm log không lộ bí mật |
 | Container non-root, image pin, healthcheck | distroless `nonroot` (uid 65532), mọi image pin tag, `HEALTHCHECK` bằng `cmd/healthcheck` (distroless không có curl); `read_only`, `cap_drop ALL`, `no-new-privileges` |
@@ -52,10 +54,14 @@ trong compose) và `OBJSTORE_ENDPOINT=https://$DOMAIN/_objstore` — Caddy chuy�
 Object mất khi api restart; chỉ để demo và cho job `e2e` của CI. Đổi Caddyfile
 phải `docker compose restart caddy` — bind mount không tự reload.
 
-**Prod khác staging ở đâu:** `APP_ENV=prod` từ chối `sslmode=disable` — compose
-này nói plaintext với Postgres trong mạng riêng nên là `staging`. Prod cần
-Postgres có TLS (managed, hoặc server bật `ssl=on`) và `DATABASE_URL` với
-`sslmode=verify-full`; còn lại giữ nguyên. Volume `backups` phải được copy ra
+**Prod khác staging ở đâu:** `APP_ENV=prod` đòi `DATABASE_URL` có
+`sslmode=verify-full` (hoặc `verify-ca`) — compose này đã nối như vậy, nên prod
+chạy nguyên trạng khi có `OBJSTORE=s3` thật và `COOKIE_SECURE=true`. CA của
+`pgtls` sống trong volume `pgtls` (20 năm, không bao giờ tự thay); cert server 5
+năm, `pgtls` cấp lại khi còn < 30 ngày ở lần `up` kế tiếp — sau đó
+`docker compose restart postgres` (Postgres đọc cert lúc khởi động). Dùng
+Postgres managed thì bỏ service `postgres` + `pgtls`, đặt `DATABASE_URL` với
+`sslmode=verify-full&sslrootcert=<CA của nhà cung cấp>`. Volume `backups` phải được copy ra
 khỏi host (object storage có versioning) — backup cùng đĩa với DB không phải
 backup. WAF/bot management: §11.7, chưa cần ở quy mô design partner.
 
@@ -67,7 +73,8 @@ chạy trong compose mà chạy cạnh nó, trỏ vào Postgres của compose (m
 host qua `docker compose exec`). Ví dụ soak 24 h với S3 thật:
 
 ```bash
-export TEST_DATABASE_URL="postgres://atp:$POSTGRES_PASSWORD@127.0.0.1:5432/atp?sslmode=disable"
+docker compose -f deploy/compose.yml --env-file deploy/.env cp pgtls:/tls/ca.crt ./pg-ca.crt   # CA để kiểm server
+export TEST_DATABASE_URL="postgres://atp:$POSTGRES_PASSWORD@127.0.0.1:5432/atp?sslmode=verify-full&sslrootcert=$PWD/pg-ca.crt"
 SOAK_TEST=1 SOAK_DURATION=24h SOAK_SAMPLE=1m SOAK_JOB_RETENTION=1h \
 SOAK_OBJSTORE=s3 OBJSTORE_ENDPOINT=… OBJSTORE_BUCKET=… OBJSTORE_ACCESS_KEY=… OBJSTORE_SECRET_KEY=… \
 go test -count=1 -v -timeout 80h ./test/soak/ | tee soak-24h.log

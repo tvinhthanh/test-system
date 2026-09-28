@@ -28,6 +28,8 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		{"bad metrics addr", map[string]string{"METRICS_ADDR": "9090"}, "METRICS_ADDR"},
 		{"not a postgres url", map[string]string{"DATABASE_URL": "mysql://x"}, "DATABASE_URL"},
 		{"prod without tls", map[string]string{"APP_ENV": "prod", "DATABASE_URL": "postgres://u:p@h/db?sslmode=disable"}, "sslmode"},
+		{"prod with the default sslmode (prefer)", map[string]string{"APP_ENV": "prod", "DATABASE_URL": "postgres://u:p@h/db"}, "sslmode"},
+		{"prod with require (no server check)", map[string]string{"APP_ENV": "prod", "DATABASE_URL": "postgres://u:p@h/db?sslmode=require"}, "sslmode"},
 		{"short pepper", map[string]string{"TOKEN_PEPPER": "short"}, "TOKEN_PEPPER"},
 		{"dev pepper outside dev", map[string]string{"APP_ENV": "staging", "DATABASE_URL": "postgres://u:p@h/db"}, "TOKEN_PEPPER"},
 		{"memory store outside dev", map[string]string{"APP_ENV": "staging", "DATABASE_URL": "postgres://u:p@h/db", "TOKEN_PEPPER": "0123456789abcdef0123456789abcdef"}, "OBJSTORE=memory"},
@@ -79,5 +81,25 @@ func TestOAuthSwitches(t *testing.T) {
 	c, err = Load()
 	if err != nil || !c.OAuthGitHub.Enabled || c.OAuthGoogle.Enabled || c.OAuthGitHub.ClientID != "gh-id" || c.PublicURL != "http://localhost:5173" {
 		t.Errorf("github on: %+v %v", c, err)
+	}
+}
+
+// A prod configuration that checks the database's certificate loads.
+func TestProdAcceptsVerifiedTLS(t *testing.T) {
+	for _, mode := range []string{"verify-full", "verify-ca"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("APP_ENV", "prod")
+			t.Setenv("DATABASE_URL", "postgres://u:p@postgres:5432/atp?sslmode="+mode+"&sslrootcert=/tls/ca.crt")
+			t.Setenv("TOKEN_PEPPER", "0123456789abcdef0123456789abcdef")
+			t.Setenv("OBJSTORE", "s3")
+			t.Setenv("OBJSTORE_ENDPOINT", "https://s3.example.com")
+			t.Setenv("OBJSTORE_BUCKET", "atp")
+			t.Setenv("OBJSTORE_ACCESS_KEY", "k")
+			t.Setenv("OBJSTORE_SECRET_KEY", "s")
+			t.Setenv("DASHBOARD_ORIGINS", "https://atp.example.com")
+			if _, err := Load(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
