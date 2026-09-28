@@ -234,6 +234,64 @@ await step(
 );
 
 await step(
+  "CI tokens follow token.manage; a maintainer issues one (secret shown once) and revokes it (§11.3.2, §11.4)",
+  async () => {
+    const actions = await page.evaluate(async (id) => {
+      const r = await fetch("/v1/projects?limit=100", {
+        credentials: "same-origin",
+      });
+      const body = await r.json();
+      return body.items.find((p) => p.id === id)?.actions ?? [];
+    }, project);
+    const manage = actions.includes("token.manage");
+    const nav = page.getByRole("link", { name: "CI tokens" });
+    await nav
+      .first()
+      .waitFor({ state: "visible", timeout: manage ? 10000 : 1500 })
+      .catch(() => undefined);
+    if (manage !== (await nav.count()) > 0)
+      throw new Error(
+        `actions ${JSON.stringify(actions)} but ${await nav.count()} CI tokens link(s)`,
+      );
+    if (!manage) return;
+    await nav.first().click();
+    await page
+      .locator(".token-new")
+      .waitFor({ state: "visible", timeout: 10000 });
+    const name = "live-check " + Date.now();
+    await page.fill("#token-name", name);
+    await Promise.all([
+      page.waitForResponse(v1(/^\/v1\/projects\/[^/]+\/tokens$/, 201), {
+        timeout: 10000,
+      }),
+      page.getByRole("button", { name: "Issue token" }).click(),
+    ]);
+    const secret = await page
+      .locator(".token-secret input")
+      .inputValue({ timeout: 5000 });
+    if (!secret.startsWith("atp_ing_"))
+      throw new Error("no secret shown after issuing: " + secret.slice(0, 12));
+    const row = page.locator(".token-table tr", { hasText: name });
+    await row.waitFor({ state: "visible", timeout: 5000 });
+    if ((await page.locator(".token-table").textContent()).includes(secret))
+      throw new Error("the list shows the full secret");
+    await row.getByRole("button", { name: "Revoke" }).click();
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.request().method() === "DELETE" &&
+          /\/tokens\/[^/]+$/.test(new URL(r.url()).pathname) &&
+          r.status() === 204,
+        { timeout: 10000 },
+      ),
+      row.getByRole("button", { name: "Confirm revoke" }).click(),
+    ]);
+    await row.getByText("revoked").waitFor({ timeout: 5000 });
+    await page.screenshot({ path: "test-results/live-tokens.png" });
+  },
+);
+
+await step(
   "ROI: no baseline says so; a measured one recorded by a maintainer turns into hours (§6.8.3, QĐ-13)",
   async () => {
     await page.goto(base + "/p/" + project + "/roi");
@@ -676,6 +734,7 @@ const bad = calls.filter(
     !/POST \/v1\/session → 401$/.test(c) &&
     !/POST \/v1\/session\/password → 400$/.test(c),
 );
+z;
 if (bad.length) {
   console.log(
     "\nunexpected statuses (only the deliberate wrong-password 401 and 400 are allowed):",

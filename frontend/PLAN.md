@@ -255,6 +255,18 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-29 (CI tokens)
+
+- `/p/:project/tokens` "CI tokens" (nav only with `token.manage`): issue
+  (name, 30/90/365 days, optional release-gate read), the secret shown once
+  with Copy and the ATP_TOKEN hint, list with prefix / last used / expiry /
+  status, revoke with a confirm click. `TokensRepository` (strict decode),
+  fixture, `tokens.test.ts`.
+- `format.day()`: a date with its year — the first screenshot showed a
+  one-year token "expiring 29 Sept, 01:16", i.e. apparently today.
+- live-check: issue → secret shown → only the prefix listed → revoke →
+  "revoked".
+
 ### 2026-09-29 (change password)
 
 - Security page "Password": current + new twice; this browser stays signed

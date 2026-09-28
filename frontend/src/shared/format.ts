@@ -14,6 +14,16 @@ const formatter = new Intl.DateTimeFormat("en-GB", {
 export function time(value: string) {
   return formatter.format(new Date(value));
 }
+// A calendar day with its year — for dates that can be months away (a token
+// expiring next year must not read like today).
+const dayFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+export function day(value: string) {
+  return dayFormatter.format(new Date(value));
+}
 export function short(value: string) {
   return value.slice(0, 8);
 }

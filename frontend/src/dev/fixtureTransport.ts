@@ -288,6 +288,47 @@ export function createFixtureTransport(): Transport {
         fewTriaged: false,
         minTriaged: 10,
       });
+    // CI tokens: one live, one revoked; issuing echoes a fake secret.
+    if (/^\/v1\/projects\/[^/]+\/tokens(?:\/[^/]+)?$/.test(path)) {
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      const t = (id: string, name: string, revoked: string | null) => ({
+        id,
+        prefix: "atp_ing_" + id.slice(0, 8),
+        name,
+        permissions: ["project:ingest"],
+        createdAt: "2026-09-01T08:00:00Z",
+        lastUsedAt: revoked ? null : "2026-09-28T21:14:00Z",
+        expiresAt: "2027-09-01T08:00:00Z",
+        revokedAt: revoked,
+      });
+      if (init?.method === "POST")
+        return response(
+          {
+            token: t(
+              "c0ffee00-0000-4000-8000-000000000003",
+              "new pipeline",
+              null,
+            ),
+            secret: "atp_ing_c0ffee00" + "x".repeat(40),
+          },
+          201,
+        );
+      return response({
+        items: [
+          t(
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "github-actions main",
+            null,
+          ),
+          t(
+            "e5f6a7b8-0000-4000-8000-000000000002",
+            "old jenkins",
+            "2026-09-10T08:00:00Z",
+          ),
+        ],
+        nextCursor: null,
+      });
+    }
     // JUnit upload: always "imported" into the first fixture run, so the
     // sheet's result and its link can be seen offline.
     if (/^\/v1\/projects\/[^/]+\/imports\/junit$/.test(path))

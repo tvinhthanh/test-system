@@ -12,6 +12,7 @@ import { TeamAccess } from "./features/members/teamAccess";
 import { MfaRepository } from "./features/account/mfaRepository";
 import { IdentitiesRepository } from "./features/account/identitiesRepository";
 import { MeterRepository } from "./features/billing/meterRepository";
+import { TokensRepository } from "./features/tokens/tokensRepository";
 import { servicesKey } from "./app/providers/services";
 import { makeRouter } from "./app/router";
 import "./shared/theme.css";
@@ -51,6 +52,7 @@ async function start() {
     mfa: new MfaRepository(api),
     identities: new IdentitiesRepository(api),
     meter: new MeterRepository(api),
+    tokens: new TokensRepository(api),
     fixture,
   });
   app.use(router);

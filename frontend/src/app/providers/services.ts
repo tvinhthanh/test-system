@@ -7,6 +7,7 @@ import type { MfaRepository } from "../../features/account/mfaRepository";
 import type { TeamAccess } from "../../features/members/teamAccess";
 import type { IdentitiesRepository } from "../../features/account/identitiesRepository";
 import type { MeterRepository } from "../../features/billing/meterRepository";
+import type { TokensRepository } from "../../features/tokens/tokensRepository";
 import type { createSessionStore } from "../../features/auth/sessionStore";
 
 export interface Services {
@@ -18,6 +19,7 @@ export interface Services {
   teamAccess: TeamAccess;
   identities: IdentitiesRepository;
   meter: MeterRepository;
+  tokens: TokensRepository;
   session: ReturnType<ReturnType<typeof createSessionStore>>;
   fixture: boolean;
 }

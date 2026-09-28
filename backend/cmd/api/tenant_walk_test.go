@@ -55,6 +55,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		userID  string
 		orgID   string
 		wsID    string
+		tokenID string
 	}
 	seed := func(slug, email, password string) org {
 		o, err := ten.CreateOrganization(ctx, strings.ToUpper(slug), slug)
@@ -75,7 +76,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			t.Fatalf("login %s: %d %s", email, r.code, r.raw)
 		}
 		c.csrf, _ = c.get("/v1/session").body["csrfToken"].(string)
-		return org{project: p.ID, token: tok.Plaintext, user: c, userID: u.ID, orgID: string(o.ID), wsID: string(ws.ID)}
+		return org{project: p.ID, token: tok.Plaintext, tokenID: tok.Token.ID, user: c, userID: u.ID, orgID: string(o.ID), wsID: string(ws.ID)}
 	}
 	a := seed("alpha", "a@alpha.example", "alpha passphrase long enough")
 	b := seed("beta", "b@beta.example", "beta passphrase long enough")
@@ -153,6 +154,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"userId":      a.userID,
 		"workspaceId": a.wsID, "organizationId": a.orgID,
 		"invitationId": inviteA.ID,
+		"tokenId":      a.tokenID,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -188,6 +190,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/organizations/{organizationId}/members": map[string]any{"email": "a@alpha.example", "role": "org_admin"},
 		// JUnit upload: the tenant check runs before the body is read.
 		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
+		"POST /v1/projects/{projectId}/tokens":        map[string]any{"name": "walk"},
 		// ROI baseline (§6.8.3, QĐ-13): a valid measurement, so only the tenant check refuses.
 		"POST /v1/projects/{projectId}/roi/baselines": map[string]any{"kind": "retrospective", "failures": 10, "medianMinutes": 180, "periodFrom": "2026-08-01", "periodTo": "2026-08-14"},
 	}

@@ -6,6 +6,7 @@ import {
   FolderGit2,
   Gauge,
   GitBranch,
+  KeyRound,
   LogOut,
   Scale,
   ShieldCheck,
@@ -75,6 +76,17 @@ const items = computed(() =>
             route.path.includes("/plans") ||
             route.path.includes("/releases"),
         },
+        // CI tokens: maintainers and up (§11.3.2 token.manage).
+        ...(projectAccess.can(props.project, "token.manage")
+          ? [
+              {
+                to: `/p/${p.value}/tokens`,
+                label: "CI tokens",
+                icon: KeyRound,
+                active: route.path.endsWith("/tokens"),
+              },
+            ]
+          : []),
         // Only for those who may manage members (§11.3.2); others would
         // meet a 403 there.
         ...(projectAccess.can(props.project, "member.manage")

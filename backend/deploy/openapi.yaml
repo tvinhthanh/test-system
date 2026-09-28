@@ -40,6 +40,8 @@ tags:
     description: "Test Management Plane (§6.8, P2): requirements, manual test cases linked to TestIdentity, plans with manual executions, releases with the server-side quality gate. Session for people; the gate is also readable by a project:read token for CI."
   - name: members
     description: "Who can reach a project and with which role (§11.3). Project-level roles are granted and revoked here by holders of `member.manage`; every change is audited."
+  - name: tokens
+    description: API tokens for CI, managed from the dashboard by maintainers and up (§11.3.2, §11.4). The secret is shown once.
   - name: ops
     description: Liveness.
 
@@ -1865,6 +1867,79 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/tokens:
+    get:
+      operationId: listProjectTokens
+      tags: [tokens]
+      summary: The project's API tokens — prefix only, never the secret (§11.4)
+      description: Needs `token.manage` (maintainer and up, §11.3.2). Revoked and expired tokens are listed too, with their dates.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Tokens scoped to this project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ProjectToken" } }
+                  nextCursor: { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: issueProjectToken
+      tags: [tokens]
+      summary: Issue a project token for CI; the secret is in this answer and nowhere else
+      description: |
+        Needs `token.manage`. Default permission `project:ingest` (a reporter);
+        add `project:read` for a pipeline that reads a release gate. Default
+        lifetime 365 days (§11.4). The answer, like every /v1 answer, is
+        `Cache-Control: no-store`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                permissions: { type: array, items: { type: string, enum: ["project:ingest", "project:read"] } }
+                expiresInDays: { type: integer, minimum: 1, maximum: 365 }
+      responses:
+        "201":
+          description: Issued. Store the secret now; it is never shown again.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, secret]
+                properties:
+                  token: { $ref: "#/components/schemas/ProjectToken" }
+                  secret: { type: string, example: "atp_ing_…" }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/tokens/{tokenId}:
+    delete:
+      operationId: revokeProjectToken
+      tags: [tokens]
+      summary: Revoke a project token; audited with the session user (§11.7)
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: tokenId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Revoked (or already revoked). }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/test-cases/{testCaseId}:
     get:
       operationId: getTestCase
@@ -2354,6 +2429,18 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
+    ProjectToken:
+      type: object
+      required: [id, prefix, name, permissions, createdAt, lastUsedAt, expiresAt, revokedAt]
+      properties:
+        id: { type: string, format: uuid }
+        prefix: { type: string, description: "The first characters of the secret, to recognise it in a CI settings page." }
+        name: { type: string }
+        permissions: { type: array, items: { type: string, enum: ["project:ingest", "project:read"] } }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        expiresAt: { type: string, format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
     TTRCBaseline:
       type: object
       required: [id, kind, failures, medianMinutes, p90Minutes, rerunPassRate, flakyInvestigationMinutes, periodFrom, periodTo, note, enteredBy, enteredAt]

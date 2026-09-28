@@ -42,6 +42,10 @@ export function makeRouter(
             component: () => import("../../features/testmgmt/RoiPage.vue"),
           },
           {
+            path: "p/:project/tokens",
+            component: () => import("../../features/tokens/TokensPage.vue"),
+          },
+          {
             path: "p/:project/runs",
             component: () => import("../../features/reports/RunsPage.vue"),
           },

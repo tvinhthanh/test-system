@@ -329,6 +329,17 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
   token holding `project:read`.
 
+## CI tokens (§11.3.2, §11.4, implemented 2026-09-29)
+
+`GET /v1/projects/{projectId}/tokens` → `{items: [{id, prefix, name,
+permissions, createdAt, lastUsedAt|null, expiresAt, revokedAt|null}]}`;
+`POST` `{name, permissions?: ["project:ingest"|"project:read"], expiresInDays?:
+1–365}` → `201 {token, secret}` — the only time the secret is sent;
+`DELETE …/tokens/{tokenId}` → `204`. All need `token.manage` in the project's
+`actions[]` (the nav shows "CI tokens" only then); a token id of another
+project is `404`. `prefix` already includes `atp_ing_`. Dates that can be
+months away use `format.day()` (with the year).
+
 ## Members (§11.3.2, implemented 2026-09-27)
 
 Every route needs `member.manage` (workspace admin, org admin, owner; not a
