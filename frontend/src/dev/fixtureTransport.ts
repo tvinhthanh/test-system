@@ -56,6 +56,17 @@ let fixtureMembers = [
   userId: i === 0 ? user.id : `preview-user-${i}`,
   createdAt: new Date(Date.UTC(2026, 7, 20 + i * 5)).toISOString(),
 }));
+let fixtureInvitations = [
+  {
+    id: "invite-1",
+    email: "new.person@example.test",
+    role: "member",
+    level: "project",
+    invitedBy: "Alex Morgan",
+    createdAt: new Date(Date.UTC(2026, 8, 18, 8)).toISOString(),
+    expiresAt: new Date(Date.UTC(2026, 8, 25, 8)).toISOString(),
+  },
+];
 
 export function createFixtureTransport(): Transport {
   return async (input, init) => {
@@ -85,9 +96,58 @@ export function createFixtureTransport(): Transport {
       if (init?.method === "POST") sessionStorage.setItem(sessionKey, "in");
       return response({
         csrfToken: marker,
+        invitations: true,
+        passwordReset: true,
         providers: ["google", "github"],
         user: signedIn || init?.method === "POST" ? user : null,
       });
+    }
+    if (path === "/v1/session/password/forgot")
+      return response(
+        {
+          message:
+            "if an account uses that email, a link to choose a new password is on its way",
+        },
+        202,
+      );
+    if (path === "/v1/session/password/reset") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        password?: string;
+        token?: string;
+      };
+      if (!String(body.token ?? "").startsWith("atp_rst_"))
+        return response(
+          { error: { code: "RESET_NOT_FOUND", message: "not found" } },
+          404,
+        );
+      if (String(body.password ?? "").length < 12)
+        return response(
+          { error: { code: "INVALID_PASSWORD", message: "too short" } },
+          400,
+        );
+      sessionStorage.setItem(sessionKey, "out");
+      return new Response(null, { status: 204 });
+    }
+    if (path === "/v1/invitations/lookup")
+      return response({
+        email: "new.person@example.test",
+        role: "member",
+        level: "project",
+        scopeName: "Commerce Web (Acme Engineering)",
+        invitedBy: "Alex Morgan",
+        expiresAt: new Date(Date.UTC(2026, 8, 25, 8)).toISOString(),
+      });
+    if (path === "/v1/invitations/accept") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        password?: string;
+      };
+      if (String(body.password ?? "").length < 12)
+        return response(
+          { error: { code: "INVALID_PASSWORD", message: "too short" } },
+          400,
+        );
+      sessionStorage.setItem(sessionKey, "in");
+      return response({ csrfToken: marker, user });
     }
     if (!signedIn)
       return response(
@@ -322,6 +382,18 @@ export function createFixtureTransport(): Transport {
         nextCursor: null,
       });
     }
+    const invitations = path.match(
+      /^\/v1\/(projects|organizations|workspaces)\/[^/]+\/invitations(?:\/([^/]+))?$/,
+    );
+    if (invitations) {
+      if (init?.method === "DELETE") {
+        fixtureInvitations = fixtureInvitations.filter(
+          (i) => i.id !== invitations[2],
+        );
+        return new Response(null, { status: 204 });
+      }
+      return response({ items: fixtureInvitations, nextCursor: null });
+    }
     // §11.3 members: the preview user is a workspace admin, so the list
     // shows one inherited row next to the project's own.
     const mm = path.match(/^\/v1\/projects\/commerce\/members(?:\/([^/]+))?$/);
@@ -341,17 +413,19 @@ export function createFixtureTransport(): Transport {
           .trim()
           .toLowerCase();
         const known = fixtureMembers.find((m) => m.email === email);
-        if (!known)
-          return response(
-            {
-              error: {
-                code: "USER_NOT_FOUND",
-                message: "no verified account uses that email",
-                details: { field: "email" },
-              },
-            },
-            404,
-          );
+        if (!known) {
+          const invitation = {
+            id: `invite-${fixtureInvitations.length + 1}`,
+            email,
+            role: String(body.role ?? "member"),
+            level: "project",
+            invitedBy: user.name,
+            createdAt: iso(0),
+            expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+          };
+          fixtureInvitations = [invitation, ...fixtureInvitations];
+          return response({ invitation }, 202);
+        }
         const row = {
           ...known,
           role: String(body.role),
