@@ -734,7 +734,6 @@ const bad = calls.filter(
     !/POST \/v1\/session → 401$/.test(c) &&
     !/POST \/v1\/session\/password → 400$/.test(c),
 );
-z;
 if (bad.length) {
   console.log(
     "\nunexpected statuses (only the deliberate wrong-password 401 and 400 are allowed):",
