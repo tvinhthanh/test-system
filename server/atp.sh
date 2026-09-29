@@ -18,7 +18,8 @@
 #   admin <args…>                   the operator CLI (org/ws/project/user/role/token/audit…)
 #   backup | backups | backup-copy <dir>
 #   ca [file]                       export Caddy's root certificate for other devices
-#   firewall                        open HTTPS_PORT (tcp+udp) and HTTP_PORT in this machine's firewall
+#   firewall                        open HTTPS_PORT (tcp+udp) and HTTP_PORT: Windows (Git Bash/WSL),
+#                                   ufw, firewalld, iptables or nftables
 #   reset                           stop and DELETE ALL DATA (asks first)
 #
 # Requirements: docker (with compose v2; the dashboard is built in a Node
@@ -277,41 +278,23 @@ EOF
 
 # Opens the ports Caddy publishes (HTTPS_PORT tcp + udp for HTTP/3, HTTP_PORT
 # for the http→https redirect and Let's Encrypt) in whichever firewall this
-# machine runs. Rules are named/added idempotently, so it can run again.
-# It never switches a firewall on: enabling ufw from a script can lock out
-# the SSH session running it. A router, cloud security group or VPN in
-# front of this machine is not reached from here.
+# machine runs: Windows (from Git Bash or WSL, via one UAC prompt), ufw,
+# firewalld, or plain iptables/nftables. Rules are idempotent, so it can run
+# again. It never switches a firewall on — enabling ufw from a script can
+# lock out the SSH session running it. A router, cloud security group or
+# VPN in front of this machine is not reached from here.
 cmd_firewall() {
 	need_env
 	local https http; https=$(https_port); http=$(env_get HTTP_PORT); http="${http:-80}"
 	case "$https$http" in *[!0-9]*) die "HTTPS_PORT/HTTP_PORT in $ENV_FILE must be numbers" ;; esac
-	local sudo=""
 	case "$(uname -s)" in
-	MINGW* | MSYS* | CYGWIN*)
-		net session >/dev/null 2>&1 || die "run Git Bash as administrator (right click → Run as administrator), then: $0 firewall"
-		local rule name proto port
-		for rule in "ATP HTTPS TCP:TCP:$https" "ATP HTTPS UDP:UDP:$https" "ATP HTTP:TCP:$http"; do
-			IFS=: read -r name proto port <<<"$rule"
-			netsh advfirewall firewall delete rule name="$name" >/dev/null 2>&1 || true
-			netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol="$proto" localport="$port" >/dev/null ||
-				die "netsh refused the rule '$name'"
-			say "Windows firewall: $proto $port allowed ($name)"
-		done
-		;;
+	MINGW* | MSYS* | CYGWIN*) fw_windows "$https" "$http" ;;
 	Linux)
-		if [ "$(id -u)" != 0 ]; then need sudo "or run this as root"; sudo=sudo; fi
-		if command -v ufw >/dev/null 2>&1 && $sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-			$sudo ufw allow "$https/tcp" >/dev/null
-			$sudo ufw allow "$https/udp" >/dev/null
-			$sudo ufw allow "$http/tcp" >/dev/null
-			say "ufw: $https/tcp, $https/udp, $http/tcp allowed"
-		elif command -v firewall-cmd >/dev/null 2>&1 && $sudo firewall-cmd --state >/dev/null 2>&1; then
-			$sudo firewall-cmd --permanent --add-port="$https/tcp" --add-port="$https/udp" --add-port="$http/tcp" >/dev/null
-			$sudo firewall-cmd --reload >/dev/null
-			say "firewalld: $https/tcp, $https/udp, $http/tcp allowed (permanent)"
+		if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+			# Other devices reach WSL only through Windows: its firewall is the one that counts.
+			fw_windows "$https" "$http"
 		else
-			say "no active ufw or firewalld here — nothing on this machine blocks $https/$http"
-			echo "    Still unreachable? Check iptables/nftables rules, the router, or the cloud security group."
+			fw_linux "$https" "$http"
 		fi
 		;;
 	Darwin)
@@ -321,6 +304,108 @@ cmd_firewall() {
 	*) die "unknown system $(uname -s) — open TCP $https, UDP $https and TCP $http in its firewall yourself" ;;
 	esac
 	echo "    Other devices: $(base_url)"
+}
+
+# Windows Defender Firewall, from Git Bash or WSL alike: one elevated
+# PowerShell (a single UAC prompt) replaces the three "ATP …" rules. The
+# script travels as -EncodedCommand (base64 UTF-16LE), so no quoting layer
+# between bash, PowerShell and Start-Process can mangle it.
+fw_windows() {
+	local https="$1" http="$2" ps
+	command -v powershell.exe >/dev/null 2>&1 || die "powershell.exe not found — open TCP $https, UDP $https and TCP $http in Windows Defender Firewall yourself"
+	need iconv "part of glibc/Git for Windows"
+	ps="\$ErrorActionPreference='Stop'; try {"
+	local r name proto port
+	for r in "ATP HTTPS TCP|TCP|$https" "ATP HTTPS UDP|UDP|$https" "ATP HTTP|TCP|$http"; do
+		IFS='|' read -r name proto port <<<"$r"
+		ps="$ps Remove-NetFirewallRule -DisplayName '$name' -ErrorAction SilentlyContinue;"
+		ps="$ps New-NetFirewallRule -DisplayName '$name' -Direction Inbound -Action Allow -Protocol $proto -LocalPort $port -Profile Any | Out-Null;"
+	done
+	ps="$ps } catch { exit 1 }"
+	local enc; enc=$(printf '%s' "$ps" | iconv -t UTF-16LE | base64 | tr -d '\r\n')
+	say "Windows firewall: approve the administrator prompt (UAC) that opens now"
+	powershell.exe -NoProfile -Command "try { \$p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','$enc'; exit \$p.ExitCode } catch { exit 2 }" ||
+		die "the firewall rules were not added (prompt declined, or PowerShell refused)"
+	say "Windows firewall: TCP $https, UDP $https, TCP $http allowed (rules \"ATP HTTPS TCP\", \"ATP HTTPS UDP\", \"ATP HTTP\")"
+	if [ -n "${WSL_DISTRO_NAME:-}" ] && ! docker info 2>/dev/null | grep -qi "docker desktop"; then
+		warn "Docker runs inside WSL, not Docker Desktop: Windows must also forward $https/$http into WSL"
+		echo "    (WSL mirrored networking, or netsh interface portproxy) — the firewall alone is not enough."
+	fi
+}
+
+fw_linux() {
+	local https="$1" http="$2" sudo=""
+	if [ "$(id -u)" != 0 ]; then need sudo "or run this as root"; sudo=sudo; fi
+	if command -v ufw >/dev/null 2>&1 && $sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+		$sudo ufw allow "$https/tcp" >/dev/null
+		$sudo ufw allow "$https/udp" >/dev/null
+		$sudo ufw allow "$http/tcp" >/dev/null
+		say "ufw: $https/tcp, $https/udp, $http/tcp allowed"
+	elif command -v firewall-cmd >/dev/null 2>&1 && $sudo firewall-cmd --state >/dev/null 2>&1; then
+		$sudo firewall-cmd --permanent --add-port="$https/tcp" --add-port="$https/udp" --add-port="$http/tcp" >/dev/null
+		$sudo firewall-cmd --reload >/dev/null
+		say "firewalld: $https/tcp, $https/udp, $http/tcp allowed (permanent)"
+	else
+		local opened=0
+		fw_iptables "$sudo" "$https" "$http" && opened=1
+		fw_nft "$sudo" "$https" "$http" && opened=1
+		if [ "$opened" = 0 ]; then
+			say "no firewall on this machine blocks $https/$http (no active ufw/firewalld, no blocking iptables/nftables input rule)"
+			echo "    Still unreachable? Check the router, the cloud security group, or a VPN."
+		fi
+	fi
+}
+
+# iptables/ip6tables INPUT (iptables-nft included): only when it blocks
+# (policy DROP, or a DROP/REJECT rule), accept rules go first. Returns 1
+# when there was nothing to do.
+fw_iptables() {
+	local sudo="$1" https="$2" http="$3" t did=1
+	for t in iptables ip6tables; do
+		command -v "$t" >/dev/null 2>&1 || continue
+		$sudo "$t" -S INPUT 2>/dev/null | grep -qE -- "^-P INPUT DROP|-j (DROP|REJECT)" || continue
+		local rule
+		for rule in "tcp $https" "udp $https" "tcp $http"; do
+			set -- $rule
+			$sudo "$t" -C INPUT -p "$1" --dport "$2" -j ACCEPT 2>/dev/null ||
+				$sudo "$t" -I INPUT -p "$1" --dport "$2" -j ACCEPT || die "$t refused the rule for $2/$1"
+		done
+		say "$t: $https/tcp, $https/udp, $http/tcp accepted in INPUT"
+		did=0
+	done
+	[ "$did" = 0 ] || return 1
+	if command -v netfilter-persistent >/dev/null 2>&1; then
+		$sudo netfilter-persistent save >/dev/null 2>&1 && say "saved (netfilter-persistent)"
+	elif [ -x /usr/libexec/iptables/iptables.init ]; then
+		$sudo /usr/libexec/iptables/iptables.init save >/dev/null 2>&1 && say "saved (iptables-services)"
+	else
+		warn "iptables rules last until reboot — save them with your distribution's tool (e.g. iptables-persistent)"
+	fi
+}
+
+# Native nftables (e.g. /etc/nftables.conf's "table inet filter"): every
+# input base chain that blocks gets the accept rules at its top. Tables
+# iptables-nft owns (chains named INPUT) are left to fw_iptables.
+fw_nft() {
+	local sudo="$1" https="$2" http="$3" did=1 fam tbl chain
+	command -v nft >/dev/null 2>&1 || return 1
+	while read -r fam tbl chain; do
+		local body; body=$($sudo nft list chain "$fam" "$tbl" "$chain" 2>/dev/null) || continue
+		echo "$body" | grep -qE "policy drop|[[:space:]](drop|reject)([[:space:];]|$)" || continue
+		local r
+		for r in "tcp $https" "udp $https" "tcp $http"; do
+			set -- $r
+			echo "$body" | grep -qE "$1 dport $2 accept" ||
+				$sudo nft insert rule "$fam" "$tbl" "$chain" "$1" dport "$2" accept || die "nft refused the rule for $2/$1"
+		done
+		say "nftables $fam $tbl $chain: $https/tcp, $https/udp, $http/tcp accepted"
+		did=0
+	done < <($sudo nft list ruleset 2>/dev/null | awk '
+		$1 == "table" { fam = $2; tbl = $3 }
+		$1 == "chain" { chain = $2 }
+		/hook input/ && chain != "INPUT" { print fam, tbl, chain }')
+	[ "$did" = 0 ] || return 1
+	warn "nftables rules added at runtime — add the same accept rules to /etc/nftables.conf to keep them after reboot"
 }
 
 cmd_update() {
@@ -357,6 +442,6 @@ case "${1:-help}" in
 	firewall) cmd_firewall ;;
 	update) cmd_update ;;
 	reset) cmd_reset ;;
-	help | -h | --help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
+	help | -h | --help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
 	*) die "unknown command '$1' — see: $0 help" ;;
 esac
