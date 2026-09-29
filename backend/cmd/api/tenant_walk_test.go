@@ -186,6 +186,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":                         map[string]any{"status": "approved"},
 		// Members: a real, verified account, so only the tenant check can refuse.
 		"POST /v1/projects/{projectId}/members":                          map[string]any{"email": "a@alpha.example", "role": "viewer"},
+		"DELETE /v1/projects/{projectId}/runs/{runId}":                   map[string]any{},
+		"POST /v1/projects/{projectId}/runs/{runId}/restore":             map[string]any{},
 		"DELETE /v1/projects/{projectId}":                                map[string]any{"confirmName": "alpha-app"},
 		"POST /v1/workspaces/{workspaceId}/projects/{projectId}/restore": map[string]any{},
 		"POST /v1/workspaces/{workspaceId}/projects":                     map[string]any{"name": "walk project"},

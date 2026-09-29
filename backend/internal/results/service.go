@@ -565,7 +565,7 @@ func (s *service) History(ctx context.Context, stableTestID, environmentID strin
 		SELECT r.id, r.started_at, t.final_status, t.failure_observed_at
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
 		 WHERE t.stable_test_id = $1 AND r.environment_id = $2 AND r.started_at >= $3
-		   AND r.status IN ('passed', 'failed', 'error')
+		   AND r.status IN ('passed', 'failed', 'error') AND r.deleted_at IS NULL
 		 ORDER BY r.started_at, t.occurrence_index`, stableTestID, environmentID, since.UTC())
 	if err != nil {
 		return nil, err
@@ -603,7 +603,7 @@ func (s *service) HistoryMany(ctx context.Context, stableTestIDs []string, envir
 		SELECT t.stable_test_id, r.id, r.started_at, t.final_status, t.failure_observed_at
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
 		 WHERE t.stable_test_id = ANY($1::uuid[]) AND r.environment_id = $2 AND r.started_at >= $3
-		   AND r.status IN ('passed', 'failed', 'error')
+		   AND r.status IN ('passed', 'failed', 'error') AND r.deleted_at IS NULL
 		 ORDER BY t.stable_test_id, r.started_at, t.occurrence_index`, stableTestIDs, environmentID, since.UTC())
 	if err != nil {
 		return nil, err
@@ -639,7 +639,7 @@ func (s *service) GetResult(ctx context.Context, projectID string, id TestResult
 		SELECT t.id, t.run_id, r.project_id, t.stable_test_id, t.client_test_id, t.occurrence_index, t.display_name, t.suite_name, t.identity_raw,
 		       t.final_status, t.failure_category, t.attempt_count, t.first_failed_at, t.failure_observed_at, t.duration_ms, t.created_at
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
-		 WHERE t.id = $1 AND r.project_id = $2`, string(id), projectID,
+		 WHERE t.id = $1 AND r.project_id = $2 AND r.deleted_at IS NULL`, string(id), projectID,
 	).Scan(&t.ID, &t.RunID, &t.ProjectID, &stable, &t.ClientTestID, &t.OccurrenceIndex, &t.DisplayName, &t.SuiteName, &t.IdentityRaw,
 		&t.FinalStatus, &category, &t.AttemptCount, &firstFailed, &observed, &t.DurationMs, &t.CreatedAt)
 	if err != nil {

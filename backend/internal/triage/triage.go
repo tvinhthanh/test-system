@@ -98,6 +98,10 @@ var (
 
 // Service is the contract. Writes join the caller's transaction.
 type Service interface {
+	// PurgeResults deletes triage of results about to be purged with their
+	// run (§11.3.2); results says which.
+	PurgeResults(ctx context.Context, resultIDs []string) error
+
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:

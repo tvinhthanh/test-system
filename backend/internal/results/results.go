@@ -89,6 +89,16 @@ type Run struct {
 	CreatedAt     time.Time
 }
 
+// DeletedRun is a run in its restore window; StableTestIDs are the tests
+// in it, whose flaky signals change when it is hidden or restored.
+type DeletedRun struct {
+	Run           Run
+	DeletedAt     time.Time
+	DeletedBy     string
+	PurgeAfter    time.Time
+	StableTestIDs []string
+}
+
 // NewRun is what CreateRun needs. ProjectID/EnvironmentID come from the
 // caller's tenancy lookups; LocalRunID is the reporter's UUID (§7.3).
 type NewRun struct {
@@ -160,6 +170,15 @@ var (
 
 // Service is the contract.
 type Service interface {
+	// Deleting a run (§11.3.2 "Xóa dữ liệu run/artifact", rundelete.go):
+	// soft, hidden from every read at once, restorable until the worker's
+	// PurgeRun. ErrRunOpen for a run still receiving events.
+	DeleteRun(ctx context.Context, projectID string, id RunID, actor string, keep time.Duration) (DeletedRun, error)
+	RestoreRun(ctx context.Context, projectID string, id RunID) (DeletedRun, error)
+	DeletedRuns(ctx context.Context, projectID string) ([]DeletedRun, error)
+	RunsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedRun, error)
+	PurgeRun(ctx context.Context, id RunID) error
+
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:

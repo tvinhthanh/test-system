@@ -179,3 +179,126 @@ func TestPurgeDeletedProject(t *testing.T) {
 		t.Errorf("second purge: %d %v", n, err)
 	}
 }
+
+// §11.3.2 "Xóa dữ liệu run/artifact": a deleted run leaves the flaky
+// signal as soon as its tests are rebuilt, and after its window the worker
+// removes its results, triage, artifacts (bytes too) — never the other
+// run of the same test.
+func TestPurgeDeletedRun(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	ten, az, res := tenancy.New(db), authz.New(db, []byte("test-pepper-test-pepper-test-pepper!")), results.New(db)
+	idn, flk, tri := identity.New(db), flaky.New(db, res), triage.New(db, res)
+	tm := testmgmt.New(db, idn, nil, testmgmt.Policy{})
+	art := artifact.New(db, store, res)
+	p := purger{tenancy: ten, authz: az, artifact: art, triage: tri, flaky: flk, identity: idn, testmgmt: tm, results: res}
+
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
+	pr, _ := ten.CreateProject(ctx, ws.ID, "checkout", "")
+	pid := string(pr.ID)
+	env, _ := ten.EnsureEnvironment(ctx, pr.ID, "ci")
+	raw := json.RawMessage(`{"framework":"playwright","filePath":"tests/a.spec.ts","titlePath":["A"]}`)
+	var stable string
+	mk := func(n int, st results.AttemptStatus, oc results.Outcome) results.RunID {
+		run, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: pid, EnvironmentID: string(env.ID), LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-00000000010" + string(rune('0'+n)), StartedAt: time.Now().Add(-time.Duration(3-n) * time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := res.AppendAttempts(ctx, run.ID, []results.AttemptEvent{{Sequence: 1, ClientTestID: "ct_a", DisplayName: "A", IdentityRaw: raw, Status: st, Outcome: oc, DurationMs: 10}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := res.FinishRun(ctx, run.ID, time.Now().Add(-time.Duration(3-n)*time.Hour+time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		m, _, err := idn.ResolveDeferred(ctx, pid, string(run.ID), []identity.Ref{{Key: "ct_a", Signals: identity.Signals{Framework: "playwright", FilePath: "tests/a.spec.ts", TitlePath: []string{"A"}}}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stable = m["ct_a"]
+		if _, err := res.SetStableIDs(ctx, run.ID, m); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := flk.RecomputeRun(ctx, pid, string(run.ID)); err != nil {
+			t.Fatal(err)
+		}
+		return run.ID
+	}
+	failed := mk(1, results.AttemptFailed, results.OutcomeUnexpected)
+	passed := mk(2, results.AttemptPassed, results.OutcomeExpected)
+	list, _ := res.ListResults(ctx, failed)
+	if _, _, err := tri.Record(ctx, triage.Record{ProjectID: pid, TestResultID: string(list[0].ID), Type: triage.FailureSeen, ActorType: triage.ActorUser, ActorID: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	key := "t/" + pid + "/run.log"
+	put, _ := store.PresignPut(ctx, key, "text/plain", time.Minute)
+	req, _ := http.NewRequest("PUT", put, strings.NewReader("log"))
+	req.Header.Set("Content-Type", "text/plain")
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode >= 300 {
+		t.Fatalf("put object: %v %v", r, err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `
+		INSERT INTO artifacts (project_id, run_id, client_test_id, attempt, kind, name, content_type, declared_bytes, sha256, storage_key, status, expires_at)
+		VALUES ($1, $2, 'ct_a', 0, 'log', 'run.log', 'text/plain', 3, $3, $4, 'verified', now() + interval '30 days')`,
+		pid, string(failed), strings.Repeat("ab", 32), key); err != nil {
+		t.Fatal(err)
+	}
+	sig, _ := flk.Get(ctx, stable, string(env.ID))
+	if sig.TotalRuns != 2 || sig.FailedRuns != 1 {
+		t.Fatalf("signal before: %+v", sig)
+	}
+
+	gone, err := res.DeleteRun(ctx, pid, failed, "mia@acme.example", time.Hour)
+	if err != nil || len(gone.StableTestIDs) != 1 {
+		t.Fatalf("delete: %+v %v", gone, err)
+	}
+	if err := flk.Invalidate(ctx, pid, gone.StableTestIDs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := flk.Sweep(ctx, flaky.RebuildAfter, 500); err != nil {
+		t.Fatal(err)
+	}
+	if sig, _ := flk.Get(ctx, stable, string(env.ID)); sig.TotalRuns != 1 || sig.FailedRuns != 0 {
+		t.Errorf("signal after the failed run was deleted: %+v, want 1 run, 0 failed", sig)
+	}
+
+	if n, err := p.runs(ctx, time.Now(), 10); err != nil || n != 0 {
+		t.Fatalf("purge inside the window: %d %v", n, err)
+	}
+	if n, err := p.runs(ctx, time.Now().Add(2*time.Hour), 10); err != nil || n != 1 {
+		t.Fatalf("purge: %d %v", n, err)
+	}
+	count := func(q string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := db.Q(ctx).QueryRow(ctx, q, args...).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return n
+	}
+	for q, want := range map[string]int{
+		`SELECT count(*) FROM runs WHERE id = $1`:                                         0,
+		`SELECT count(*) FROM test_results WHERE run_id = $1`:                             0,
+		`SELECT count(*) FROM run_events WHERE run_id = $1`:                               0,
+		`SELECT count(*) FROM artifacts WHERE run_id = $1`:                                0,
+		`SELECT count(*) FROM authz_audit WHERE subject_id = $1 AND action = 'run.purge'`: 1,
+	} {
+		if n := count(q, string(failed)); n != want {
+			t.Errorf("%s: %d, want %d", q, n, want)
+		}
+	}
+	if n := count(`SELECT count(*) FROM triage_events WHERE test_result_id = $1`, string(list[0].ID)); n != 0 {
+		t.Errorf("triage of the purged result: %d", n)
+	}
+	if _, err := store.Head(ctx, key); !errors.Is(err, objstore.ErrNotFound) {
+		t.Errorf("object still in the bucket: %v", err)
+	}
+	if n := count(`SELECT count(*) FROM test_results WHERE run_id = $1`, string(passed)); n != 1 {
+		t.Errorf("the other run lost its results: %d", n)
+	}
+	if n := count(`SELECT count(*) FROM test_identities WHERE id = $1`, stable); n != 1 {
+		t.Errorf("the test's identity went with one run: %d", n)
+	}
+}

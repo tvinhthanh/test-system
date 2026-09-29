@@ -95,7 +95,7 @@ func (s *service) Runs(ctx context.Context, projectID string, f RunFilter) (Page
 		q = &like
 	}
 	rows, err := s.db.Q(ctx).Query(ctx, runSelect+`
-		 WHERE r.project_id = $1
+		 WHERE r.project_id = $1 AND r.deleted_at IS NULL
 		   AND ($2::text IS NULL OR r.status = $2)
 		   AND ($3::text IS NULL OR e.key = $3)
 		   AND ($4::text IS NULL OR r.branch ILIKE $4 OR r.commit_sha ILIKE $4 OR r.local_run_id::text ILIKE $4)
@@ -133,7 +133,7 @@ func (s *service) Run(ctx context.Context, projectID, runID string) (Run, error)
 	if !isUUID(projectID) || !isUUID(runID) {
 		return Run{}, ErrNotFound
 	}
-	r, err := scanRun(s.db.Q(ctx).QueryRow(ctx, runSelect+` WHERE r.project_id = $1 AND r.id = $2`, projectID, runID))
+	r, err := scanRun(s.db.Q(ctx).QueryRow(ctx, runSelect+` WHERE r.project_id = $1 AND r.id = $2 AND r.deleted_at IS NULL`, projectID, runID))
 	return r, mapErr(err)
 }
 
@@ -161,7 +161,7 @@ func (s *service) Results(ctx context.Context, projectID, runID string, limit in
 		       coalesce(t.failure_category, ''), t.failure_observed_at,
 		       CASE WHEN t.final_status IN ('failed', 'timed_out', 'interrupted') THEN 0 ELSE 1 END AS rank
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
-		 WHERE r.project_id = $1 AND r.id = $2
+		 WHERE r.project_id = $1 AND r.id = $2 AND r.deleted_at IS NULL
 		   AND ($3::int IS NULL OR (CASE WHEN t.final_status IN ('failed', 'timed_out', 'interrupted') THEN 0 ELSE 1 END, t.display_name, t.id) > ($3, $4::text, $5::uuid))
 		 ORDER BY rank, t.display_name, t.id
 		 LIMIT $6`, projectID, runID, afterRank, afterName, afterID, limit+1)
@@ -187,7 +187,7 @@ func (s *service) Results(ctx context.Context, projectID, runID string, limit in
 		// An empty page is only an answer when the run is this project's; a
 		// foreign or unknown run is 404, never "no results" (§11.3.3).
 		var one int
-		if err := s.db.Q(ctx).QueryRow(ctx, `SELECT 1 FROM runs WHERE project_id = $1 AND id = $2`, projectID, runID).Scan(&one); err != nil {
+		if err := s.db.Q(ctx).QueryRow(ctx, `SELECT 1 FROM runs WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`, projectID, runID).Scan(&one); err != nil {
 			if errors.Is(err, pg.ErrNoRows) {
 				return Page[Result]{}, ErrNotFound
 			}
@@ -220,7 +220,7 @@ func (s *service) ResultDetail(ctx context.Context, projectID, resultID string) 
 		SELECT t.id, t.run_id, t.display_name, coalesce(t.identity_raw->>'filePath', ''), t.final_status, t.attempt_count, t.duration_ms, t.stable_test_id,
 		       coalesce(t.failure_category, ''), t.failure_observed_at
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
-		 WHERE r.project_id = $1 AND t.id = $2`, projectID, resultID,
+		 WHERE r.project_id = $1 AND t.id = $2 AND r.deleted_at IS NULL`, projectID, resultID,
 	).Scan(&d.Result.ID, &d.RunID, &d.Result.DisplayName, &d.Result.FilePath, &d.Result.FinalStatus, &d.Result.AttemptCount, &d.Result.DurationMs, &d.Result.StableTestID,
 		&d.Result.FailureCategory, &observed)
 	if err != nil {
@@ -317,7 +317,7 @@ const identitySelect = `
 	       coalesce(f.verdict, 'insufficient_data'), f.flaky_score, coalesce(f.total_runs, 0),
 	       i.status, i.merged_into_id,
 	       coalesce((SELECT array_agg(t.final_status ORDER BY t.created_at DESC)
-	                   FROM (SELECT final_status, created_at FROM test_results WHERE stable_test_id = i.id ORDER BY created_at DESC LIMIT 30) t), '{}'),
+	                   FROM (SELECT t.final_status, t.created_at FROM test_results t JOIN runs r ON r.id = t.run_id WHERE t.stable_test_id = i.id AND r.deleted_at IS NULL ORDER BY t.created_at DESC LIMIT 30) t), '{}'),
 	       coalesce(-f.flaky_score, 1) AS neg
 	  FROM test_identities i
 	  LEFT JOIN LATERAL (
@@ -423,7 +423,7 @@ func (s *service) IdentityRuns(ctx context.Context, projectID, identityID string
 		afterTime, afterID = &t, &c.ID
 	}
 	rows, err := s.db.Q(ctx).Query(ctx, runSelect+`
-		 WHERE r.project_id = $1
+		 WHERE r.project_id = $1 AND r.deleted_at IS NULL
 		   AND EXISTS (SELECT 1 FROM test_results t WHERE t.run_id = r.id AND t.stable_test_id = $2)
 		   AND ($3::timestamptz IS NULL OR (r.started_at, r.id) < ($3, $4::uuid))
 		 ORDER BY r.started_at DESC, r.id DESC
@@ -466,7 +466,7 @@ func (s *service) CategoryTrend(ctx context.Context, projectID string, since tim
 		-- is part of the contract, not of the connection's TimeZone setting.
 		SELECT date_trunc('week', coalesce(t.first_failed_at, t.failure_observed_at) AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS week, coalesce(t.failure_category, 'unknown'), count(*)
 		  FROM test_results t JOIN runs r ON r.id = t.run_id
-		 WHERE r.project_id = $1 AND t.failure_observed_at >= $2
+		 WHERE r.project_id = $1 AND t.failure_observed_at >= $2 AND r.deleted_at IS NULL
 		 GROUP BY 1, 2 ORDER BY 1, 2`, projectID, since.UTC())
 	if err != nil {
 		return nil, err
@@ -497,7 +497,7 @@ func (s *service) Triage(ctx context.Context, projectID string, since time.Time)
 		WITH failures AS (
 			SELECT t.id, t.failure_observed_at
 			  FROM test_results t JOIN runs r ON r.id = t.run_id
-			 WHERE r.project_id = $1 AND t.failure_observed_at >= $2
+			 WHERE r.project_id = $1 AND t.failure_observed_at >= $2 AND r.deleted_at IS NULL
 		), firsts AS (
 			SELECT e.test_result_id,
 			       min(e.occurred_at) FILTER (WHERE e.type = 'HYPOTHESIS_ACCEPTED') AS accepted_at,
@@ -556,7 +556,7 @@ func (s *service) GateEvidence(ctx context.Context, projectID, branch string) (G
 	err := s.db.Q(ctx).QueryRow(ctx, `
 		SELECT id, branch, finished_at
 		  FROM runs
-		 WHERE project_id = $1 AND finished_at IS NOT NULL AND status IN ('passed', 'failed')
+		 WHERE project_id = $1 AND finished_at IS NOT NULL AND status IN ('passed', 'failed') AND deleted_at IS NULL
 		   AND ($2 = '' OR branch = $2)
 		 ORDER BY finished_at DESC, id DESC LIMIT 1`, projectID, branch).Scan(&run.RunID, &br, &finished)
 	if err != nil {
@@ -615,7 +615,7 @@ func (s *service) ROIFacts(ctx context.Context, projectID string, from, to time.
 		WITH failures AS (
 			SELECT t.id, t.failure_observed_at
 			  FROM test_results t JOIN runs r ON r.id = t.run_id
-			 WHERE r.project_id = $1 AND t.failure_observed_at >= $2 AND t.failure_observed_at < $3
+			 WHERE r.project_id = $1 AND t.failure_observed_at >= $2 AND t.failure_observed_at < $3 AND r.deleted_at IS NULL
 		), marks AS (
 			SELECT e.test_result_id,
 			       min(e.occurred_at) FILTER (WHERE e.type = 'HYPOTHESIS_ACCEPTED') AS accepted_at,
@@ -645,7 +645,7 @@ func (s *service) ROIFacts(ctx context.Context, projectID string, from, to time.
 		  FROM test_result_attempts a
 		  JOIN test_results t ON t.id = a.test_result_id
 		  JOIN runs r ON r.id = t.run_id
-		 WHERE r.project_id = $1 AND r.started_at >= $2 AND r.started_at < $3
+		 WHERE r.project_id = $1 AND r.started_at >= $2 AND r.started_at < $3 AND r.deleted_at IS NULL
 		   AND t.final_status = 'flaky_pass' AND a.status IN ('failed', 'timed_out', 'interrupted')`,
 		projectID, from.UTC(), to.UTC()).Scan(&retryMs)
 	if err != nil {
@@ -669,7 +669,7 @@ func (s *service) MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, 
 		WITH window_results AS (
 			SELECT r.project_id, t.stable_test_id, t.client_test_id
 			  FROM test_results t JOIN runs r ON r.id = t.run_id
-			 WHERE r.started_at >= $1 AND r.started_at < $3
+			 WHERE r.started_at >= $1 AND r.started_at < $3 AND r.deleted_at IS NULL
 		), active AS (
 			SELECT w.project_id,
 			       count(DISTINCT coalesce(i.merged_into_id, i.id)) AS active_tests,
@@ -688,7 +688,7 @@ func (s *service) MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, 
 		), volume AS (
 			SELECT r.project_id, count(DISTINCT r.id) AS runs, count(t.id) AS results
 			  FROM runs r LEFT JOIN test_results t ON t.run_id = r.id
-			 WHERE r.started_at >= $2 AND r.started_at < $3 GROUP BY r.project_id
+			 WHERE r.started_at >= $2 AND r.started_at < $3 AND r.deleted_at IS NULL GROUP BY r.project_id
 		), storage AS (
 			SELECT project_id, sum(coalesce(actual_bytes, declared_bytes)) AS bytes
 			  FROM artifacts WHERE status = 'verified' AND expires_at > $3 AND created_at < $3 GROUP BY project_id

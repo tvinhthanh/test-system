@@ -202,3 +202,20 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 }
 
 var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func (s *service) PurgeResults(ctx context.Context, resultIDs []string) error {
+	if len(resultIDs) == 0 {
+		return nil
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			`DELETE FROM ai_hypotheses WHERE test_result_id::text = ANY($1)`,
+			`DELETE FROM triage_events WHERE test_result_id::text = ANY($1)`,
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, resultIDs); err != nil {
+				return fmt.Errorf("triage: purge results: %w", err)
+			}
+		}
+		return nil
+	})
+}

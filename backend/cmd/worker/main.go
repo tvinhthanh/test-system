@@ -140,6 +140,11 @@ func main() {
 					logger.Info("meter recorded", "day", yesterday.Format("2006-01-02"), "projects", n)
 				}
 			}
+			if n, err := purge.runs(ctx, time.Now(), 50); err != nil {
+				logger.Error("run purge", "err", err)
+			} else if n > 0 {
+				logger.Info("runs purged", "n", n)
+			}
 			if n, err := purge.run(ctx, time.Now(), 5); err != nil {
 				logger.Error("project purge", "err", err)
 			} else if n > 0 {

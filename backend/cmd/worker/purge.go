@@ -84,3 +84,52 @@ func (p purger) one(ctx context.Context, d tenancy.DeletedProject) error {
 	return p.authz.AuditProject(ctx, "project.purge", id, string(d.WorkspaceID), "system: restore window ended",
 		map[string]any{"name": d.Name, "deleted_by": d.DeletedBy, "deleted_at": d.DeletedAt, "artifacts_removed": objects})
 }
+
+// runs purges up to limit deleted runs whose restore window has passed
+// (§11.3.2 "Xóa dữ liệu run/artifact"): the artifacts (bytes first), the
+// triage of their results, review items they raised, then the results and
+// the run. Flaky signals were marked for rebuild when the run was deleted.
+func (p purger) runs(ctx context.Context, now time.Time, limit int) (int, error) {
+	due, err := p.results.RunsToPurge(ctx, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	var first error
+	for _, d := range due {
+		if err := p.run1(ctx, d); err != nil {
+			if first == nil {
+				first = fmt.Errorf("purge run %s: %w", d.Run.ID, err)
+			}
+			continue
+		}
+		done++
+	}
+	return done, first
+}
+
+func (p purger) run1(ctx context.Context, d results.DeletedRun) error {
+	list, err := p.results.ListResults(ctx, d.Run.ID)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(list))
+	for _, r := range list {
+		ids = append(ids, string(r.ID))
+	}
+	objects, err := p.artifact.PurgeRun(ctx, string(d.Run.ID))
+	if err != nil {
+		return err
+	}
+	if err := p.triage.PurgeResults(ctx, ids); err != nil {
+		return err
+	}
+	if err := p.identity.PurgeRun(ctx, string(d.Run.ID)); err != nil {
+		return err
+	}
+	if err := p.results.PurgeRun(ctx, d.Run.ID); err != nil {
+		return err
+	}
+	return p.authz.AuditRun(ctx, "run.purge", string(d.Run.ID), d.Run.ProjectID, "system: restore window ended",
+		map[string]any{"deleted_by": d.DeletedBy, "deleted_at": d.DeletedAt, "results_removed": len(ids), "artifacts_removed": objects})
+}

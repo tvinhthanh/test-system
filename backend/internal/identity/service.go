@@ -459,3 +459,11 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 }
 
 var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func (s *service) PurgeRun(ctx context.Context, runID string) error {
+	if !purgeUUID.MatchString(runID) {
+		return ErrNotFound
+	}
+	_, err := s.db.Q(ctx).Exec(ctx, `DELETE FROM review_queue_items WHERE run_id = $1`, runID)
+	return err
+}

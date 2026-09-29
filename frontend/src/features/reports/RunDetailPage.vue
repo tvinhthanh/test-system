@@ -12,8 +12,12 @@ import StatTile from "../../shared/StatTile.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import TechnicalBlock from "../../shared/TechnicalBlock.vue";
 import { Button } from "@/components/ui/button";
+import DeleteRunButton from "./DeleteRunButton.vue";
+import { useProjectPermission } from "./useProjectPermission";
 const { project, id, cursor, run, results, loadRun, loadResults, next, first } =
   useRunDetail();
+// §11.3.2: owners, org admins and maintainers may delete a run.
+const canDelete = useProjectPermission("data.delete");
 const resultPath = (resultId: string) =>
   `/p/${encodeURIComponent(project.value)}/runs/${encodeURIComponent(id.value)}/results/${encodeURIComponent(resultId)}`;
 </script>
@@ -44,6 +48,11 @@ const resultPath = (resultId: string) =>
       "
       ><RefreshCw
     /></Button>
+    <DeleteRunButton
+      v-if="canDelete && run.data.value"
+      :project="project"
+      :run="id"
+    />
   </PageHeader>
 
   <AsyncState

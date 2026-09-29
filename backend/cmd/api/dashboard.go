@@ -17,12 +17,14 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
+	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
+	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
@@ -66,6 +68,9 @@ type dashboard struct {
 	publicURL string
 	// imports runs JUnit backfill through the ingest pipeline (imports.go).
 	imports ingest.Deps
+	// results and flaky: run deletion (runs_delete.go).
+	runStore results.Service
+	flaky    flaky.Service
 	// meter reads the §10.6 shadow meter (meter.go).
 	meter billing.Service
 }
@@ -107,6 +112,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.tokenRoutes(handle)
 	d.projectCreateRoutes(handle)
 	d.projectDeleteRoutes(handle)
+	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
 }

@@ -64,6 +64,11 @@ var ErrNotFound = errors.New("flaky: not found")
 
 // Service is the contract.
 type Service interface {
+	// Invalidate marks these tests' signals for rebuild on the next sweep —
+	// a run of theirs was hidden or restored (§11.3.2); the rebuild reads
+	// results, which skip deleted runs.
+	Invalidate(ctx context.Context, projectID string, stableTestIDs []string) error
+
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:

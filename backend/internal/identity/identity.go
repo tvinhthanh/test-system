@@ -150,6 +150,9 @@ var (
 
 // Service is the contract. Writes join the caller's transaction (§6.9.6).
 type Service interface {
+	// PurgeRun deletes review items raised by a purged run (§11.3.2).
+	PurgeRun(ctx context.Context, runID string) error
+
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:

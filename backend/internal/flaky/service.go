@@ -188,3 +188,12 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 }
 
 var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func (s *service) Invalidate(ctx context.Context, projectID string, stableTestIDs []string) error {
+	if len(stableTestIDs) == 0 {
+		return nil
+	}
+	_, err := s.db.Q(ctx).Exec(ctx,
+		`UPDATE flaky_signals SET rebuilt_at = '1970-01-01T00:00:00Z' WHERE project_id = $1 AND identity_id::text = ANY($2)`, projectID, stableTestIDs)
+	return err
+}

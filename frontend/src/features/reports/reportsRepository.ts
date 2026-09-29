@@ -579,4 +579,52 @@ export class ReportsRepository {
       startedAt: d.date(x.startedAt),
     } satisfies JUnitImportResult;
   }
+  // §11.3.2 "Xóa dữ liệu run/artifact": soft, restorable for 30 days.
+  async deleteRun(projectId: string, runId: string, signal: AbortSignal) {
+    return deletedRun(
+      await this.api.request(
+        scope(projectId) + "/runs/" + encodeURIComponent(runId),
+        { signal, method: "DELETE" },
+      ),
+    );
+  }
+  async deletedRuns(projectId: string, signal: AbortSignal) {
+    return d.array(
+      d.record(
+        await this.api.request(scope(projectId) + "/runs/deleted", { signal }),
+      ).items,
+      deletedRun,
+      200,
+    );
+  }
+  async restoreRun(projectId: string, runId: string, signal: AbortSignal) {
+    await this.api.request(
+      scope(projectId) + "/runs/" + encodeURIComponent(runId) + "/restore",
+      { signal, body: {} },
+    );
+  }
+}
+
+export interface DeletedRun {
+  id: string;
+  branch: string;
+  commitSha: string;
+  status: string;
+  startedAt: string;
+  deletedAt: string;
+  deletedBy: string;
+  purgeAfter: string;
+}
+function deletedRun(value: unknown): DeletedRun {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    branch: d.string(x.branch),
+    commitSha: d.string(x.commitSha),
+    status: d.string(x.status),
+    startedAt: d.date(x.startedAt),
+    deletedAt: d.date(x.deletedAt),
+    deletedBy: d.string(x.deletedBy),
+    purgeAfter: d.date(x.purgeAfter),
+  };
 }

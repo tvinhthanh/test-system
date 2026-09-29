@@ -622,9 +622,19 @@ func newID() string {
 }
 
 func (s *service) PurgeProject(ctx context.Context, projectID string) (int, error) {
+	return s.purgeWhere(ctx, `project_id = $1`, projectID)
+}
+
+func (s *service) PurgeRun(ctx context.Context, runID string) (int, error) {
+	return s.purgeWhere(ctx, `run_id = $1`, runID)
+}
+
+// purgeWhere removes matching artifacts, the object before the row, in
+// batches; resumable.
+func (s *service) purgeWhere(ctx context.Context, where string, arg string) (int, error) {
 	n := 0
 	for {
-		rows, err := s.db.Q(ctx).Query(ctx, `SELECT id, storage_key, coalesce(upload_id, '') FROM artifacts WHERE project_id = $1 LIMIT 500`, projectID)
+		rows, err := s.db.Q(ctx).Query(ctx, `SELECT id, storage_key, coalesce(upload_id, '') FROM artifacts WHERE `+where+` LIMIT 500`, arg)
 		if err != nil {
 			return n, err
 		}

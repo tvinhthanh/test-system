@@ -255,6 +255,14 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-29 (delete / restore a run)
+
+- Run page: "Delete run" for `data.delete` (second click confirms), back to
+  the Runs list. Runs page: "Recently deleted runs" with who / when / purge
+  date and Restore (the list refreshes). Repository methods,
+  `run-delete.test.ts`. live-check: the JUnit run is deleted, disappears,
+  shows under Recently deleted, is restored and listed again.
+
 ### 2026-09-29 (delete / restore a project)
 
 - Project Members page: "Delete this project" for `project.manage`, enabled

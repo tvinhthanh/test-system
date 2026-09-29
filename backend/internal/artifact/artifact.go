@@ -215,6 +215,9 @@ func (e *MismatchError) Error() string {
 
 // Service is the contract.
 type Service interface {
+	// PurgeRun deletes a deleted run's artifacts, bytes first (§11.3.2).
+	PurgeRun(ctx context.Context, runID string) (int, error)
+
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:

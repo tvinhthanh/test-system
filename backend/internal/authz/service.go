@@ -662,3 +662,15 @@ func (s *service) AuditProject(ctx context.Context, action, projectID, workspace
 	}
 	return s.audit(ctx, action, "project", projectID, string(LevelWorkspace), workspaceID, actor, details)
 }
+
+func (s *service) AuditRun(ctx context.Context, action, runID, projectID, actor string, details map[string]any) error {
+	switch action {
+	case "run.delete", "run.restore", "run.purge":
+	default:
+		return fmt.Errorf("%w: audit action %q", ErrInvalid, action)
+	}
+	if !isUUID(runID) || !isUUID(projectID) || actor == "" {
+		return fmt.Errorf("%w: run, project and actor", ErrInvalid)
+	}
+	return s.audit(ctx, action, "run", runID, string(LevelProject), projectID, actor, details)
+}

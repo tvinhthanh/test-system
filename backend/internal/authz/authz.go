@@ -315,6 +315,9 @@ var (
 
 // Service is the contract. Writes join the caller's transaction (§6.9.6).
 type Service interface {
+	// AuditRun records a run deletion, restore or purge (§11.7).
+	AuditRun(ctx context.Context, action, runID, projectID, actor string, details map[string]any) error
+
 	// AuditProject records a project deletion, restore or purge (§11.7:
 	// destructive actions are logged) — tenancy owns the project, authz the
 	// audit table. action is project.delete | project.restore | project.purge.

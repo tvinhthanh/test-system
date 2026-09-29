@@ -329,6 +329,16 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
   token holding `project:read`.
 
+### Delete and restore a run (§11.3.2 data.delete, implemented 2026-09-29)
+
+`DELETE /v1/projects/{projectId}/runs/{runId}` → `200 {id, branch, commitSha,
+status, startedAt, deletedAt, deletedBy, purgeAfter}`; `409 RUN_OPEN` while it
+still receives results. `GET …/runs/deleted`, `POST …/runs/{runId}/restore` →
+`200 {id}`. Needs `data.delete` (owner, org admin, maintainer). The deleted run
+and its results are 404 everywhere and left out of every list and metric. UI:
+run page "Delete run" (second click confirms); Runs page "Recently deleted
+runs" with Restore.
+
 ### Delete and restore a project (§11.3.2, implemented 2026-09-29)
 
 `DELETE /v1/projects/{projectId} {confirmName}` → `200 {id, name, deletedAt,

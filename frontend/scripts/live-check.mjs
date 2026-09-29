@@ -669,6 +669,53 @@ await step(
 );
 
 await step(
+  "delete a run and restore it: gone from the list, back after Restore (§11.3.2 data.delete)",
+  async () => {
+    const actions = await page.evaluate(async (id) => {
+      const r = await fetch("/v1/projects?limit=100", {
+        credentials: "same-origin",
+      });
+      const body = await r.json();
+      return body.items.find((p) => p.id === id)?.actions ?? [];
+    }, project);
+    if (!actions.includes("data.delete")) return; // a member: no button to test
+    // The JUnit import step's run (branch live-check): nothing later needs it.
+    await page.goto(base + "/p/" + project + "/runs?q=live-check");
+    const link = page.locator("a.run-link", { hasText: "live-check" }).first();
+    await link.waitFor({ state: "visible", timeout: 10000 });
+    await link.click();
+    const del = page.locator("button.delete-run");
+    await del.waitFor({ state: "visible", timeout: 10000 });
+    await del.click(); // arms
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.request().method() === "DELETE" &&
+          /\/runs\/[^/]+$/.test(new URL(r.url()).pathname) &&
+          r.status() === 200,
+        { timeout: 10000 },
+      ),
+      page.getByRole("button", { name: "Confirm delete" }).click(),
+    ]);
+    await page.waitForURL(/\/runs$/, { timeout: 10000 });
+    const restore = page.locator(".deleted-runs li", { hasText: "live-check" });
+    await restore.first().waitFor({ state: "visible", timeout: 10000 });
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          /\/restore$/.test(new URL(r.url()).pathname) && r.status() === 200,
+        { timeout: 10000 },
+      ),
+      restore.first().getByRole("button", { name: "Restore" }).click(),
+    ]);
+    await page
+      .locator("a.run-link", { hasText: "live-check" })
+      .first()
+      .waitFor({ state: "visible", timeout: 10000 });
+  },
+);
+
+await step(
   "change password from Security: wrong current refused, change and change back; still signed in (§11.2)",
   async () => {
     const temp = password + " (live-check)";

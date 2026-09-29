@@ -1267,6 +1267,46 @@ paths:
         "400": { $ref: "#/components/responses/InvalidCursor" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/runs/deleted:
+    get:
+      operationId: listDeletedRuns
+      tags: [dashboard]
+      summary: The project's deleted runs still in their restore window
+      description: Needs `data.delete` (owner, org admin, maintainer — §11.3.2).
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Newest deletion first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DeletedRun" } }
+                  nextCursor: { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/runs/{runId}/restore:
+    post:
+      operationId: restoreRun
+      tags: [dashboard]
+      summary: Restore a deleted run before its purge
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Restored; its tests' flaky signals are rebuilt with it.
+          content:
+            application/json:
+              schema: { type: object, required: [id], properties: { id: { type: string, format: uuid } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/runs/{runId}:
     get:
       operationId: getRun
@@ -1282,6 +1322,30 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/Run" } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteRun
+      tags: [dashboard]
+      summary: Delete a run — soft, restorable for 30 days, then purged (§11.3.2 "Xóa dữ liệu run/artifact")
+      description: |
+        Needs `data.delete` (owner, org admin, maintainer; not workspace
+        admin). The run and its results leave every list, trend, flaky rate,
+        ROI figure and release gate at once; its tests' flaky signals are
+        rebuilt without it on the next worker sweep. `409 RUN_OPEN` while the
+        run still receives results. Audited.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Deleted; restorable until purgeAfter.
+          content: { application/json: { schema: { $ref: "#/components/schemas/DeletedRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`RUN_OPEN` — still receiving results; delete it once finished."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/projects/{projectId}/runs/{runId}/results:
     get:
       operationId: listResults
@@ -2547,6 +2611,18 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
+    DeletedRun:
+      type: object
+      required: [id, branch, commitSha, status, startedAt, deletedAt, deletedBy, purgeAfter]
+      properties:
+        id: { type: string, format: uuid }
+        branch: { type: string }
+        commitSha: { type: string }
+        status: { type: string }
+        startedAt: { type: string, format: date-time }
+        deletedAt: { type: string, format: date-time }
+        deletedBy: { type: string }
+        purgeAfter: { type: string, format: date-time }
     DeletedProject:
       type: object
       required: [id, name, deletedAt, deletedBy, purgeAfter]

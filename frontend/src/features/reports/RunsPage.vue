@@ -10,6 +10,7 @@ import {
 import { useRuns } from "./useRuns";
 import { useProjectPermission } from "./useProjectPermission";
 import JUnitImportSheet from "./JUnitImportSheet.vue";
+import DeletedRuns from "./DeletedRuns.vue";
 import { duration, short, time } from "../../shared/format";
 import AsyncState from "../../shared/AsyncState.vue";
 import EmptyState from "../../shared/EmptyState.vue";
@@ -46,6 +47,8 @@ const {
 } = useRuns();
 // Backfilling history is configuring the project (maintainer and up).
 const canImport = useProjectPermission("project.configure");
+// Deleted runs can be restored by those who may delete them (§11.3.2).
+const canDelete = useProjectPermission("data.delete");
 const statuses = ["running", "passed", "failed", "error", "cancelled"];
 const runPath = (id: string) =>
   `/p/${encodeURIComponent(project.value)}/runs/${encodeURIComponent(id)}`;
@@ -259,4 +262,5 @@ const runPath = (id: string) =>
       @next="next"
     />
   </AsyncState>
+  <DeletedRuns v-if="canDelete" :project="project" @restored="refresh" />
 </template>
