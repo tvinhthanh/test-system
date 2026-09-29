@@ -10,6 +10,8 @@ container `backup` chạy `backup/backup.sh` mỗi ngày. Đã dựng và kiểm
 
 ## Dựng staging
 
+> Trên một máy cá nhân, `server/atp.sh` ở gốc repo làm các bước dưới đây (sinh secret, build dashboard trong container, up, tenant đầu tiên, backup, xuất CA). Phần này là các lệnh thô nếu muốn tự làm.
+
 ```bash
 cd backend
 cp deploy/.env.example deploy/.env        # điền POSTGRES_PASSWORD, TOKEN_PEPPER, DOMAIN, DASHBOARD_ORIGINS, OBJSTORE_*

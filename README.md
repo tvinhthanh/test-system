@@ -45,6 +45,23 @@ npm install && npm run build
 ./verify.sh                      # checklist §4.7, hiện 11/11
 ```
 
+## Chạy máy cá nhân làm server
+
+`server/atp.sh` gom mọi lệnh vận hành: dựng cả stack (Postgres TLS, api, worker, Caddy HTTPS, Prometheus, backup hằng ngày) trên một máy có Docker — Linux, macOS, hoặc Windows với Docker Desktop + Git Bash. Dashboard được build trong container Node 22, không đụng `node_modules` của máy.
+
+```bash
+./server/atp.sh init          # hỏi địa chỉ máy (IP LAN hoặc tên miền), bucket hay không; sinh secret vào backend/deploy/.env
+./server/atp.sh up            # build dashboard + image, chạy tất cả, đợi api khỏe
+./server/atp.sh seed          # tổ chức, project, tài khoản owner, CI token đầu tiên
+./server/atp.sh status        # service nào chạy, dashboard ở đâu
+./server/atp.sh ca            # xuất chứng chỉ gốc của Caddy cho máy khác trong LAN tin cậy
+./server/atp.sh backup        # dump ngay; backup-copy <thư mục> để chép ra ổ khác
+./server/atp.sh update        # git pull, backup, build lại, chạy lại
+./server/atp.sh help          # mọi lệnh: down, restart, logs, token, admin …, reset
+```
+
+Máy khác trong mạng mở `https://<IP>`: mở cổng 443 (và 80) trên firewall, cài chứng chỉ từ `ca`. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
+
 ## Bốn luật của repo này
 
 1. **`SPEC.md` là nguồn sự thật duy nhất.** Mọi thứ trong `docs/` là lịch sử. Tài liệu nào nói khác SPEC → tài liệu đó sai.
@@ -58,6 +75,7 @@ npm install && npm run build
 SPEC.md              nguồn sự thật — quyết định, kiến trúc, schema, thuật toán, gate
 phase0/              bộ công cụ thi hành: outreach, phỏng vấn, baseline TTRC, biên bản Gate-0
 backend/             Go monolith P1-min theo §6.9 — QĐ-11; test kiến trúc cưỡng chế §6.9.3; GATES.md = bằng chứng T0–T5
+server/atp.sh        một script cho máy cá nhân làm server: init / up / seed / status / backup / ca / update / reset
 backend/deploy/      image distroless, compose staging (Caddy TLS, Prometheus, backup), openapi.yaml, alert rules
 reporter/playwright/ npm reporter §7.5 — batch, retry, spool, artifact, fingerprint §9.2 khớp Go
 frontend/            dashboard Vue 3 (P1-min UI đủ; QĐ-9 chọn Flutter, chủ dự án chọn Vue 14-09 — PLAN.md)

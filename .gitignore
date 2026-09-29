@@ -15,3 +15,6 @@ Thumbs.db
 
 # Deployment secrets (deploy/.env.example is the template).
 backend/deploy/.env
+
+# The root certificate server/atp.sh ca exports.
+server/atp-root-ca.crt
