@@ -150,6 +150,12 @@ var (
 
 // Service is the contract. Writes join the caller's transaction (§6.9.6).
 type Service interface {
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string) error
+
 	// ResolveInline is tier 1 (§7.6): exact alias match only, never creates.
 	// Returns Key → identity id for the refs it knows; unknown keys are
 	// absent. Touches last_seen_at of matched identities.

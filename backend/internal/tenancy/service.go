@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
+	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 )
@@ -80,7 +82,7 @@ func (s *service) GetProject(ctx context.Context, id ProjectID) (Project, error)
 	}
 	var p Project
 	err := s.db.Q(ctx).QueryRow(ctx,
-		`SELECT id, workspace_id, name, default_branch, created_at FROM projects WHERE id = $1`, string(id),
+		`SELECT id, workspace_id, name, default_branch, created_at FROM projects WHERE id = $1 AND deleted_at IS NULL`, string(id),
 	).Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.DefaultBranch, &p.CreatedAt)
 	return p, mapErr(err)
 }
@@ -94,7 +96,7 @@ func (s *service) ProjectScope(ctx context.Context, id ProjectID) (Scope, error)
 	err := s.db.Q(ctx).QueryRow(ctx,
 		`SELECT w.org_id, p.workspace_id, p.id
 		   FROM projects p JOIN workspaces w ON w.id = p.workspace_id
-		  WHERE p.id = $1`, string(id),
+		  WHERE p.id = $1 AND p.deleted_at IS NULL`, string(id),
 	).Scan(&sc.OrgID, &sc.WorkspaceID, &sc.ProjectID)
 	return sc, mapErr(err)
 }
@@ -208,7 +210,7 @@ func (s *service) ListProjects(ctx context.Context, level string, id string) ([]
 	rows, err := s.db.Q(ctx).Query(ctx, `
 		SELECT p.id, p.workspace_id, w.name, p.name, p.default_branch, p.created_at
 		  FROM projects p JOIN workspaces w ON w.id = p.workspace_id
-		 WHERE `+where+` ORDER BY p.name, p.id`, id)
+		 WHERE `+where+` AND p.deleted_at IS NULL ORDER BY p.name, p.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -242,4 +244,98 @@ func (s *service) ListEnvironments(ctx context.Context, project ProjectID) ([]En
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ---- soft delete (§11.3.2 "Tạo/xóa project") --------------------------------
+
+const deletedColumns = `p.id, p.workspace_id, w.name, p.name, p.default_branch, p.created_at, w.org_id, p.deleted_at, p.deleted_by, p.purge_after`
+
+func scanDeleted(row interface{ Scan(...any) error }) (DeletedProject, error) {
+	var d DeletedProject
+	err := row.Scan(&d.ID, &d.WorkspaceID, &d.WorkspaceName, &d.Name, &d.DefaultBranch, &d.CreatedAt, &d.OrgID, &d.DeletedAt, &d.DeletedBy, &d.PurgeAfter)
+	d.DeletedAt, d.PurgeAfter = d.DeletedAt.UTC(), d.PurgeAfter.UTC()
+	return d, err
+}
+
+func (s *service) DeleteProject(ctx context.Context, id ProjectID, actor string, keep time.Duration) (DeletedProject, error) {
+	if !uuidRe.MatchString(string(id)) {
+		return DeletedProject{}, ErrNotFound
+	}
+	if strings.TrimSpace(actor) == "" || keep < time.Hour {
+		return DeletedProject{}, fmt.Errorf("%w: actor and a restore window of at least an hour", ErrInvalid)
+	}
+	now := time.Now().UTC()
+	d, err := scanDeleted(s.db.Q(ctx).QueryRow(ctx, `
+		WITH d AS (
+			UPDATE projects SET deleted_at = $2, deleted_by = $3, purge_after = $4
+			 WHERE id = $1 AND deleted_at IS NULL
+			RETURNING *)
+		SELECT `+deletedColumns+` FROM d p JOIN workspaces w ON w.id = p.workspace_id`,
+		string(id), now, strings.TrimSpace(actor), now.Add(keep)))
+	return d, mapErr(err)
+}
+
+func (s *service) RestoreProject(ctx context.Context, id ProjectID) (Project, error) {
+	if !uuidRe.MatchString(string(id)) {
+		return Project{}, ErrNotFound
+	}
+	var p Project
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		UPDATE projects SET deleted_at = NULL, deleted_by = NULL, purge_after = NULL
+		 WHERE id = $1 AND deleted_at IS NOT NULL
+		RETURNING id, workspace_id, name, default_branch, created_at`, string(id),
+	).Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.DefaultBranch, &p.CreatedAt)
+	// A live project took the name meanwhile: projects_live_name says so.
+	return p, mapErr(err)
+}
+
+func (s *service) DeletedProjects(ctx context.Context, ws WorkspaceID) ([]DeletedProject, error) {
+	if !uuidRe.MatchString(string(ws)) {
+		return nil, ErrNotFound
+	}
+	return s.listDeleted(ctx, `p.workspace_id = $1`, string(ws), 500)
+}
+
+func (s *service) ProjectsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedProject, error) {
+	return s.listDeleted(ctx, `p.purge_after <= $1`, now.UTC(), limit)
+}
+
+func (s *service) listDeleted(ctx context.Context, where string, arg any, limit int) ([]DeletedProject, error) {
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT `+deletedColumns+`
+		  FROM projects p JOIN workspaces w ON w.id = p.workspace_id
+		 WHERE p.deleted_at IS NOT NULL AND `+where+`
+		 ORDER BY p.deleted_at DESC LIMIT `+fmt.Sprint(limit), arg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DeletedProject{}
+	for rows.Next() {
+		d, err := scanDeleted(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (s *service) PurgeProject(ctx context.Context, id ProjectID) error {
+	if !uuidRe.MatchString(string(id)) {
+		return ErrNotFound
+	}
+	var deleted bool
+	err := s.db.Q(ctx).QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM projects WHERE id = $1`, string(id)).Scan(&deleted)
+	if err != nil {
+		return mapErr(err)
+	}
+	if !deleted {
+		return fmt.Errorf("%w: project %s is not deleted", ErrConflict, id)
+	}
+	if _, err := s.db.Q(ctx).Exec(ctx, `DELETE FROM environments WHERE project_id = $1`, string(id)); err != nil {
+		return err
+	}
+	_, err = s.db.Q(ctx).Exec(ctx, `DELETE FROM projects WHERE id = $1`, string(id))
+	return err
 }

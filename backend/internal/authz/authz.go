@@ -315,6 +315,17 @@ var (
 
 // Service is the contract. Writes join the caller's transaction (§6.9.6).
 type Service interface {
+	// AuditProject records a project deletion, restore or purge (§11.7:
+	// destructive actions are logged) — tenancy owns the project, authz the
+	// audit table. action is project.delete | project.restore | project.purge.
+	AuditProject(ctx context.Context, action, projectID, workspaceID, actor string, details map[string]any) error
+
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string, environmentIDs []string) error
+
 	// Authorize is THE check (§11.3.3). It returns nil, ErrForbidden or
 	// ErrNoAccess. The caller must have validated that the Resource ids are
 	// real and related; authz only asks "may this principal act here".

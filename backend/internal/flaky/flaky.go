@@ -64,6 +64,12 @@ var ErrNotFound = errors.New("flaky: not found")
 
 // Service is the contract.
 type Service interface {
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string) error
+
 	// RecomputeRun rebuilds the signal of every resolved identity in a
 	// finished run (§8.6: "recompute on run finish, incremental"). Results
 	// without a stable id are skipped. Returns how many signals it wrote.

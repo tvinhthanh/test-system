@@ -620,3 +620,41 @@ func newID() string {
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
+
+func (s *service) PurgeProject(ctx context.Context, projectID string) (int, error) {
+	n := 0
+	for {
+		rows, err := s.db.Q(ctx).Query(ctx, `SELECT id, storage_key, coalesce(upload_id, '') FROM artifacts WHERE project_id = $1 LIMIT 500`, projectID)
+		if err != nil {
+			return n, err
+		}
+		type row struct{ id, key, upload string }
+		var batch []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.id, &r.key, &r.upload); err != nil {
+				rows.Close()
+				return n, err
+			}
+			batch = append(batch, r)
+		}
+		rows.Close()
+		if len(batch) == 0 {
+			return n, nil
+		}
+		for _, r := range batch {
+			if r.upload != "" {
+				if err := s.store.AbortMultipart(ctx, r.key, r.upload); err != nil && !errors.Is(err, objstore.ErrNotFound) {
+					return n, fmt.Errorf("%w: %v", ErrStore, err)
+				}
+			}
+			if err := s.store.Delete(ctx, r.key); err != nil && !errors.Is(err, objstore.ErrNotFound) {
+				return n, fmt.Errorf("%w: %v", ErrStore, err)
+			}
+			if _, err := s.db.Q(ctx).Exec(ctx, `DELETE FROM artifacts WHERE id = $1`, r.id); err != nil {
+				return n, err
+			}
+			n++
+		}
+	}
+}

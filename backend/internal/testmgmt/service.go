@@ -896,3 +896,29 @@ func (s *service) ProjectOfRelease(ctx context.Context, releaseID string) (strin
 	err := s.db.Q(ctx).QueryRow(ctx, `SELECT project_id FROM releases WHERE id = $1`, releaseID).Scan(&project)
 	return project, mapErr(err)
 }
+
+func (s *service) PurgeProject(ctx context.Context, projectID string) error {
+	if !purgeUUID.MatchString(projectID) {
+		return ErrNotFound
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			"DELETE FROM manual_executions WHERE project_id = $1",
+			"DELETE FROM test_plans WHERE project_id = $1",
+			"DELETE FROM releases WHERE project_id = $1",
+			"DELETE FROM requirement_coverage WHERE project_id = $1",
+			"DELETE FROM test_case_automation_links WHERE project_id = $1",
+			"DELETE FROM test_cases WHERE project_id = $1",
+			"DELETE FROM requirements WHERE project_id = $1",
+			"DELETE FROM test_suites WHERE project_id = $1",
+			"DELETE FROM ttrc_baselines WHERE project_id = $1",
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, projectID); err != nil {
+				return fmt.Errorf("testmgmt: purge project: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

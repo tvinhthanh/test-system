@@ -255,6 +255,16 @@ files and updating this plan.
 
 ## Change Log
 
+### 2026-09-29 (delete / restore a project)
+
+- Project Members page: "Delete this project" for `project.manage`, enabled
+  only once the exact name is typed; goes to Projects. Workspace page:
+  "Recently deleted projects" with who, when, purge date, Restore (opens the
+  project's runs). `ProjectAccess.name()`, repository methods,
+  `project-delete.test.ts`. Checked on the compose stack as a workspace
+  admin: create → delete (wrong name keeps the button off) → not listed →
+  restore → runs; no non-2xx, no console errors; full live-check green.
+
 ### 2026-09-29 (create a project)
 
 - Workspace Team page: "New project" for `project.manage`; on success the

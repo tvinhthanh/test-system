@@ -437,3 +437,25 @@ func nullable(s string) *string {
 	}
 	return &s
 }
+
+func (s *service) PurgeProject(ctx context.Context, projectID string) error {
+	if !purgeUUID.MatchString(projectID) {
+		return ErrNotFound
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			"DELETE FROM review_queue_items WHERE project_id = $1",
+			"DELETE FROM test_identity_aliases WHERE project_id = $1",
+			"DELETE FROM identity_audit WHERE project_id = $1",
+			"UPDATE test_identities SET merged_into_id = NULL, status = 'retired' WHERE project_id = $1 AND merged_into_id IS NOT NULL",
+			"DELETE FROM test_identities WHERE project_id = $1",
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, projectID); err != nil {
+				return fmt.Errorf("identity: purge project: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

@@ -98,6 +98,12 @@ var (
 
 // Service is the contract. Writes join the caller's transaction.
 type Service interface {
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string) error
+
 	// Record appends one event. FAILURE_SEEN from the same user on the same
 	// result within 24 h is collapsed into the earlier row (§8.3 dedupe)
 	// and returned with created=false.

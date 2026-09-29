@@ -7,6 +7,8 @@ import { useResource } from "../../core/state/useResource";
 import type { Invitation, Member } from "./membersRepository";
 import { grantable, type MemberNode, type Role } from "./roles";
 import NewProject from "./NewProject.vue";
+import DeleteProject from "./DeleteProject.vue";
+import DeletedProjects from "./DeletedProjects.vue";
 import { useMutation } from "../testmgmt/useMutation";
 import ErrorNote from "../testmgmt/ErrorNote.vue";
 import { useProjectPermission } from "../reports/useProjectPermission";
@@ -32,7 +34,7 @@ import {
 // One screen for the members of a project, a workspace or an organization
 // (§11.3.2 "Quản lý member (tầng tương ứng)"); the route says which.
 const route = useRoute();
-const { members, session, teamAccess } = useServices();
+const { members, session, teamAccess, projectAccess } = useServices();
 const node = computed<MemberNode>(() =>
   route.params.organization
     ? { level: "organization", id: String(route.params.organization) }
@@ -53,6 +55,13 @@ const canManage = computed(() =>
     : !!scope.value?.actions.includes("member.manage"),
 );
 // §11.3.2 "Tạo project": workspace admins, org admins and owners.
+// §11.3.2 "xóa project": the same admins, on the project's own page.
+const canDeleteProject = computed(
+  () =>
+    node.value.level === "project" &&
+    projectAccess.can(node.value.id, "project.manage") &&
+    !!projectAccess.name(node.value.id),
+);
 const canCreateProject = computed(
   () =>
     node.value.level === "workspace" &&
@@ -398,4 +407,10 @@ const rowRoles = (m: Member) =>
       </li>
     </ul>
   </section>
+  <DeletedProjects v-if="canCreateProject" :workspace="node.id" />
+  <DeleteProject
+    v-if="canDeleteProject"
+    :project="node.id"
+    :name="projectAccess.name(node.id)"
+  />
 </template>

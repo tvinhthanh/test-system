@@ -160,6 +160,12 @@ var (
 
 // Service is the contract.
 type Service interface {
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string) error
+
 	// CreateRun is idempotent on (ProjectID, LocalRunID): a repeat returns
 	// the existing run with created=false and changes nothing (§7.2 #1).
 	CreateRun(ctx context.Context, in NewRun) (run Run, created bool, err error)

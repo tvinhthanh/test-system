@@ -75,6 +75,9 @@ GET /v1/member-scopes
 GET /v1/workspaces/{workspaceId}/members
 POST /v1/workspaces/{workspaceId}/members
 POST /v1/workspaces/{workspaceId}/projects
+GET /v1/workspaces/{workspaceId}/projects/deleted
+POST /v1/workspaces/{workspaceId}/projects/{projectId}/restore
+DELETE /v1/projects/{projectId}
 DELETE /v1/workspaces/{workspaceId}/members/{userId}
 GET /v1/organizations/{organizationId}/members
 GET /v1/organizations/{organizationId}/meter

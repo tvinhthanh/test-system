@@ -703,6 +703,7 @@ func (s *service) MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, 
 		  LEFT JOIN reviews rv ON rv.project_id = p.id
 		  LEFT JOIN volume v ON v.project_id = p.id
 		  LEFT JOIN storage st ON st.project_id = p.id
+		 WHERE p.deleted_at IS NULL -- a deleted project is not billed while it waits for its purge
 		 ORDER BY p.id`, from, start, end)
 	if err != nil {
 		return nil, err

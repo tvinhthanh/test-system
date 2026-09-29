@@ -55,6 +55,15 @@ type Project struct {
 	CreatedAt     time.Time
 }
 
+// DeletedProject is a project in its restore window.
+type DeletedProject struct {
+	Project
+	OrgID      OrganizationID
+	DeletedAt  time.Time
+	DeletedBy  string
+	PurgeAfter time.Time
+}
+
 // Environment separates histories of the same test (§8.2). Key is what the
 // reporter sends as environmentKey (§7.3).
 type Environment struct {
@@ -88,6 +97,18 @@ type Service interface {
 	CreateOrganization(ctx context.Context, name, slug string) (Organization, error)
 	CreateWorkspace(ctx context.Context, org OrganizationID, name string) (Workspace, error)
 	CreateProject(ctx context.Context, ws WorkspaceID, name, defaultBranch string) (Project, error)
+
+	// Deleting a project (§11.3.2) is soft: from DeleteProject on, no read
+	// of this module returns it — GetProject, ProjectScope and ListProjects
+	// skip it, so every route answers 404 — until RestoreProject, or until
+	// the worker purges it after keep. PurgeProject removes this module's
+	// rows (environments, the project) once the other modules have removed
+	// theirs; it refuses a project that is not deleted.
+	DeleteProject(ctx context.Context, id ProjectID, actor string, keep time.Duration) (DeletedProject, error)
+	RestoreProject(ctx context.Context, id ProjectID) (Project, error)
+	DeletedProjects(ctx context.Context, ws WorkspaceID) ([]DeletedProject, error)
+	ProjectsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedProject, error)
+	PurgeProject(ctx context.Context, id ProjectID) error
 
 	GetProject(ctx context.Context, id ProjectID) (Project, error)
 	GetOrganization(ctx context.Context, id OrganizationID) (Organization, error)

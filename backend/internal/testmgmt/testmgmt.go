@@ -430,6 +430,12 @@ var (
 // another project answers ErrNotFound (§11.3.3: the tenant condition is in
 // the query, never a filter afterwards).
 type Service interface {
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string) error
+
 	// Suites
 	CreateSuite(ctx context.Context, projectID, parentID, name string) (Suite, error)
 	ListSuites(ctx context.Context, projectID string) ([]Suite, error)

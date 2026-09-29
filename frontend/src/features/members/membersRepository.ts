@@ -202,4 +202,62 @@ export class MembersRepository {
     );
     return { id: d.string(x.id), name: d.string(x.name) };
   }
+  // §11.3.2 "xóa project": soft — restorable from the workspace until
+  // purgeAfter. The name is asked back so a stray click deletes nothing.
+  async deleteProject(
+    projectId: string,
+    confirmName: string,
+    signal: AbortSignal,
+  ) {
+    return deletedProject(
+      await this.api.request(`/v1/projects/${encodeURIComponent(projectId)}`, {
+        signal,
+        method: "DELETE",
+        body: { confirmName },
+      }),
+    );
+  }
+  async deletedProjects(workspaceId: string, signal: AbortSignal) {
+    return d.array(
+      d.record(
+        await this.api.request(
+          `/v1/workspaces/${encodeURIComponent(workspaceId)}/projects/deleted`,
+          { signal },
+        ),
+      ).items,
+      deletedProject,
+      500,
+    );
+  }
+  async restoreProject(
+    workspaceId: string,
+    projectId: string,
+    signal: AbortSignal,
+  ) {
+    const x = d.record(
+      await this.api.request(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectId)}/restore`,
+        { signal, body: {} },
+      ),
+    );
+    return { id: d.string(x.id), name: d.string(x.name) };
+  }
+}
+
+export interface DeletedProject {
+  id: string;
+  name: string;
+  deletedAt: string;
+  deletedBy: string;
+  purgeAfter: string;
+}
+function deletedProject(value: unknown): DeletedProject {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    name: d.string(x.name),
+    deletedAt: d.date(x.deletedAt),
+    deletedBy: d.string(x.deletedBy),
+    purgeAfter: d.date(x.purgeAfter),
+  };
 }

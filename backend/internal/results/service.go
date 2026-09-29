@@ -669,3 +669,24 @@ func (s *service) SetFailureCategory(ctx context.Context, id TestResultID, categ
 	}
 	return nil
 }
+
+func (s *service) PurgeProject(ctx context.Context, projectID string) error {
+	if !purgeUUID.MatchString(projectID) {
+		return ErrNotFound
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			"DELETE FROM test_result_attempts WHERE test_result_id IN (SELECT t.id FROM test_results t JOIN runs r ON r.id = t.run_id WHERE r.project_id = $1)",
+			"DELETE FROM test_results WHERE run_id IN (SELECT id FROM runs WHERE project_id = $1)",
+			"DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE project_id = $1)",
+			"DELETE FROM runs WHERE project_id = $1",
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, projectID); err != nil {
+				return fmt.Errorf("results: purge project: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

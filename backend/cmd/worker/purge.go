@@ -1,0 +1,86 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
+	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
+	"github.com/vinh/automation-testing-platform/backend/internal/identity"
+	"github.com/vinh/automation-testing-platform/backend/internal/results"
+	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
+	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+)
+
+// purger ends deleted projects whose restore window has passed (§11.3.2
+// "xóa project"): each module deletes what it owns — artifacts and their
+// objects in the bucket first, then triage, flaky, identity, Test
+// Management, results, tokens and memberships — and tenancy removes the
+// project last, so a purge cut short leaves a deleted project the next
+// sweep finishes. The shadow meter's history (billing) stays: it is what
+// was counted, not the project's data. Audited as project.purge.
+type purger struct {
+	tenancy  tenancy.Service
+	authz    authz.Service
+	artifact artifact.Service
+	triage   triage.Service
+	flaky    flaky.Service
+	identity identity.Service
+	testmgmt testmgmt.Service
+	results  results.Service
+}
+
+// run purges up to limit due projects; it returns how many it finished and
+// the first error (a project that failed stays deleted and is retried).
+func (p purger) run(ctx context.Context, now time.Time, limit int) (int, error) {
+	due, err := p.tenancy.ProjectsToPurge(ctx, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	var first error
+	for _, d := range due {
+		if err := p.one(ctx, d); err != nil {
+			if first == nil {
+				first = fmt.Errorf("purge %s: %w", d.ID, err)
+			}
+			continue
+		}
+		done++
+	}
+	return done, first
+}
+
+func (p purger) one(ctx context.Context, d tenancy.DeletedProject) error {
+	id := string(d.ID)
+	envs, err := p.tenancy.ListEnvironments(ctx, d.ID)
+	if err != nil {
+		return err
+	}
+	envIDs := make([]string, 0, len(envs))
+	for _, e := range envs {
+		envIDs = append(envIDs, string(e.ID))
+	}
+	objects, err := p.artifact.PurgeProject(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, step := range []func(context.Context, string) error{
+		p.triage.PurgeProject, p.flaky.PurgeProject, p.identity.PurgeProject, p.testmgmt.PurgeProject, p.results.PurgeProject,
+	} {
+		if err := step(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err := p.authz.PurgeProject(ctx, id, envIDs); err != nil {
+		return err
+	}
+	if err := p.tenancy.PurgeProject(ctx, d.ID); err != nil {
+		return err
+	}
+	return p.authz.AuditProject(ctx, "project.purge", id, string(d.WorkspaceID), "system: restore window ended",
+		map[string]any{"name": d.Name, "deleted_by": d.DeletedBy, "deleted_at": d.DeletedAt, "artifacts_removed": objects})
+}

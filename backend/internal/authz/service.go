@@ -631,3 +631,34 @@ func (s *service) ExpiringTokens(ctx context.Context, within time.Duration) (int
 		 WHERE revoked_at IS NULL AND expires_at > $1 AND expires_at <= $2`, now, now.Add(within)).Scan(&n)
 	return n, err
 }
+
+func (s *service) PurgeProject(ctx context.Context, projectID string, environmentIDs []string) error {
+	if !isUUID(projectID) {
+		return ErrNotFound
+	}
+	scopes := append([]string{projectID}, environmentIDs...)
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			`DELETE FROM api_tokens WHERE scope_id::text = ANY($1)`,
+			`DELETE FROM memberships WHERE scope_level = 'project' AND scope_id::text = ANY($1)`,
+			`DELETE FROM invitations WHERE scope_level = 'project' AND scope_id::text = ANY($1)`,
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, scopes); err != nil {
+				return fmt.Errorf("authz: purge project: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+func (s *service) AuditProject(ctx context.Context, action, projectID, workspaceID, actor string, details map[string]any) error {
+	switch action {
+	case "project.delete", "project.restore", "project.purge":
+	default:
+		return fmt.Errorf("%w: audit action %q", ErrInvalid, action)
+	}
+	if !isUUID(projectID) || !isUUID(workspaceID) || actor == "" {
+		return fmt.Errorf("%w: project, workspace and actor", ErrInvalid)
+	}
+	return s.audit(ctx, action, "project", projectID, string(LevelWorkspace), workspaceID, actor, details)
+}

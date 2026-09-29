@@ -329,6 +329,17 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
   token holding `project:read`.
 
+### Delete and restore a project (§11.3.2, implemented 2026-09-29)
+
+`DELETE /v1/projects/{projectId} {confirmName}` → `200 {id, name, deletedAt,
+deletedBy, purgeAfter}` (`400 CONFIRM_NAME` unless the exact name); from then
+the project is `404` everywhere, CI tokens included. `GET
+/v1/workspaces/{id}/projects/deleted` lists those still restorable; `POST
+…/projects/{projectId}/restore` → `200 {id, name, workspaceName}`, `409` if a
+live project took the name. All need `project.manage`. UI: project Members
+page → "Delete this project" (typed name); workspace page → "Recently deleted
+projects" → Restore.
+
 ### Create a project (§11.3.2, implemented 2026-09-29)
 
 `POST /v1/workspaces/{workspaceId}/projects {name, defaultBranch?}` → `201

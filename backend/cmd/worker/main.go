@@ -34,6 +34,8 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
+	"github.com/vinh/automation-testing-platform/backend/internal/triage"
 )
 
 const (
@@ -82,7 +84,12 @@ func main() {
 	// §10.6 shadow meter (QĐ-13): yesterday is recorded once, by the first
 	// sweep that finds it missing; counted, never charged.
 	meter := billing.New(db, meterSource{query.New(db)})
-	artJobs := artifact.NewJobs(artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: artifact.New(db, store, res), Metrics: reg, Logger: logger})
+	art := artifact.New(db, store, res)
+	artJobs := artifact.NewJobs(artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: art, Metrics: reg, Logger: logger})
+	// Deleted projects past their restore window (§11.3.2), a few per sweep.
+	idn := identity.New(db)
+	purge := purger{tenancy: ten, authz: az, artifact: art, triage: triage.New(db, res), flaky: flk, identity: idn,
+		testmgmt: testmgmt.New(db, idn, nil, testmgmt.Policy{}), results: res}
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", reg.Handler())
@@ -132,6 +139,11 @@ func main() {
 				} else {
 					logger.Info("meter recorded", "day", yesterday.Format("2006-01-02"), "projects", n)
 				}
+			}
+			if n, err := purge.run(ctx, time.Now(), 5); err != nil {
+				logger.Error("project purge", "err", err)
+			} else if n > 0 {
+				logger.Info("projects purged", "n", n)
 			}
 			// Finished jobs older than JOB_RETENTION go, a bounded batch per sweep
 			// (§14.1 T5: the queue table must not grow with history).

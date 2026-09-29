@@ -46,6 +46,9 @@ export class ProjectAccess {
       await this.ensure(projectId);
   }
 
+  name(projectId: string) {
+    return this.projects.get(projectId)?.name ?? "";
+  }
   can(projectId: string, action: ProjectAction) {
     return this.projects.get(projectId)?.actions.includes(action) ?? false;
   }

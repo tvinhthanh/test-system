@@ -852,6 +852,88 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}:
+    delete:
+      operationId: deleteProject
+      tags: [members]
+      summary: Delete a project — soft, restorable for 30 days, then purged (§11.3.2)
+      description: |
+        Needs `project.manage` (workspace admins, org admins and owners). The
+        body must carry the project's exact name. From this answer on the
+        project is gone for every route, its CI tokens included (404); it is
+        listed under its workspace's deleted projects and can be restored
+        until `purgeAfter`, when the worker deletes every module's data for
+        it and its objects in the bucket. Delete, restore and purge are
+        audited.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmName]
+              properties:
+                confirmName: { type: string }
+      responses:
+        "200":
+          description: Deleted; restorable until purgeAfter.
+          content: { application/json: { schema: { $ref: "#/components/schemas/DeletedProject" } } }
+        "400":
+          description: "`CONFIRM_NAME` — the name typed is not the project's."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/projects/deleted:
+    get:
+      operationId: listDeletedProjects
+      tags: [members]
+      summary: The workspace's deleted projects still in their restore window
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Newest deletion first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DeletedProject" } }
+                  nextCursor: { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/projects/{projectId}/restore:
+    post:
+      operationId: restoreProject
+      tags: [members]
+      summary: Restore a deleted project before its purge
+      description: "`409` when another live project in the workspace has taken its name meanwhile."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Restored, with its data and tokens as they were.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, workspaceName]
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  workspaceName: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/workspaces/{workspaceId}/members:
     get:
       operationId: listWorkspaceMembers
@@ -2465,6 +2547,15 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
+    DeletedProject:
+      type: object
+      required: [id, name, deletedAt, deletedBy, purgeAfter]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        deletedAt: { type: string, format: date-time }
+        deletedBy: { type: string }
+        purgeAfter: { type: string, format: date-time, description: "Restorable until then; purged by the worker after." }
     ProjectToken:
       type: object
       required: [id, prefix, name, permissions, createdAt, lastUsedAt, expiresAt, revokedAt]

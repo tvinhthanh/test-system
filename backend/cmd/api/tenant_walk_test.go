@@ -185,10 +185,12 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/releases/{releaseId}/evaluate":                         map[string]any{},
 		"POST /v1/projects/{projectId}/releases/{releaseId}/decision":                         map[string]any{"status": "approved"},
 		// Members: a real, verified account, so only the tenant check can refuse.
-		"POST /v1/projects/{projectId}/members":           map[string]any{"email": "a@alpha.example", "role": "viewer"},
-		"POST /v1/workspaces/{workspaceId}/projects":      map[string]any{"name": "walk project"},
-		"POST /v1/workspaces/{workspaceId}/members":       map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},
-		"POST /v1/organizations/{organizationId}/members": map[string]any{"email": "a@alpha.example", "role": "org_admin"},
+		"POST /v1/projects/{projectId}/members":                          map[string]any{"email": "a@alpha.example", "role": "viewer"},
+		"DELETE /v1/projects/{projectId}":                                map[string]any{"confirmName": "alpha-app"},
+		"POST /v1/workspaces/{workspaceId}/projects/{projectId}/restore": map[string]any{},
+		"POST /v1/workspaces/{workspaceId}/projects":                     map[string]any{"name": "walk project"},
+		"POST /v1/workspaces/{workspaceId}/members":                      map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},
+		"POST /v1/organizations/{organizationId}/members":                map[string]any{"email": "a@alpha.example", "role": "org_admin"},
 		// JUnit upload: the tenant check runs before the body is read.
 		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
 		"POST /v1/projects/{projectId}/tokens":        map[string]any{"name": "walk"},

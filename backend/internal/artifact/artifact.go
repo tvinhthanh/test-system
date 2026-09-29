@@ -215,6 +215,12 @@ func (e *MismatchError) Error() string {
 
 // Service is the contract.
 type Service interface {
+	// PurgeProject deletes everything this module keeps for a project that
+	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
+	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
+	// a purge cut short is finished by the next one.
+	PurgeProject(ctx context.Context, projectID string) (int, error)
+
 	// Declare records the artifact and returns how to upload it. Repeating
 	// a declare returns the same artifact with fresh URLs and, for
 	// multipart, the parts already received (§7.7 resume).

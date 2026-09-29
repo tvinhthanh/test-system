@@ -3,6 +3,7 @@ package flaky
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
 	"time"
@@ -169,3 +170,21 @@ func mapErr(err error) error {
 	}
 	return err
 }
+
+func (s *service) PurgeProject(ctx context.Context, projectID string) error {
+	if !purgeUUID.MatchString(projectID) {
+		return ErrNotFound
+	}
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			"DELETE FROM flaky_signals WHERE project_id = $1",
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, projectID); err != nil {
+				return fmt.Errorf("flaky: purge project: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+var purgeUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
