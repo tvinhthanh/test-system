@@ -54,13 +54,14 @@ npm install && npm run build
 ./server/atp.sh up            # build dashboard + image, chạy tất cả, đợi api khỏe
 ./server/atp.sh seed          # tổ chức, project, tài khoản owner, CI token đầu tiên
 ./server/atp.sh status        # service nào chạy, dashboard ở đâu
+./server/atp.sh firewall      # mở cổng HTTPS/HTTP trên firewall của máy (ufw, firewalld, Windows)
 ./server/atp.sh ca            # xuất chứng chỉ gốc của Caddy cho máy khác trong LAN tin cậy
 ./server/atp.sh backup        # dump ngay; backup-copy <thư mục> để chép ra ổ khác
 ./server/atp.sh update        # git pull, backup, build lại, chạy lại
 ./server/atp.sh help          # mọi lệnh: down, restart, logs, token, admin …, reset
 ```
 
-Máy khác trong mạng mở `https://<IP>`: mở cổng 443 (và 80) trên firewall, cài chứng chỉ từ `ca`. Cổng 443/80 đã có server khác dùng thì `HTTPS_PORT=8443 HTTP_PORT=8080 ./server/atp.sh init` — địa chỉ thành `https://<IP>:8443`. Ngay trên máy chủ cũng mở bằng địa chỉ đó (Caddy chỉ có chứng chỉ cho `DOMAIN`, không cho `localhost`). `seed` chạy trong một transaction: lỗi thì không tạo gì, chạy lại được. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
+Máy khác trong mạng mở `https://<IP>`: mở cổng bằng `./server/atp.sh firewall` (ufw, firewalld hoặc Windows firewall — Windows thì chạy Git Bash bằng quyền administrator), cài chứng chỉ từ `ca`. Cổng 443/80 đã có server khác dùng thì `HTTPS_PORT=8443 HTTP_PORT=8080 ./server/atp.sh init` — địa chỉ thành `https://<IP>:8443`. Ngay trên máy chủ cũng mở bằng địa chỉ đó (Caddy chỉ có chứng chỉ cho `DOMAIN`, không cho `localhost`). `seed` chạy trong một transaction: lỗi thì không tạo gì, chạy lại được. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
 
 ## Bốn luật của repo này
 

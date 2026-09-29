@@ -18,6 +18,7 @@
 #   admin <args…>                   the operator CLI (org/ws/project/user/role/token/audit…)
 #   backup | backups | backup-copy <dir>
 #   ca [file]                       export Caddy's root certificate for other devices
+#   firewall                        open HTTPS_PORT (tcp+udp) and HTTP_PORT in this machine's firewall
 #   reset                           stop and DELETE ALL DATA (asks first)
 #
 # Requirements: docker (with compose v2; the dashboard is built in a Node
@@ -138,7 +139,7 @@ cmd_init() {
 	echo "    Sign-in with Google/GitHub and email (invitations, forgot password) are off;"
 	echo "    turn them on in that file (OAUTH_*, MAIL=smtp) and run: $0 restart"
 	if [ "$host" != localhost ]; then
-		echo "    Other devices reach it at $url — allow TCP $port (and $hport) in this machine's firewall;"
+		echo "    Other devices reach it at $url — open the ports with: $0 firewall"
 		echo "    they must also trust its certificate: after up, run $0 ca"
 	fi
 	echo "Next: $0 up"
@@ -274,6 +275,54 @@ cmd_ca() {
 EOF
 }
 
+# Opens the ports Caddy publishes (HTTPS_PORT tcp + udp for HTTP/3, HTTP_PORT
+# for the http→https redirect and Let's Encrypt) in whichever firewall this
+# machine runs. Rules are named/added idempotently, so it can run again.
+# It never switches a firewall on: enabling ufw from a script can lock out
+# the SSH session running it. A router, cloud security group or VPN in
+# front of this machine is not reached from here.
+cmd_firewall() {
+	need_env
+	local https http; https=$(https_port); http=$(env_get HTTP_PORT); http="${http:-80}"
+	case "$https$http" in *[!0-9]*) die "HTTPS_PORT/HTTP_PORT in $ENV_FILE must be numbers" ;; esac
+	local sudo=""
+	case "$(uname -s)" in
+	MINGW* | MSYS* | CYGWIN*)
+		net session >/dev/null 2>&1 || die "run Git Bash as administrator (right click → Run as administrator), then: $0 firewall"
+		local rule name proto port
+		for rule in "ATP HTTPS TCP:TCP:$https" "ATP HTTPS UDP:UDP:$https" "ATP HTTP:TCP:$http"; do
+			IFS=: read -r name proto port <<<"$rule"
+			netsh advfirewall firewall delete rule name="$name" >/dev/null 2>&1 || true
+			netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol="$proto" localport="$port" >/dev/null ||
+				die "netsh refused the rule '$name'"
+			say "Windows firewall: $proto $port allowed ($name)"
+		done
+		;;
+	Linux)
+		if [ "$(id -u)" != 0 ]; then need sudo "or run this as root"; sudo=sudo; fi
+		if command -v ufw >/dev/null 2>&1 && $sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+			$sudo ufw allow "$https/tcp" >/dev/null
+			$sudo ufw allow "$https/udp" >/dev/null
+			$sudo ufw allow "$http/tcp" >/dev/null
+			say "ufw: $https/tcp, $https/udp, $http/tcp allowed"
+		elif command -v firewall-cmd >/dev/null 2>&1 && $sudo firewall-cmd --state >/dev/null 2>&1; then
+			$sudo firewall-cmd --permanent --add-port="$https/tcp" --add-port="$https/udp" --add-port="$http/tcp" >/dev/null
+			$sudo firewall-cmd --reload >/dev/null
+			say "firewalld: $https/tcp, $https/udp, $http/tcp allowed (permanent)"
+		else
+			say "no active ufw or firewalld here — nothing on this machine blocks $https/$http"
+			echo "    Still unreachable? Check iptables/nftables rules, the router, or the cloud security group."
+		fi
+		;;
+	Darwin)
+		say "macOS filters by app, not by port: when asked, allow Docker to accept incoming connections"
+		echo "    (System Settings → Network → Firewall → Options → Docker: Allow incoming connections)"
+		;;
+	*) die "unknown system $(uname -s) — open TCP $https, UDP $https and TCP $http in its firewall yourself" ;;
+	esac
+	echo "    Other devices: $(base_url)"
+}
+
 cmd_update() {
 	need_env; need git "https://git-scm.com"
 	say "pulling the latest code"
@@ -305,8 +354,9 @@ case "${1:-help}" in
 	backups) cmd_backups ;;
 	backup-copy) shift; cmd_backup_copy "$@" ;;
 	ca) shift; cmd_ca "$@" ;;
+	firewall) cmd_firewall ;;
 	update) cmd_update ;;
 	reset) cmd_reset ;;
-	help | -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+	help | -h | --help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
 	*) die "unknown command '$1' — see: $0 help" ;;
 esac
