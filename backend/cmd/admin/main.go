@@ -8,8 +8,10 @@
 //	admin org create   -name "Acme" -slug acme
 //	admin ws  create   -org <id> -name "Payments"
 //	admin project create -ws <id> -name checkout [-branch main]
-//	admin user create  -email alice@example.com [-password '…' -verified]
-//	admin user set-password -id <user> -password '…'   (revokes the user's other sessions, §11.2)
+//	admin org bootstrap -name "Acme" -slug acme -ws "Engineering" -project web-app -email alice@example.com -token first-ci < password
+//	                   (one transaction: organization, workspace, project, verified org_owner, CI token — all or nothing)
+//	admin user create  -email alice@example.com [-password '…' | -password-stdin] [-verified]
+//	admin user set-password -id <user> [-password '…' | -password-stdin]   (revokes the user's other sessions, §11.2)
 //	admin user verify  -id <user>
 //	admin user mfa-reset -id <user> -actor you@x -reason "…"  (lost phone + recovery codes; audited, sessions revoked)
 //	admin role grant   -user <id> -level project -scope <id> -role admin
@@ -44,12 +46,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
@@ -102,23 +107,89 @@ func main() {
 		ws, name, branch := fs.String("ws", "", "workspace id"), fs.String("name", "", "display name"), fs.String("branch", "main", "default branch")
 		parse(fs)
 		out, err = ten.CreateProject(ctx, tenancy.WorkspaceID(*ws), *name, *branch)
+	case "org bootstrap":
+		// The first tenant of a new install in one transaction, so a refused
+		// step (slug or email taken, short password) leaves nothing behind
+		// and the same command can simply be run again. The password comes
+		// on stdin: an argument would show in `ps` to every local user.
+		name, slug := fs.String("name", "", "organization display name"), fs.String("slug", "", "organization url slug")
+		wsName, projName := fs.String("ws", "", "workspace name"), fs.String("project", "", "project name")
+		email, tokName := fs.String("email", "", "owner email"), fs.String("token", "ci", "CI token label")
+		parse(fs)
+		password, perr := readPassword()
+		if perr != nil {
+			fail(2, perr)
+		}
+		var b struct {
+			Organization tenancy.Organization
+			Workspace    tenancy.Workspace
+			Project      tenancy.Project
+			User         authz.User
+			Token        authz.Issued
+		}
+		err = db.WithTx(ctx, func(ctx context.Context) (err error) {
+			if b.User, err = az.CreateUser(ctx, *email); err != nil {
+				return fmt.Errorf("account %s: %w", *email, err)
+			}
+			if err = az.SetPassword(ctx, b.User.ID, password, ""); err != nil {
+				return err
+			}
+			if err = az.VerifyEmail(ctx, b.User.ID); err != nil {
+				return err
+			}
+			if b.Organization, err = ten.CreateOrganization(ctx, *name, *slug); err != nil {
+				return fmt.Errorf("organization slug %q: %w", *slug, err)
+			}
+			if b.Workspace, err = ten.CreateWorkspace(ctx, b.Organization.ID, *wsName); err != nil {
+				return fmt.Errorf("workspace: %w", err)
+			}
+			if b.Project, err = ten.CreateProject(ctx, b.Workspace.ID, *projName, "main"); err != nil {
+				return fmt.Errorf("project: %w", err)
+			}
+			if _, err = az.GrantRole(ctx, b.User.ID, authz.ScopeRef{Level: authz.LevelOrganization, ID: string(b.Organization.ID)}, authz.RoleOrgOwner); err != nil {
+				return err
+			}
+			b.Token, err = az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(b.Project.ID)}, Permissions: []authz.Permission{authz.PermProjectIngest}, Name: *tokName})
+			return err
+		})
+		out = map[string]string{
+			"OrganizationID": string(b.Organization.ID), "WorkspaceID": string(b.Workspace.ID),
+			"ProjectID": string(b.Project.ID), "UserID": b.User.ID, "Email": b.User.Email,
+			"TokenID": b.Token.Token.ID, "Plaintext": b.Token.Plaintext,
+		}
 	case "user create":
 		email, password, verified := fs.String("email", "", "email"), fs.String("password", "", "initial password (≥ 12 chars)"), fs.Bool("verified", false, "mark the email verified now")
+		stdin := fs.Bool("password-stdin", false, "read the password from the first line of stdin (keeps it out of `ps`)")
 		parse(fs)
+		if *stdin {
+			if *password, err = readPassword(); err != nil {
+				fail(2, err)
+			}
+		}
 		var u authz.User
-		if u, err = az.CreateUser(ctx, *email); err == nil && *password != "" {
-			err = az.SetPassword(ctx, u.ID, *password, "")
-		}
-		if err == nil && *verified {
-			err = az.VerifyEmail(ctx, u.ID)
-		}
+		// One transaction: a refused password must not leave an account behind.
+		err = db.WithTx(ctx, func(ctx context.Context) (err error) {
+			if u, err = az.CreateUser(ctx, *email); err == nil && *password != "" {
+				err = az.SetPassword(ctx, u.ID, *password, "")
+			}
+			if err == nil && *verified {
+				err = az.VerifyEmail(ctx, u.ID)
+			}
+			return err
+		})
 		if err == nil {
 			u, err = az.GetUser(ctx, u.ID)
 		}
 		out = u
 	case "user set-password":
 		id, password := fs.String("id", "", "user id"), fs.String("password", "", "new password (≥ 12 chars)")
+		stdin := fs.Bool("password-stdin", false, "read the password from the first line of stdin (keeps it out of `ps`)")
 		parse(fs)
+		if *stdin {
+			if *password, err = readPassword(); err != nil {
+				fail(2, err)
+			}
+		}
 		err = az.SetPassword(ctx, *id, *password, "")
 		out = map[string]string{"user": *id, "password": "updated; other sessions revoked"}
 	case "user verify":
@@ -290,13 +361,22 @@ func main() {
 
 func parse(fs *flag.FlagSet) { _ = fs.Parse(os.Args[3:]) }
 
+// readPassword takes the first line of stdin, without its line ending.
+func readPassword() (string, error) {
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return "", errors.New("no password on stdin")
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
 func fail(code int, err error) {
 	fmt.Fprintln(os.Stderr, "admin:", err)
 	os.Exit(code)
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: admin <org create|ws create|project create|user create|user set-password|user verify|user mfa-reset|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend|meter record|meter report> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: admin <org create|org bootstrap|ws create|project create|user create|user set-password|user verify|user mfa-reset|role grant|role revoke|token issue|token revoke|token list|audit list|identity show|identity merge|identity undo-merge|identity split|review list|review decide|flaky list|triage record|triage list|dash runs|dash run|dash result|dash identities|dash history|dash triage|dash trend|meter record|meter report> [flags]")
 	os.Exit(2)
 }
 

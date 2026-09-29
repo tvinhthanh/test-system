@@ -60,7 +60,7 @@ npm install && npm run build
 ./server/atp.sh help          # mọi lệnh: down, restart, logs, token, admin …, reset
 ```
 
-Máy khác trong mạng mở `https://<IP>`: mở cổng 443 (và 80) trên firewall, cài chứng chỉ từ `ca`. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
+Máy khác trong mạng mở `https://<IP>`: mở cổng 443 (và 80) trên firewall, cài chứng chỉ từ `ca`. Cổng 443/80 đã có server khác dùng thì `HTTPS_PORT=8443 HTTP_PORT=8080 ./server/atp.sh init` — địa chỉ thành `https://<IP>:8443`. Ngay trên máy chủ cũng mở bằng địa chỉ đó (Caddy chỉ có chứng chỉ cho `DOMAIN`, không cho `localhost`). `seed` chạy trong một transaction: lỗi thì không tạo gì, chạy lại được. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
 
 ## Bốn luật của repo này
 
