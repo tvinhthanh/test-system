@@ -128,11 +128,32 @@ Unit/integration test cho phần còn lại (Postgres thật):
 | Duplicate event / retry cùng `(localRunId, sequence)` | `internal/ingest` `TestIngestEndToEnd` (batch gửi lại → `duplicates: 3`, finish hai lần) | §7.1, không nhân đôi |
 | Hai run song song cùng fingerprint lạ | `internal/identity` `TestRaceOnUnknownFingerprint` | một `TestIdentity` |
 | Reporter mất mạng → spool, run khách vẫn xanh | `reporter/playwright/test/client.test.ts`, `reporter.test.ts` | spool `.jsonl`, không bao giờ fail run |
-| S3 timeout khi upload → artifact retry được, run hợp lệ | `internal/artifact` với `memory.Fail` injection | §10.4 |
+| S3 timeout khi upload → artifact retry được, run hợp lệ | `internal/artifact` với `memory.Fail` injection; **30-09 trên S3 thật: xem đoạn dưới** | §10.4 |
 | Worker crash giữa job → lease hết hạn, job được nhận lại | `internal/platform/queue` `TestLeaseExpiryRecoversCrashedWorker`, `TestBackoff` | `FOR UPDATE SKIP LOCKED` |
 
-**Còn ngoài harness:** S3 timeout chỉ ở mức unit (`memory.Fail`; store thật cần
-staging); reporter mất mạng chỉ ở test của reporter; restore backup — Gate-1
+**S3/R2 timeout trên binary thật ✅ 30-09-2026.** `test/failure`
+`TestObjectStoreHangKeepsRunValid`: api + worker thật với `OBJSTORE=s3` trỏ
+qua một proxy TCP tới **SeaweedFS 4.48** (server S3 thật; MinIO đã ngừng phát
+binary). Reporter khai báo artifact, PUT thật lên store, rồi proxy chuyển sang
+*treo* — nhận kết nối, không trả lời gì, kiểu hỏng tệ nhất vì không có gì fail
+nhanh. `complete` → **503 `STORE_UNAVAILABLE` sau 8,0 s**, artifact vẫn
+`pending`; run vẫn finish và được xử lý (`failed`, 1 result) khi store còn
+treo; store hồi → gọi lại `complete` → `verified` và worker link vào attempt.
+**Lỗi thật nó bắt:** client S3 chỉ có `http.Client.Timeout` 60 s cho cả request,
+nên api giữ `complete` tới 60 s mỗi lần gọi store (tới 3 lần) — reporter bỏ
+cuộc ở 30 s (§7.5) và không bao giờ nhận được 503; chạy lại test trên code cũ:
+client test hết giờ ở 30 s không có câu trả lời. Sửa: `s3.HeaderTimeout` 8 s cho
+dial + TLS + chờ header, 60 s vẫn là trần đọc body (cap lớn nhất §10.4 là
+50 MB). Cùng server đó, `internal/platform/objstore/s3` có bộ conformance lần đầu
+chạy trên S3 thật (trước chỉ có 4 ví dụ chữ ký của AWS): presigned PUT, pin
+content-type (gửi type khác → 403), URL hết hạn → 403, multipart gửi part lệch
+thứ tự + ListParts + Complete + Get đúng byte, Abort, Put phía api, Delete hai
+lần, và `TestHungStoreFailsWithinHeaderTimeout` (không cần server). CI job
+`backend` chạy SeaweedFS trong container (`test/s3/seaweedfs.json`, khóa chỉ để
+test) nên cả hai chạy mỗi commit. Tái lập local: backend/README "S3 conformance".
+
+**Còn ngoài harness:** R2/S3 của nhà cung cấp thật vẫn chờ staging (khác biệt
+nhỏ giữa các server S3 — vd R2 region `auto` — chỉ lộ ra ở đó); reporter mất mạng chỉ ở test của reporter; restore backup — Gate-1
 (§11.5). "Queue không khả dụng" đọc là *worker không khả dụng* vì queue của P1
 là bảng Postgres — queue chết = DB chết = kịch bản DB.
 

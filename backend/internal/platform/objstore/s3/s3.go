@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -57,7 +58,34 @@ func New(cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("s3: endpoint %q must be an http(s) URL", cfg.Endpoint)
 	}
 	u.Path = strings.TrimSuffix(u.Path, "/")
-	return &Store{cfg: cfg, base: u, client: &http.Client{Timeout: 60 * time.Second}, now: time.Now}, nil
+	return &Store{cfg: cfg, base: u, client: newClient(HeaderTimeout), now: time.Now}, nil
+}
+
+// HeaderTimeout bounds how long a store call waits for the connection and
+// the response headers. A hung S3/R2 (§14.3 "S3/R2 timeout khi upload")
+// must turn into 503 STORE_UNAVAILABLE before the reporter's own 30 s
+// timeout (§7.5), and complete makes up to three store calls in a row.
+// Reading a body may take longer — bounded by bodyTimeout; the largest
+// cap (§10.4) is 50 MB.
+const HeaderTimeout = 8 * time.Second
+
+const bodyTimeout = 60 * time.Second
+
+func newClient(header time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: header, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: bodyTimeout,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialer.DialContext,
+			TLSHandshakeTimeout:   header,
+			ResponseHeaderTimeout: header,
+			ExpectContinueTimeout: time.Second,
+			MaxIdleConnsPerHost:   16,
+			IdleConnTimeout:       90 * time.Second,
+			ForceAttemptHTTP2:     true,
+		},
+	}
 }
 
 func (s *Store) objectPath(key string) string {
@@ -181,6 +209,32 @@ func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 func (s *Store) Delete(ctx context.Context, key string) error {
 	_, err := s.do(ctx, "DELETE", s.objectPath(key), nil, nil, nil)
 	return err
+}
+
+// EnsureBucket creates the bucket; one that already exists and is ours is
+// fine. Not part of objstore.Store — production buckets are made by the
+// operator (deploy/README.md). Tests and local S3 servers use it.
+func (s *Store) EnsureBucket(ctx context.Context) error {
+	_, err := s.do(ctx, "PUT", s.base.Path+"/"+s.cfg.Bucket, nil, nil, nil)
+	if err != nil && strings.Contains(err.Error(), "HTTP 409") && strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") {
+		return nil
+	}
+	return err
+}
+
+// EnsureBucketReady retries EnsureBucket until it succeeds or wait passes —
+// a freshly started local server answers before its storage is up.
+func EnsureBucketReady(s *Store, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := s.EnsureBucket(ctx)
+		cancel()
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // Put is a header-signed PUT of the whole body (SigV4 signs its SHA-256, so

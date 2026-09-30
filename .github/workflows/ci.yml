@@ -74,13 +74,26 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # A real S3-compatible server (§14.3 "S3/R2 timeout khi upload"): the
+      # s3 client conformance tests (every verb, signed content type, expiry)
+      # and test/failure TestObjectStoreHangKeepsRunValid run against it.
+      # Test-only credentials from test/s3/seaweedfs.json.
+      - name: Start SeaweedFS (S3)
+        run: |
+          docker run -d --name s3 -p 8333:8333 -v "$PWD/test/s3/seaweedfs.json:/etc/seaweedfs/s3.json:ro" \
+            chrislusf/seaweedfs:4.48 server -dir=/data -volume.max=50 -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+          for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:8333/ && break; sleep 1; done
+
       # Everything Postgres-backed runs for real here: unit stores, the
       # cmd/api contract and cross-tenant walk, test/failure (kills the real
       # binaries), test/observe, test/restore (RESTORE_TEST=1 → a missing
       # pg_dump fails instead of skipping).
-      - name: go test (real Postgres)
+      - name: go test (real Postgres, real S3)
         env:
           RESTORE_TEST: "1"
+          S3_TEST_ENDPOINT: http://127.0.0.1:8333
+          S3_TEST_ACCESS_KEY: atptestkey
+          S3_TEST_SECRET_KEY: atptestsecret123
         run: go test -count=1 -timeout 15m ./...
 
       # Pinned: govulncheck v1.8+ requires Go 1.26, and this job runs the

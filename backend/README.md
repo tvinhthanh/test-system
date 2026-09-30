@@ -63,7 +63,7 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `platform/pg/pgtest` | ✅ | Postgres thật cho test, schema riêng mỗi test, skip khi thiếu `TEST_DATABASE_URL` |
 | `platform/outbound` | ✅ 27-09 | client HTTP duy nhất ra bên thứ ba ngoài objstore: chỉ tới host đã cho lúc dựng (lấy từ cấu hình provider OAuth), không theo redirect, timeout, body ≤ 1 MiB, chỉ JSON (§11.6 API7/API10) |
 | `platform/mail` | ✅ 28-09 | gửi SMTP bằng stdlib: văn bản thuần, quoted-printable, Subject mã hóa RFC 2047, từ chối CR/LF trong mọi header, bắt buộc STARTTLS khi cấu hình, có deadline |
-| `platform/objstore` | ✅ | interface 9 verb; `s3/` = SigV4 tự viết trên `net/http` (không SDK), **khớp 4 ví dụ trong tài liệu AWS** (presign GET, GET+Range, PUT+storage-class, lifecycle query); `memory/` = bucket giả bằng `httptest` phục vụ đúng URL presigned (pin content-type, hết hạn) để test end-to-end. Chọn bằng `OBJSTORE=s3|memory` |
+| `platform/objstore` | ✅ | interface 9 verb; `s3/` = SigV4 tự viết trên `net/http` (không SDK), **khớp 4 ví dụ trong tài liệu AWS** (presign GET, GET+Range, PUT+storage-class, lifecycle query) và **30-09 chạy bộ conformance trên server S3 thật** (SeaweedFS, mỗi commit trong CI); gọi store chờ kết nối + header tối đa `s3.HeaderTimeout` 8 s để store treo thành 503 trước timeout 30 s của reporter; `memory/` = bucket giả bằng `httptest` phục vụ đúng URL presigned (pin content-type, hết hạn) để test end-to-end. Chọn bằng `OBJSTORE=s3|memory` |
 | `platform/queue` | ✅ | bảng `jobs`, nhiều `kind`; claim bằng `FOR UPDATE SKIP LOCKED`; lease → worker chết giữa chừng thì job được claim lại (§14.3); backoff mũ, `dead` sau `max_attempts`; dedupe theo `(kind, key)` khi còn sống; handler chạy **trong cùng transaction** với `Complete` → ghi + hoàn thành commit chung, panic = một lần thử hỏng. Metric `queue_jobs_total`, `queue_pending`, `queue_oldest_pending_seconds` |
 | `platform/outbox` | gộp vào `queue` | `queue.Add` tham gia transaction của caller: job commit cùng thay đổi nghiệp vụ hoặc không gì cả — đúng bảo đảm outbox §6.9.6 mà không cần bảng thứ hai |
 | `platform/idem` | không cần | mọi endpoint ghi của P1 có khóa tự nhiên: run `(project, localRunId)`, event `(run, sequence)`, artifact `(run, clientTestId, occurrence, attempt, name)`. Tạo khi có endpoint không có khóa tự nhiên |
@@ -120,6 +120,28 @@ go test -count=1 ./...
 ```
 
 Đã chạy thật 13–14-09 trên PostgreSQL 17.5: toàn bộ test PASS (11 package); `cmd/migrate` áp 0001–0004; `cmd/admin` tạo org → ws → project → token; `cmd/api` bằng curl: run 1 `identityMap {}` → finish tạo identity; run 2 tier 1 trả đủ id; run 3 đổi tên leaf → finish auto-match về identity cũ, alias `exact,auto_match`, `stable_test_id` của cả ba run trỏ cùng một id.
+
+## S3 conformance — server S3 thật cho test
+
+`internal/platform/objstore/s3` (mọi verb trên server thật) và `test/failure`
+`TestObjectStoreHangKeepsRunValid` (§14.3 "S3/R2 timeout", api + worker thật
+sau proxy treo) chạy khi có `S3_TEST_ENDPOINT`, bỏ qua khi không. CI dùng
+SeaweedFS trong container. Trên Windows không cần Docker — SeaweedFS có bản
+`weed.exe` (MinIO đã ngừng phát binary):
+
+```bash
+# github.com/seaweedfs/seaweedfs/releases/download/4.48/windows_amd64.zip (kiểm .md5 đi kèm)
+./weed.exe server -dir=data -ip=127.0.0.1 -volume.max=50 -s3 -s3.port=8333 -s3.config=test/s3/seaweedfs.json
+
+export S3_TEST_ENDPOINT=http://127.0.0.1:8333 S3_TEST_ACCESS_KEY=atptestkey S3_TEST_SECRET_KEY=atptestsecret123
+go test -count=1 ./internal/platform/objstore/... ./test/failure/   # test/failure cần thêm TEST_DATABASE_URL
+```
+
+Tùy chọn: `S3_TEST_BUCKET` (mặc định `atp-conformance`, test tự tạo) và
+`S3_TEST_REGION` (mặc định `us-east-1`). Trỏ vào bucket R2/S3 thật của staging
+cũng được, nhưng dùng bucket riêng: test ghi và xóa object dưới `conformance/`.
+Mỗi bucket mới trên SeaweedFS chiếm volume riêng — đừng đổi tên bucket mỗi lần
+chạy (hết volume → PUT trả 500).
 
 ## Giao thức ingest như đã cài (§7.2–7.4) — cho người viết reporter
 
