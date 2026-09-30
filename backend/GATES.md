@@ -127,7 +127,7 @@ Unit/integration test cho phần còn lại (Postgres thật):
 |---|---|---|
 | Duplicate event / retry cùng `(localRunId, sequence)` | `internal/ingest` `TestIngestEndToEnd` (batch gửi lại → `duplicates: 3`, finish hai lần) | §7.1, không nhân đôi |
 | Hai run song song cùng fingerprint lạ | `internal/identity` `TestRaceOnUnknownFingerprint` | một `TestIdentity` |
-| Reporter mất mạng → spool, run khách vẫn xanh | `reporter/playwright/test/client.test.ts`, `reporter.test.ts` | spool `.jsonl`, không bao giờ fail run |
+| Reporter mất mạng → spool, run khách vẫn xanh | `reporter/playwright/test/client.test.ts`, `reporter.test.ts`; **30-09 binary thật: `outage.test.ts`** (đoạn dưới) | spool `.jsonl`, không bao giờ fail run |
 | S3 timeout khi upload → artifact retry được, run hợp lệ | `internal/artifact` với `memory.Fail` injection; **30-09 trên S3 thật: xem đoạn dưới** | §10.4 |
 | Worker crash giữa job → lease hết hạn, job được nhận lại | `internal/platform/queue` `TestLeaseExpiryRecoversCrashedWorker`, `TestBackoff` | `FOR UPDATE SKIP LOCKED` |
 
@@ -152,8 +152,22 @@ lần, và `TestHungStoreFailsWithinHeaderTimeout` (không cần server). CI job
 `backend` chạy SeaweedFS trong container (`test/s3/seaweedfs.json`, khóa chỉ để
 test) nên cả hai chạy mỗi commit. Tái lập local: backend/README "S3 conformance".
 
+**Reporter mất mạng trên binary thật ✅ 30-09-2026.** `reporter/playwright/test/outage.test.ts`
+(`ATP_OUTAGE_TEST=1`, chạy trong CI job `reporter`) chạy `playwright test` thật —
+4 test × 3 s, 1 worker — ba lần: không cấu hình platform (mốc), `ATP_URL` trỏ
+vào cổng đóng, và vào một server TCP nhận kết nối rồi im lặng. Cùng exit code,
+đủ 4 event trong spool. **Lỗi thật nó bắt:** trước sửa, server treo cộng
+**+313 s** vào bộ test 13 s (createRun 5 × 30 s + backoff, rồi từng batch lại tự
+chờ đủ vòng retry, `onEnd` đợi hết) — test vẫn xanh nhưng CI của khách chờ hơn
+5 phút, còn bộ test dài thì mỗi batch 5 s cộng thêm ~165 s: bất biến §7.5 thủng
+trên thực tế. Sửa: request đầu dùng hết retry vì timeout/đứt kết nối/5xx thì
+platform coi là down cho cả run (request sau fail ngay, PUT lên object store
+không tính); không tạo được run → batch vào thẳng spool; `onEnd` chờ tối đa
+`flushTimeoutMs` (30 s) rồi spool phần còn lại, bỏ upload/finish. Sau sửa: cổng
+đóng **+2,1 s**, server treo **+29,9 s**.
+
 **Còn ngoài harness:** R2/S3 của nhà cung cấp thật vẫn chờ staging (khác biệt
-nhỏ giữa các server S3 — vd R2 region `auto` — chỉ lộ ra ở đó); reporter mất mạng chỉ ở test của reporter; restore backup — Gate-1
+nhỏ giữa các server S3 — vd R2 region `auto` — chỉ lộ ra ở đó); restore backup — Gate-1
 (§11.5). "Queue không khả dụng" đọc là *worker không khả dụng* vì queue của P1
 là bảng Postgres — queue chết = DB chết = kịch bản DB.
 

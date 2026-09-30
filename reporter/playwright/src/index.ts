@@ -42,6 +42,12 @@ export interface ReporterOptions {
   uploadArtifacts?: boolean;
   /** Strip Authorization/Cookie from HAR files before upload (§11.1). Default true. */
   stripHar?: boolean;
+  /**
+   * How long onEnd waits for the platform after the last test before it
+   * spools what is left and lets the run end. Default 30 000 (one request
+   * timeout, §7.5). The tests' result never depends on it.
+   */
+  flushTimeoutMs?: number;
   /** Print debug lines. Env: ATP_DEBUG=1. */
   debug?: boolean;
   /** Test hooks. */
@@ -104,15 +110,6 @@ export default class AtpReporter implements Reporter {
       this.repoRoot = this.opts.repoRoot ?? config.rootDir;
       this.localRunId = randomUUID();
       this.client = this.opts._client ?? new Client({ url, token, userAgent: `atp-playwright-reporter/0.1.0 playwright/${config.version}` });
-      this.queue = new EventQueue({
-        localRunId: this.localRunId,
-        client: this.client,
-        spoolDir: this.opts.spoolDir ?? `${tmpdir()}/atp-reporter`,
-        log: (l, m) => this.log(l, m),
-        onIdentity: (m) => {
-          for (const [k, v] of Object.entries(m)) this.identity.set(k, v);
-        },
-      });
       // Create the run now, off the hot path; events queue behind it.
       const body = {
         localRunId: this.localRunId,
@@ -122,24 +119,37 @@ export default class AtpReporter implements Reporter {
         reporter: { name: "@atp/playwright-reporter", version: "0.1.0", protocolVersion: "1.1" },
         startedAt: this.now().toISOString(),
       };
-      const client = this.client;
-      this.runCreated = client
+      this.runCreated = this.client
         .createRun(body)
         .then((r) => {
           this.run = r;
           this.log("debug", `run ${this.localRunId} → ${r.runId}`);
+          return true;
         })
         .catch((e) => {
           // No run on the server: events will spool. The tests keep going.
           this.log("warn", `could not create run (${describe(e)}); events will be spooled`);
+          return false;
         });
+      this.queue = new EventQueue({
+        ready: this.runCreated,
+        localRunId: this.localRunId,
+        client: this.client,
+        spoolDir: this.opts.spoolDir ?? `${tmpdir()}/atp-reporter`,
+        log: (l, m) => this.log(l, m),
+        onIdentity: (m) => {
+          for (const [k, v] of Object.entries(m)) this.identity.set(k, v);
+        },
+      });
     } catch (e) {
       this.disabled = true;
       this.log("warn", `reporter disabled: ${describe(e)}`);
     }
   }
 
-  private runCreated: Promise<void> = Promise.resolve();
+  private runCreated: Promise<boolean> = Promise.resolve(false);
+  /** onEnd's budget ran out: nothing more goes to the platform. */
+  private gaveUp = false;
 
   onTestEnd(test: TestCase, result: TestResult): void {
     if (this.disabled || !this.queue) return;
@@ -169,8 +179,8 @@ export default class AtpReporter implements Reporter {
           snippet: stripAnsi(result.error.snippet ?? ""),
         };
       }
-      // Enqueue after the run exists; the queue preserves order.
-      void this.runCreated.then(() => this.queue?.push(event));
+      // Sequenced now; the queue holds batches until the run exists.
+      this.queue.push(event);
 
       if (this.opts.uploadArtifacts !== false && result.attachments.length > 0) {
         const ref = { localRunId: this.localRunId, clientTestId: ct, occurrenceIndex: occurrence, attempt: result.retry };
@@ -190,7 +200,7 @@ export default class AtpReporter implements Reporter {
     while (this.uploadsInFlight >= 4) await new Promise<void>((r) => this.uploadWaiters.push(r));
     this.uploadsInFlight++;
     try {
-      if (!this.client || !this.run) return { name: a.name, status: "skipped", reason: "no run" };
+      if (!this.client || !this.run || this.gaveUp) return { name: a.name, status: "skipped", reason: "no run" };
       return await uploadAttachment(this.client, ref, a, { stripHar: this.opts.stripHar !== false, limits: this.run.limits.artifactBytes, log: (l, m) => this.log(l, m) });
     } finally {
       this.uploadsInFlight--;
@@ -200,16 +210,36 @@ export default class AtpReporter implements Reporter {
 
   async onEnd(_result: FullResult): Promise<void> {
     if (this.disabled || !this.queue || !this.client) return;
+    // The platform gets flushTimeoutMs after the last test; then whatever is
+    // undelivered goes to the spool and the run ends (§7.5).
+    const budget = this.opts.flushTimeoutMs ?? 30_000;
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<"expired">((r) => {
+      timer = setTimeout(() => r("expired"), budget);
+    });
+    const outcome = await Promise.race([this.deliver().then(() => "done" as const), expired]);
+    clearTimeout(timer);
+    if (outcome === "expired") {
+      this.gaveUp = true;
+      this.queue.abandon(`no answer from the platform within ${budget} ms of the last test`);
+      this.log("warn", `gave up on the platform after ${budget} ms: ${this.queue.stats.spooled} events spooled, uploads and finish skipped (tests unaffected)`);
+    }
+  }
+
+  private async deliver(): Promise<void> {
+    const queue = this.queue!;
+    const client = this.client!;
     try {
       await this.runCreated;
-      await this.queue.close();
+      await queue.close();
       const outcomes = await Promise.all(this.uploads);
-      const s = this.queue.stats;
+      const s = queue.stats;
       const counts = { verified: 0, skipped: 0, too_large: 0, failed: 0 };
       for (const o of outcomes) counts[o.status]++;
+      if (this.gaveUp) return;
       if (this.run) {
         try {
-          const fin = await this.client.finishRun(this.localRunId, this.now().toISOString());
+          const fin = await client.finishRun(this.localRunId, this.now().toISOString());
           this.log("info", `run ${fin.runId}: ${fin.status}, ${s.accepted} events (${s.duplicates} dup, ${s.spooled} spooled), artifacts ${counts.verified} ok / ${counts.too_large} over cap / ${counts.failed} failed`);
         } catch (e) {
           this.log("warn", `could not finish run (${describe(e)}); the server will auto-close it (§7.4)`);

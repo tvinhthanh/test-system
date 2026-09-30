@@ -77,3 +77,21 @@ test("presigned PUT sends the pinned headers and returns the ETag", async () => 
   assert.equal((s.calls[0].init.headers as Record<string, string>)["Content-Type"], "image/png");
   assert.equal((s.calls[0].init.headers as Record<string, string>)["Authorization"], undefined);
 });
+
+test("once a request uses up its retries, the platform is down for the run: later calls fail without a request", async () => {
+  const s = scripted([...Array(5).fill({ status: 0, fail: true }), { status: 200, body: {} }]);
+  const c = client(s.fetch, []);
+  await assert.rejects(c.createRun({}), (e: any) => e instanceof NetworkError);
+  assert.equal(c.unavailable, true);
+  await assert.rejects(c.sendEvents("x", [{}]), (e: any) => e instanceof NetworkError && /unavailable earlier/.test(e.message));
+  assert.equal(s.calls.length, 5, "no sixth request after the breaker opened");
+});
+
+test("a 4xx does not open the breaker; a presigned PUT failing does not either", async () => {
+  const s = scripted([{ status: 401, body: { error: { code: "UNAUTHORIZED" } } }, ...Array(5).fill({ status: 503 }), { status: 200, body: { accepted: 1, duplicates: 0, identityMap: {} } }]);
+  const c = client(s.fetch, []);
+  await assert.rejects(c.createRun({}), (e: any) => e instanceof ApiError && e.status === 401);
+  await assert.rejects(c.put("http://store.test/o", new Uint8Array(1), {}), (e: any) => e instanceof ApiError && e.status === 503);
+  assert.equal(c.unavailable, false);
+  assert.equal((await c.sendEvents("x", [{}])).accepted, 1);
+});

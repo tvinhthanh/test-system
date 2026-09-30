@@ -133,6 +133,13 @@ jobs:
           cache-dependency-path: reporter/playwright/package-lock.json
       - run: npm ci
       - run: npm test
+      # §14.3 "Reporter mất mạng toàn bộ" on the real `playwright test`: a
+      # closed port and a server that never answers — same exit code, every
+      # event spooled, delay bounded by flushTimeoutMs (≈ 75 s).
+      - name: outage on the real binary
+        env:
+          ATP_OUTAGE_TEST: "1"
+        run: node --test dist/test/outage.test.js
       - name: npm audit (§11.6 dependency review, dev deps included)
         run: npm audit --audit-level=low
 

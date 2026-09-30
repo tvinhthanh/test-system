@@ -113,7 +113,7 @@ export class Client {
       if (res.status >= 200 && res.status < 300) return { etag: res.headers.get("etag") ?? "" };
       const text = await res.text().catch(() => "");
       throw new ApiError(res.status, "UPLOAD_FAILED", `PUT ${res.status}: ${text.slice(0, 200)}`, undefined, retryAfter(res));
-    });
+    }, false);
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
@@ -146,16 +146,35 @@ export class Client {
     }
   }
 
+  /**
+   * Set once a platform request has used up its retries on a timeout, a
+   * connection failure or a 5xx: the platform is down for this run. Later
+   * requests fail at once instead of each waiting out its own cycle — a hung
+   * platform would otherwise add up to 5 × 30 s per batch to the customer's
+   * CI (§7.5: the reporter must not hurt the run). Presigned PUTs go to the
+   * object store, not the platform, and do not trip it.
+   */
+  private down: Error | undefined;
+
+  get unavailable(): boolean {
+    return this.down !== undefined;
+  }
+
   /** §7.5 backoff: 1, 2, 4, 8 s between at most 5 attempts. */
-  private async retrying<T>(fn: () => Promise<T>): Promise<T> {
+  private async retrying<T>(fn: () => Promise<T>, platform = true): Promise<T> {
+    if (platform && this.down) throw new NetworkError(`platform unavailable earlier in this run (${this.down.message})`);
     let attempt = 0;
     for (;;) {
       attempt++;
       try {
         return await fn();
       } catch (e) {
+        const serverSide = e instanceof NetworkError || (e instanceof ApiError && e.status >= 500);
         const retryable = e instanceof ApiError ? e.retryable : e instanceof NetworkError;
-        if (!retryable || attempt >= this.maxAttempts) throw e;
+        if (!retryable || attempt >= this.maxAttempts) {
+          if (platform && serverSide && retryable) this.down = e as Error;
+          throw e;
+        }
         const backoff = 1000 * 2 ** (attempt - 1);
         const wait = e instanceof ApiError && e.retryAfterMs ? Math.max(e.retryAfterMs, backoff) : backoff;
         await this.sleep(wait);

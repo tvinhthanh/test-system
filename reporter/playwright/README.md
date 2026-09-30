@@ -25,6 +25,7 @@ ATP_URL=https://api.example.com ATP_TOKEN=atp_ing_… npx playwright test
 | `environment` | `ATP_ENVIRONMENT` | `local` | `environmentKey` §7.3 |
 | `repoRoot` | | `rootDir` của Playwright | bỏ prefix khỏi `filePath` (§9.2) để dev và CI ra cùng fingerprint |
 | `spoolDir` | | `<tmp>/atp-reporter` | batch không gửi được ghi vào `atp-spool-<localRunId>.jsonl` |
+| `flushTimeoutMs` | | `30000` | sau test cuối, chờ platform tối đa chừng này; hết giờ → phần chưa gửi vào spool, bỏ upload/finish, run kết thúc (kết quả test không đổi) |
 | `uploadArtifacts` | | `true` | screenshot/video/trace/HAR/log |
 | `stripHar` | | `true` | bỏ `Authorization`/`Cookie`/`Set-Cookie` khỏi HAR **trước khi upload** (§11.1) |
 | `debug` | `ATP_DEBUG=1` | `false` | |
@@ -36,6 +37,7 @@ ATP_URL=https://api.example.com ATP_TOKEN=atp_ing_… npx playwright test
 - Attachment → `POST /v1/artifacts` (sha256 tính ở client, cap đọc từ `limits` server trả về — vượt cap thì bỏ qua và ghi warning, không declare) → PUT presigned hoặc multipart ≤ 4 part song song → `complete`.
 - `onEnd` → flush, chờ upload, `POST …/finish`, in một dòng tổng kết.
 - Retry: 5xx và timeout backoff 1/2/4/8 s tối đa 5 lần; 4xx không retry trừ 429 (theo `Retry-After`); timeout 30 s.
+- **Platform sập giữa run:** request đầu tiên dùng hết lượt retry vì timeout/đứt kết nối/5xx thì coi platform down cho cả run — các request sau fail ngay, batch vào thẳng spool (không mỗi batch tự chờ 5 × 30 s). Không tạo được run → batch vào spool, không gọi mạng. PUT presigned lên object store không tính. Thời gian thêm vào CI của khách bị chặn bởi `flushTimeoutMs` sau test cuối — `test/outage.test.ts` (`ATP_OUTAGE_TEST=1`) chạy `playwright test` thật với cổng đóng và server treo để đo.
 - Fingerprint §9.2 tính ở client: `test/fingerprint.test.ts` khóa 3 vector sinh từ Go (`backend/internal/identity/internal/match`) — separator `U+0000` tạo bằng `String.fromCharCode(0)` vì escape đã bị pipeline phá ba lần (N22).
 
 ## Dev

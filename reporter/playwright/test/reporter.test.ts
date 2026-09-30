@@ -185,6 +185,34 @@ test("total outage: events are spooled, the run is not failed", async () => {
   }
 });
 
+test("a platform that never answers: onEnd gives up after flushTimeoutMs and spools everything", async () => {
+  const spool = mkdtempSync(join(tmpdir(), "atp-spool-"));
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (m: string) => warnings.push(m);
+  try {
+    // Every request hangs until aborted. 1 s timeout × 5 tries still outlasts
+    // the 300 ms budget, and the process is not held for minutes afterwards.
+    const hang = ((_: unknown, init?: RequestInit) => new Promise((_r, reject) => init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))))) as unknown as typeof fetch;
+    const client = new Client({ url: "http://api.test", token: "atp_ing_t", fetch: hang, timeoutMs: 1000, sleep: async () => {} });
+    const r = new AtpReporter({ url: "http://api.test", token: "atp_ing_t", spoolDir: spool, _client: client, flushTimeoutMs: 300 });
+    r.onBegin(fakeConfig(), {} as any);
+    r.onTestEnd(fakeTest(join(REPO, "a.spec.ts"), ["a"]), fakeResult("passed"));
+    r.onTestEnd(fakeTest(join(REPO, "b.spec.ts"), ["b"]), fakeResult("failed", 0, [{ name: "screenshot", contentType: "image/png", body: Buffer.from("png") }]));
+    const started = Date.now();
+    await r.onEnd({ status: "failed" } as any);
+    const took = Date.now() - started;
+    assert.ok(took < 2000, `onEnd took ${took} ms`);
+    const files = readdirSync(spool);
+    assert.equal(files.length, 1);
+    const lines = readFileSync(join(spool, files[0]), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(lines.map((e) => e.sequence), [1, 2]);
+    assert.ok(warnings.some((w) => w.includes("gave up on the platform")), warnings.join("\n"));
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
 test("no token: reporter disables itself with one warning", async () => {
   const warnings: string[] = [];
   const origWarn = console.warn;
