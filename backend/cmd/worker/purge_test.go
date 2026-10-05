@@ -302,3 +302,148 @@ func TestPurgeDeletedRun(t *testing.T) {
 		t.Errorf("the test's identity went with one run: %d", n)
 	}
 }
+
+// §11.3.2 "Billing, xóa org": after the window every project of the org is
+// purged — live ones and ones deleted on their own — then what was held at
+// the org and its workspaces (memberships, invitations, tokens), the
+// workspaces and the org. Another org, and an org still in its window,
+// are left alone.
+func TestPurgeDeletedOrganization(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	ten, az, res := tenancy.New(db), authz.New(db, []byte("test-pepper-test-pepper-test-pepper!")), results.New(db)
+	idn := identity.New(db)
+	p := purger{tenancy: ten, authz: az, artifact: artifact.New(db, store, res), triage: triage.New(db, res), flaky: flaky.New(db, res),
+		identity: idn, testmgmt: testmgmt.New(db, idn, nil, testmgmt.Policy{}), results: res}
+
+	type tree struct {
+		org      tenancy.OrganizationID
+		ws       tenancy.WorkspaceID
+		projects []tenancy.ProjectID
+	}
+	n := 0
+	seed := func(slug string) tree {
+		org, err := ten.CreateOrganization(ctx, slug, slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
+		tr := tree{org: org.ID, ws: ws.ID}
+		for _, name := range []string{"checkout", "search"} {
+			n++
+			pr, _ := ten.CreateProject(ctx, ws.ID, name, "")
+			env, _ := ten.EnsureEnvironment(ctx, pr.ID, "ci")
+			if _, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: string(pr.ID), EnvironmentID: string(env.ID), LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-0000000001" + string(rune('0'+n/10)) + string(rune('0'+n%10)), StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(pr.ID)}, Permissions: []authz.Permission{authz.PermProjectIngest}, Name: "ci"}); err != nil {
+				t.Fatal(err)
+			}
+			tr.projects = append(tr.projects, pr.ID)
+		}
+		owner, _ := az.CreateUser(ctx, "owner@"+slug+".example")
+		admin, _ := az.CreateUser(ctx, "admin@"+slug+".example")
+		if _, err := az.GrantRole(ctx, owner.ID, authz.ScopeRef{Level: authz.LevelOrganization, ID: string(org.ID)}, authz.RoleOrgOwner); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := az.GrantRole(ctx, admin.ID, authz.ScopeRef{Level: authz.LevelWorkspace, ID: string(ws.ID)}, authz.RoleWorkspaceAdmin); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := az.Invite(ctx, "new@"+slug+".example", authz.ScopeRef{Level: authz.LevelOrganization, ID: string(org.ID)}, authz.RoleOrgAdmin, "owner@"+slug+".example"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := az.Invite(ctx, "ws@"+slug+".example", authz.ScopeRef{Level: authz.LevelWorkspace, ID: string(ws.ID)}, authz.RoleWorkspaceAdmin, "owner@"+slug+".example"); err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	gone, kept, waiting := seed("acme"), seed("globex"), seed("initech")
+
+	count := func(q string, tr tree) int {
+		t.Helper()
+		var c int
+		if err := db.Q(ctx).QueryRow(ctx, q, string(tr.org), string(tr.ws)).Scan(&c); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return c
+	}
+	perOrg := []string{
+		`SELECT count(*) FROM organizations WHERE id = $1 AND $2 <> ''`,
+		`SELECT count(*) FROM workspaces WHERE org_id = $1 AND $2 <> ''`,
+		`SELECT count(*) FROM projects WHERE workspace_id = $2 AND $1 <> ''`,
+		`SELECT count(*) FROM runs WHERE project_id IN (SELECT id FROM projects WHERE workspace_id = $2) AND $1 <> ''`,
+		`SELECT count(*) FROM memberships WHERE scope_id IN ($1, $2)`,
+		`SELECT count(*) FROM invitations WHERE scope_id IN ($1, $2)`,
+	}
+	for _, q := range perOrg {
+		if count(q, gone) == 0 {
+			t.Fatalf("seed left nothing for: %s", q)
+		}
+	}
+	projectTokens := func(tr tree) int {
+		var c int
+		ids := []string{string(tr.projects[0]), string(tr.projects[1])}
+		if err := db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM api_tokens WHERE scope_id::text = ANY($1)`, ids).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+
+	// One project of "acme" was deleted on its own first, with a longer window.
+	if _, err := ten.DeleteProject(ctx, gone.projects[1], "owner@acme.example", 90*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ten.DeleteOrganization(ctx, gone.org, "owner@acme.example", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ten.DeleteOrganization(ctx, waiting.org, "owner@initech.example", 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	// Hidden at once: no reads of the org, its workspace or its projects.
+	if _, err := ten.GetOrganization(ctx, gone.org); !errors.Is(err, tenancy.ErrNotFound) {
+		t.Errorf("GetOrganization of a deleted org: %v", err)
+	}
+	if _, err := ten.GetWorkspace(ctx, gone.ws); !errors.Is(err, tenancy.ErrNotFound) {
+		t.Errorf("GetWorkspace under a deleted org: %v", err)
+	}
+	if _, err := ten.ProjectScope(ctx, gone.projects[0]); !errors.Is(err, tenancy.ErrNotFound) {
+		t.Errorf("ProjectScope under a deleted org: %v", err)
+	}
+	if list, err := ten.ListProjects(ctx, "organization", string(gone.org)); err != nil || len(list) != 0 {
+		t.Errorf("ListProjects of a deleted org: %v %v", list, err)
+	}
+	if err := ten.PurgeOrganization(ctx, kept.org); err == nil {
+		t.Error("tenancy purged a live organization")
+	}
+	if err := ten.PurgeOrganization(ctx, gone.org); err == nil {
+		t.Error("tenancy purged an organization that still has projects")
+	}
+
+	if c, err := p.orgs(ctx, time.Now(), 10); err != nil || c != 0 {
+		t.Fatalf("purge inside the window: %d %v", c, err)
+	}
+	if c, err := p.orgs(ctx, time.Now().Add(2*time.Hour), 10); err != nil || c != 1 {
+		t.Fatalf("purge: %d %v", c, err)
+	}
+	for _, q := range perOrg {
+		if c := count(q, gone); c != 0 {
+			t.Errorf("after purge %d rows left: %s", c, q)
+		}
+		if count(q, kept) == 0 || count(q, waiting) == 0 {
+			t.Errorf("purge reached another org: %s", q)
+		}
+	}
+	if projectTokens(gone) != 0 || projectTokens(kept) != 2 || projectTokens(waiting) != 2 {
+		t.Errorf("project tokens: gone %d kept %d waiting %d", projectTokens(gone), projectTokens(kept), projectTokens(waiting))
+	}
+	var audits int
+	if err := db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM authz_audit WHERE (action = 'organization.purge' AND subject_id = $1)
+		OR (action = 'project.purge' AND subject_id::text = ANY($2))`, string(gone.org), []string{string(gone.projects[0]), string(gone.projects[1])}).Scan(&audits); err != nil || audits != 3 {
+		t.Errorf("purge audit rows: %d %v", audits, err)
+	}
+	if c, err := p.orgs(ctx, time.Now().Add(2*time.Hour), 10); err != nil || c != 0 {
+		t.Errorf("second purge: %d %v", c, err)
+	}
+}

@@ -113,6 +113,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.projectCreateRoutes(handle)
 	d.projectDeleteRoutes(handle)
 	d.projectSettingsRoutes(handle)
+	d.orgDeleteRoutes(handle)
 	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))

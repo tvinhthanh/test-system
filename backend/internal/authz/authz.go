@@ -330,6 +330,15 @@ type Service interface {
 	// a purge cut short is finished by the next one.
 	PurgeProject(ctx context.Context, projectID string, environmentIDs []string) error
 
+	// AuditOrganization records an organization deletion, restore or purge
+	// (§11.7). action is organization.delete | organization.restore |
+	// organization.purge.
+	AuditOrganization(ctx context.Context, action, orgID, actor string, details map[string]any) error
+	// PurgeOrganization deletes the memberships, invitations and tokens held
+	// at a purged organization and its workspaces (project-level ones went
+	// with each project's purge). Idempotent.
+	PurgeOrganization(ctx context.Context, orgID string, workspaceIDs []string) error
+
 	// Authorize is THE check (§11.3.3). It returns nil, ErrForbidden or
 	// ErrNoAccess. The caller must have validated that the Resource ids are
 	// real and related; authz only asks "may this principal act here".

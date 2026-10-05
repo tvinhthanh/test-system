@@ -194,6 +194,8 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/workspaces/{workspaceId}/projects":                     map[string]any{"name": "walk project"},
 		"POST /v1/workspaces/{workspaceId}/members":                      map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},
 		"POST /v1/organizations/{organizationId}/members":                map[string]any{"email": "a@alpha.example", "role": "org_admin"},
+		"DELETE /v1/organizations/{organizationId}":                      map[string]any{"confirmName": "ALPHA"},
+		"POST /v1/organizations/{organizationId}/restore":                map[string]any{},
 		// JUnit upload: the tenant check runs before the body is read.
 		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
 		"POST /v1/projects/{projectId}/tokens":        map[string]any{"name": "walk"},
@@ -205,8 +207,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	exempt := map[string]bool{
 		"GET /healthz": true, "GET /v1/session": true, "POST /v1/session": true, "POST /v1/session/logout": true,
 		"GET /v1/projects": true, "POST /v1/runs": true, "POST /v1/artifacts": true,
-		"POST /v1/imports/junit": true, // the token names the project, like POST /v1/runs; asserted below
-		"GET /v1/member-scopes":  true, // per user; asserted below
+		"POST /v1/imports/junit":        true, // the token names the project, like POST /v1/runs; asserted below
+		"GET /v1/member-scopes":         true, // per user; asserted below
+		"GET /v1/organizations/deleted": true, // the caller's own deleted orgs; asserted below
 		// MFA acts on the signed-in user only; asserted in mfa_test.go.
 		"POST /v1/session/mfa": true, "GET /v1/session/mfa": true, "POST /v1/session/mfa/setup": true,
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
@@ -297,6 +300,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	}
 
 	// The exempt routes' tenant properties.
+	if r := b.user.get("/v1/organizations/deleted"); r.code != 200 || len(r.items()) != 0 {
+		t.Errorf("B lists deleted organizations: %s", r.raw)
+	}
 	if r := b.user.get("/v1/member-scopes"); r.code != 200 || len(r.items()) != 0 {
 		t.Errorf("B (a project member) manages some scope: %s", r.raw)
 	}

@@ -150,6 +150,11 @@ func main() {
 			} else if n > 0 {
 				logger.Info("projects purged", "n", n)
 			}
+			if n, err := purge.orgs(ctx, time.Now(), 1); err != nil {
+				logger.Error("organization purge", "err", err)
+			} else if n > 0 {
+				logger.Info("organizations purged", "n", n)
+			}
 			// Finished jobs older than JOB_RETENTION go, a bounded batch per sweep
 			// (§14.1 T5: the queue table must not grow with history).
 			if n, err := q.Prune(ctx, cfg.JobRetention, 5000); err != nil {

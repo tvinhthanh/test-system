@@ -64,6 +64,16 @@ type DeletedProject struct {
 	PurgeAfter time.Time
 }
 
+// DeletedOrganization is an organization in its restore window, with the
+// workspaces under it (what the purge removes with it).
+type DeletedOrganization struct {
+	Organization
+	DeletedAt    time.Time
+	DeletedBy    string
+	PurgeAfter   time.Time
+	WorkspaceIDs []WorkspaceID
+}
+
 // Environment separates histories of the same test (§8.2). Key is what the
 // reporter sends as environmentKey (§7.3).
 type Environment struct {
@@ -113,6 +123,22 @@ type Service interface {
 	// UpdateProject renames a live project or changes its default branch;
 	// "" keeps a field. A name taken in the workspace is ErrConflict.
 	UpdateProject(ctx context.Context, id ProjectID, name, defaultBranch string) (Project, error)
+
+	// Deleting an organization (§11.3.2 "xóa org") is soft the same way:
+	// from DeleteOrganization on, the org, its workspaces and its projects
+	// are gone from every read above, until RestoreOrganization or the
+	// purge after keep. A project deleted on its own before stays deleted
+	// after a restore. DeletedOrganizations returns those of ids that are
+	// deleted. OrganizationProjects is every project of a deleted org,
+	// deleted or not, for the purge; PurgeProject accepts those too.
+	// PurgeOrganization removes the workspaces and the org once no
+	// project is left; it refuses an org that is not deleted.
+	DeleteOrganization(ctx context.Context, id OrganizationID, actor string, keep time.Duration) (DeletedOrganization, error)
+	RestoreOrganization(ctx context.Context, id OrganizationID) (Organization, error)
+	DeletedOrganizations(ctx context.Context, ids []OrganizationID) ([]DeletedOrganization, error)
+	OrganizationsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedOrganization, error)
+	OrganizationProjects(ctx context.Context, id OrganizationID) ([]DeletedProject, error)
+	PurgeOrganization(ctx context.Context, id OrganizationID) error
 
 	GetProject(ctx context.Context, id ProjectID) (Project, error)
 	GetOrganization(ctx context.Context, id OrganizationID) (Organization, error)

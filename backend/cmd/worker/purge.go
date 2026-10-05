@@ -133,3 +133,53 @@ func (p purger) run1(ctx context.Context, d results.DeletedRun) error {
 	return p.authz.AuditRun(ctx, "run.purge", string(d.Run.ID), d.Run.ProjectID, "system: restore window ended",
 		map[string]any{"deleted_by": d.DeletedBy, "deleted_at": d.DeletedAt, "results_removed": len(ids), "artifacts_removed": objects})
 }
+
+// orgs purges up to limit deleted organizations whose restore window has
+// passed (§11.3.2 "Billing, xóa org"): every project under it the way one
+// deleted project is purged (one() audits each as project.purge), then the
+// memberships, invitations and tokens held at the org and its workspaces,
+// then the workspaces and the org. A purge cut short leaves a deleted org
+// with fewer projects, which the next sweep finishes. The shadow meter's
+// history stays, as for a project.
+func (p purger) orgs(ctx context.Context, now time.Time, limit int) (int, error) {
+	due, err := p.tenancy.OrganizationsToPurge(ctx, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	var first error
+	for _, d := range due {
+		if err := p.org1(ctx, d); err != nil {
+			if first == nil {
+				first = fmt.Errorf("purge organization %s: %w", d.ID, err)
+			}
+			continue
+		}
+		done++
+	}
+	return done, first
+}
+
+func (p purger) org1(ctx context.Context, d tenancy.DeletedOrganization) error {
+	projects, err := p.tenancy.OrganizationProjects(ctx, d.ID)
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if err := p.one(ctx, project); err != nil {
+			return err
+		}
+	}
+	ws := make([]string, 0, len(d.WorkspaceIDs))
+	for _, w := range d.WorkspaceIDs {
+		ws = append(ws, string(w))
+	}
+	if err := p.authz.PurgeOrganization(ctx, string(d.ID), ws); err != nil {
+		return err
+	}
+	if err := p.tenancy.PurgeOrganization(ctx, d.ID); err != nil {
+		return err
+	}
+	return p.authz.AuditOrganization(ctx, "organization.purge", string(d.ID), "system: restore window ended",
+		map[string]any{"name": d.Name, "slug": d.Slug, "deleted_by": d.DeletedBy, "deleted_at": d.DeletedAt, "projects_removed": len(projects), "workspaces_removed": len(ws)})
+}

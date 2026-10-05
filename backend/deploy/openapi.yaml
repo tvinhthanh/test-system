@@ -1110,6 +1110,85 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}:
+    delete:
+      operationId: deleteOrganization
+      tags: [members]
+      summary: Delete an organization — soft, restorable by its owners for 30 days, then purged (§11.3.2)
+      description: |
+        Needs `org.manage` (organization owners only; owners are MFA-enrolled).
+        The body must carry the organization's exact name. From this answer on
+        the organization, its workspaces and its projects are gone for every
+        route, CI tokens included (404); its owners see it under
+        `GET /v1/organizations/deleted` and can restore it until `purgeAfter`,
+        when the worker purges every project, the memberships, invitations and
+        tokens held at the org and its workspaces, the workspaces and the org.
+        A project deleted on its own before stays deleted after a restore.
+        The slug stays reserved during the window. Audited
+        (`organization.delete|restore|purge`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmName]
+              properties:
+                confirmName: { type: string }
+      responses:
+        "200":
+          description: Deleted; restorable until purgeAfter.
+          content: { application/json: { schema: { $ref: "#/components/schemas/DeletedOrganization" } } }
+        "400":
+          description: "`CONFIRM_NAME` — the name typed is not the organization's."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/deleted:
+    get:
+      operationId: listDeletedOrganizations
+      tags: [members]
+      summary: Deleted organizations the caller owns, still in their restore window
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: Newest deletion first; empty for anyone who owns none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DeletedOrganization" } }
+                  nextCursor: { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/organizations/{organizationId}/restore:
+    post:
+      operationId: restoreOrganization
+      tags: [members]
+      summary: Restore a deleted organization before its purge
+      description: Owners of the organization only; anyone else, and an organization that is live or already purged, gets 404.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Restored with everything under it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, slug]
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  slug: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/organizations/{organizationId}/members:
     get:
       operationId: listOrganizationMembers
@@ -2701,6 +2780,16 @@ components:
               override: { type: boolean }
               updatedBy: { type: string, description: "Only with an override." }
               updatedAt: { type: string, format: date-time, description: "Only with an override." }
+    DeletedOrganization:
+      type: object
+      required: [id, name, slug, deletedAt, deletedBy, purgeAfter]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        deletedAt: { type: string, format: date-time }
+        deletedBy: { type: string }
+        purgeAfter: { type: string, format: date-time, description: "Restorable by an owner until then; purged by the worker after." }
     DeletedProject:
       type: object
       required: [id, name, deletedAt, deletedBy, purgeAfter]

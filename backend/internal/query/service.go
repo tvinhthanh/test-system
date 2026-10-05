@@ -698,6 +698,7 @@ func (s *service) MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, 
 		       coalesce(c.merges, 0), coalesce(c.undo_merges, 0), coalesce(c.splits, 0), coalesce(rv.decisions, 0),
 		       coalesce(v.runs, 0), coalesce(v.results, 0), coalesce(st.bytes, 0)
 		  FROM projects p JOIN workspaces w ON w.id = p.workspace_id
+		  JOIN organizations o ON o.id = w.org_id AND o.deleted_at IS NULL -- nor is a deleted organization's
 		  LEFT JOIN active a ON a.project_id = p.id
 		  LEFT JOIN corrections c ON c.project_id = p.id
 		  LEFT JOIN reviews rv ON rv.project_id = p.id
