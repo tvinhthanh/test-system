@@ -246,6 +246,25 @@ func (s *service) ListEnvironments(ctx context.Context, project ProjectID) ([]En
 	return out, rows.Err()
 }
 
+func (s *service) UpdateProject(ctx context.Context, id ProjectID, name, defaultBranch string) (Project, error) {
+	if name != "" && !ValidName(name) {
+		return Project{}, fmt.Errorf("%w: project name", ErrInvalid)
+	}
+	if len(defaultBranch) > 200 {
+		return Project{}, fmt.Errorf("%w: default branch", ErrInvalid)
+	}
+	if !uuidRe.MatchString(string(id)) {
+		return Project{}, ErrNotFound
+	}
+	var p Project
+	err := s.db.Q(ctx).QueryRow(ctx, `
+		UPDATE projects SET name = coalesce(nullif($2, ''), name), default_branch = coalesce(nullif($3, ''), default_branch)
+		 WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, workspace_id, name, default_branch, created_at`, string(id), name, defaultBranch,
+	).Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.DefaultBranch, &p.CreatedAt)
+	return p, mapErr(err)
+}
+
 // ---- soft delete (§11.3.2 "Tạo/xóa project") --------------------------------
 
 const deletedColumns = `p.id, p.workspace_id, w.name, p.name, p.default_branch, p.created_at, w.org_id, p.deleted_at, p.deleted_by, p.purge_after`

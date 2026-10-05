@@ -189,6 +189,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"DELETE /v1/projects/{projectId}/runs/{runId}":                   map[string]any{},
 		"POST /v1/projects/{projectId}/runs/{runId}/restore":             map[string]any{},
 		"DELETE /v1/projects/{projectId}":                                map[string]any{"confirmName": "alpha-app"},
+		"PATCH /v1/projects/{projectId}/settings":                        map[string]any{"retention": map[string]int{"video": 1}},
 		"POST /v1/workspaces/{workspaceId}/projects/{projectId}/restore": map[string]any{},
 		"POST /v1/workspaces/{workspaceId}/projects":                     map[string]any{"name": "walk project"},
 		"POST /v1/workspaces/{workspaceId}/members":                      map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},

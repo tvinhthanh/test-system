@@ -14,6 +14,8 @@ POST /v1/artifacts
 POST /v1/artifacts/{artifactId}/complete
 GET /v1/projects
 GET /v1/projects/{projectId}/runs
+GET /v1/projects/{projectId}/settings
+PATCH /v1/projects/{projectId}/settings
 GET /v1/projects/{projectId}/runs/{runId}
 DELETE /v1/projects/{projectId}/runs/{runId}
 GET /v1/projects/{projectId}/runs/deleted

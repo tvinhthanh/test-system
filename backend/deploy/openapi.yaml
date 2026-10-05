@@ -886,6 +886,64 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/settings:
+    get:
+      operationId: getProjectSettings
+      tags: [dashboard]
+      summary: The project's name, default branch and artifact retention (§11.3.2)
+      description: |
+        Anyone who may view the project. `retention` has one row per artifact
+        kind in §10.4 order: `planDays` is what the organization's plan keeps,
+        `days` what new artifacts of the kind get — the plan's number, or a
+        shorter one a maintainer set (`override`).
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The settings.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProjectSettings" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateProjectSettings
+      tags: [dashboard]
+      summary: Rename, change the default branch, or shorten retention (§11.3.2 "Sửa retention/cấu hình project")
+      description: |
+        Needs `project.configure` (maintainers and up). Every field is
+        optional. A retention value is days between 1 and the plan's number
+        for that kind, or 0 to go back to the plan's; it applies to artifacts
+        recorded from then on — stored ones keep their expiry. Every value is
+        checked before anything is written, so a refused body changes nothing.
+        A change is audited as `project.configure` with old → new; a body that
+        changes nothing is not.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                defaultBranch: { type: string, minLength: 1, maxLength: 200 }
+                retention:
+                  type: object
+                  description: "Kind → days. Kinds: screenshot, video, trace, har, log, attachment, manual_evidence."
+                  additionalProperties: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: The settings after the change.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProjectSettings" } } }
+        "400":
+          description: "`RETENTION_ABOVE_PLAN` (details carry `kind`, `planDays`, `days`) or `INVALID_PAYLOAD` (`details.field`)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`CONFLICT` — another project in the workspace has that name."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/workspaces/{workspaceId}/projects/deleted:
     get:
       operationId: listDeletedProjects
@@ -2623,6 +2681,26 @@ components:
         deletedAt: { type: string, format: date-time }
         deletedBy: { type: string }
         purgeAfter: { type: string, format: date-time }
+    ProjectSettings:
+      type: object
+      required: [id, name, defaultBranch, plan, retention]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        defaultBranch: { type: string }
+        plan: { type: string, description: "The organization's plan id; unknown plans retain as free." }
+        retention:
+          type: array
+          items:
+            type: object
+            required: [kind, planDays, days, override]
+            properties:
+              kind: { type: string, enum: [screenshot, video, trace, har, log, attachment, manual_evidence] }
+              planDays: { type: integer }
+              days: { type: integer, description: "What artifacts recorded now get: min(override, planDays)." }
+              override: { type: boolean }
+              updatedBy: { type: string, description: "Only with an override." }
+              updatedAt: { type: string, format: date-time, description: "Only with an override." }
     DeletedProject:
       type: object
       required: [id, name, deletedAt, deletedBy, purgeAfter]

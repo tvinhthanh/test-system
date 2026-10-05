@@ -110,6 +110,10 @@ type Service interface {
 	ProjectsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedProject, error)
 	PurgeProject(ctx context.Context, id ProjectID) error
 
+	// UpdateProject renames a live project or changes its default branch;
+	// "" keeps a field. A name taken in the workspace is ErrConflict.
+	UpdateProject(ctx context.Context, id ProjectID, name, defaultBranch string) (Project, error)
+
 	GetProject(ctx context.Context, id ProjectID) (Project, error)
 	GetOrganization(ctx context.Context, id OrganizationID) (Organization, error)
 	GetWorkspace(ctx context.Context, id WorkspaceID) (Workspace, error)

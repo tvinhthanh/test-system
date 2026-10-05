@@ -653,7 +653,7 @@ func (s *service) PurgeProject(ctx context.Context, projectID string, environmen
 
 func (s *service) AuditProject(ctx context.Context, action, projectID, workspaceID, actor string, details map[string]any) error {
 	switch action {
-	case "project.delete", "project.restore", "project.purge":
+	case "project.delete", "project.restore", "project.purge", "project.configure":
 	default:
 		return fmt.Errorf("%w: audit action %q", ErrInvalid, action)
 	}

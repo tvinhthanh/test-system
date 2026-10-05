@@ -318,9 +318,10 @@ type Service interface {
 	// AuditRun records a run deletion, restore or purge (§11.7).
 	AuditRun(ctx context.Context, action, runID, projectID, actor string, details map[string]any) error
 
-	// AuditProject records a project deletion, restore or purge (§11.7:
-	// destructive actions are logged) — tenancy owns the project, authz the
-	// audit table. action is project.delete | project.restore | project.purge.
+	// AuditProject records a project deletion, restore, purge or settings
+	// change (§11.7: destructive actions are logged) — tenancy owns the
+	// project, authz the audit table. action is project.delete |
+	// project.restore | project.purge | project.configure.
 	AuditProject(ctx context.Context, action, projectID, workspaceID, actor string, details map[string]any) error
 
 	// PurgeProject deletes everything this module keeps for a project that
