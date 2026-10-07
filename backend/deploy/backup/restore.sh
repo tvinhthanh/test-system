@@ -46,7 +46,7 @@ start=$(date +%s)
 "$PSQL" "$server" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$dbname\" TEMPLATE template0 ENCODING '$encoding' $locale_clause"
 # Extensions are database-level and created by the dump for a full-database
 # backup; for a schema-only dump (the drill's shape) they must exist first.
-"$PSQL" "$target" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"
+"$PSQL" "$target" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public" -c "CREATE EXTENSION IF NOT EXISTS btree_gin WITH SCHEMA public"
 "$PG_RESTORE" --no-owner --no-privileges --exit-on-error --dbname="$target" "$dump"
 took=$(( $(date +%s) - start ))
 

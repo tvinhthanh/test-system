@@ -211,6 +211,23 @@ Windows, 12 CPU logic, **Postgres + api + worker + máy phát tải cùng một 
 4. **Metrics subselect tương quan** — 2 index probe cho *mỗi* failure trong cửa
    sổ → join gộp một lần; index partial cho `failure_observed_at`.
 
+5. **Tạo identity cho suite mới: 5 round trip mỗi test, tuần tự** (07-10) — tra
+   alias, tìm ứng viên, INSERT identity, INSERT alias, tra lại. Giờ tra alias
+   một lần cho cả batch, INSERT identity + alias + đọc lại gộp một statement
+   (CTE): vòng làm nóng của bài này từ 105 713 lượt tra alias xuống 1 820, hai
+   INSERT riêng (≈ 101k) thành ≈ 52k. Trên laptop lời về thời gian chưa đo ra
+   được (DB cùng máy, round trip ≈ 0,1 ms); lời thật ở chỗ DB cách một chặng
+   mạng. Lần đầu sửa đã làm **đổi nhãn** quyết định: hai job resolve cùng suite
+   gần như cùng lúc → job sau bỏ lỡ alias vừa commit → 144 lần "auto_match"
+   (identity vẫn đúng) mà code cũ ghi "exact" — bắt được nhờ so `pg_stat_statements`
+   với code cũ; sửa: alias đã có chủ (`ON CONFLICT DO NOTHING`) là exact, không
+   rename. `TestRaceOnUnknownFingerprint` nay assert đúng 1 "new" + 7 "exact".
+6. **Index trigram tìm ứng viên không có `project_id`** (07-10, migration 0029) —
+   `%` khớp tên test của mọi tenant; tìm ứng viên là 70 % thời gian tạo identity
+   (2,5 ms/test ở 500 test, tuyến tính theo suite → bậc hai cho cả suite mới).
+   GIN `(project_id, leaf gin_trgm_ops)` qua `btree_gin`: 31 → 14 ms ở 20 project
+   × 5 000 identity.
+
 **Điều harness cho thấy nhưng không sửa được ở đây:** thời gian statement dưới
 100 đồng thời gấp 5–7 lần lúc cô lập (`pg_stat_statements`: mean vs min) — tranh
 chấp CPU của một máy chạy cả bốn thứ. `synchronous_commit=off` không đổi gì (không

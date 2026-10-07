@@ -222,7 +222,7 @@ func (s *service) SplitFrom(ctx context.Context, projectID, fingerprint string, 
 		).Scan(&newID); err != nil {
 			return mapErr(err)
 		}
-		if err := s.bind(ctx, projectID, newID, fingerprint, SourceManualSplit, 0, sig, actor, at); err != nil {
+		if _, err := s.bind(ctx, projectID, newID, fingerprint, SourceManualSplit, 0, sig, actor, at); err != nil {
 			return err
 		}
 		details, _ := json.Marshal(map[string]any{"fingerprint": fingerprint, "from": at, "closedAlias": aliasID})

@@ -146,17 +146,24 @@ func (s *service) ResolveDeferred(ctx context.Context, projectID, runID string, 
 			}
 			return ordered[i].ref.Key < ordered[j].ref.Key
 		})
+		// Step 1 for the whole batch in one probe. A fingerprint bound by a
+		// concurrent resolve after this read reaches create, whose ON
+		// CONFLICT hands back that owner as an exact match.
+		fps := make([]string, len(ordered))
+		for i, k := range ordered {
+			fps[i] = k.fp
+		}
+		known, err := s.exact(ctx, projectID, fps)
+		if err != nil {
+			return err
+		}
 		for _, k := range ordered {
 			r, ms, fp := k.ref, k.ms, k.fp
 			if id, ok := decided[fp]; ok {
 				out[r.Key] = id
 				continue
 			}
-			hits, err := s.exact(ctx, projectID, []string{fp})
-			if err != nil {
-				return err
-			}
-			if id, ok := hits[fp]; ok {
+			if id, ok := known[fp]; ok {
 				decided[fp], out[r.Key] = id, id
 				outcomes = append(outcomes, Outcome{Key: r.Key, IdentityID: id, Decision: DecisionExact, Score: 1})
 				continue
@@ -168,19 +175,23 @@ func (s *service) ResolveDeferred(ctx context.Context, projectID, runID string, 
 			v := s.cfg.Decide(ms, cands, now)
 			oc := Outcome{Key: r.Key, Score: v.Score, Gap: v.Gap}
 			var id string
+			created := true
 			switch v.Decision {
 			case match.DecisionAutoMatch:
-				id, err = s.autoMatch(ctx, projectID, v.MatchedID, fp, r.Signals, v, now)
+				id, created, err = s.autoMatch(ctx, projectID, v.MatchedID, fp, r.Signals, v, now)
 				oc.Decision = DecisionAutoMatch
 			case match.DecisionReview:
-				id, err = s.create(ctx, projectID, fp, r.Signals, now)
-				if err == nil {
+				id, created, err = s.create(ctx, projectID, fp, r.Signals, now)
+				if err == nil && created {
 					err = s.enqueueReview(ctx, projectID, runID, id, fp, v)
 				}
 				oc.Decision = DecisionReview
 			default:
-				id, err = s.create(ctx, projectID, fp, r.Signals, now)
+				id, created, err = s.create(ctx, projectID, fp, r.Signals, now)
 				oc.Decision = DecisionNew
+			}
+			if !created { // fp was bound meanwhile: it is that owner's, exactly
+				oc.Decision, oc.Score, oc.Gap = DecisionExact, 1, 0
 			}
 			if err != nil {
 				return fmt.Errorf("%s: %w", r.Key, err)
@@ -235,75 +246,95 @@ func (s *service) candidates(ctx context.Context, projectID string, in match.Sig
 	return out, rows.Err()
 }
 
-// create makes a new identity owning fp. Two runs racing on the same
-// unknown fingerprint (§9.7) both land here; the partial unique index lets
-// exactly one insert through and the other reads the winner's row.
-func (s *service) create(ctx context.Context, projectID, fp string, sig Signals, now time.Time) (string, error) {
-	q := s.db.Q(ctx)
+// create makes a new identity owning fp, and its exact alias, in one
+// statement. Two runs racing on the same unknown fingerprint (§9.7) both
+// land here; the partial unique indexes let exactly one through and the
+// other reads the winner's row (created = false).
+func (s *service) create(ctx context.Context, projectID, fp string, sig Signals, now time.Time) (id string, created bool, err error) {
 	ms := toMatch(sig).Normalize()
-	var id string
-	err := q.QueryRow(ctx, `
-		INSERT INTO test_identities (project_id, framework, canonical_file_path, canonical_title_path, canonical_leaf_title,
-		                             param_signature, template_key, current_fingerprint, first_seen_at, last_seen_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-		ON CONFLICT (project_id, current_fingerprint) WHERE status = 'active' DO NOTHING
-		RETURNING id`,
+	var newID, bound *string
+	err = s.db.Q(ctx).QueryRow(ctx, `
+		WITH ins AS (
+			INSERT INTO test_identities (project_id, framework, canonical_file_path, canonical_title_path, canonical_leaf_title,
+			                             param_signature, template_key, current_fingerprint, first_seen_at, last_seen_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+			ON CONFLICT (project_id, current_fingerprint) WHERE status = 'active' DO NOTHING
+			RETURNING id
+		), al AS (
+			INSERT INTO test_identity_aliases (identity_id, project_id, fingerprint, source, match_score, signals, created_by, valid_from)
+			SELECT id, $1::uuid, $8::text, $10::text, NULL, $11::jsonb, 'system', $9::timestamptz FROM ins
+			ON CONFLICT (project_id, fingerprint) WHERE valid_to IS NULL DO NOTHING
+			RETURNING identity_id
+		)
+		SELECT (SELECT id::text FROM ins), (SELECT identity_id::text FROM al)`,
 		projectID, ms.Framework, ms.FilePath, ms.TitlePath, ms.Leaf(), ms.ParamSignature, toMatch(sig).TemplateKey(), fp, now,
-	).Scan(&id)
-	if err != nil && !errors.Is(err, pg.ErrNoRows) {
-		return "", mapErr(err)
+		string(SourceExact), signalsJSON(sig),
+	).Scan(&newID, &bound)
+	if err != nil {
+		return "", false, mapErr(err)
 	}
-	if err == nil {
-		if err := s.bind(ctx, projectID, id, fp, SourceExact, 0, sig, "system", now); err != nil {
-			return "", err
-		}
+	if newID != nil && bound != nil {
+		return *bound, true, nil
 	}
 	// Lost the race (or the alias already existed): read who owns fp now.
 	hits, err := s.exact(ctx, projectID, []string{fp})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if owner, ok := hits[fp]; ok {
-		return owner, nil
+		return owner, false, nil
 	}
-	return "", fmt.Errorf("identity: fingerprint %s has an active identity but no alias", fp)
+	return "", false, fmt.Errorf("identity: fingerprint %s has an active identity but no alias", fp)
 }
 
-// bind opens an alias fp → identity from `from`. A conflict on the partial
-// unique index means someone bound it first; the caller re-reads.
-func (s *service) bind(ctx context.Context, projectID, identityID, fp string, src AliasSource, score float64, sig Signals, actor string, from time.Time) error {
-	var sigJSON []byte
-	if validSignals(sig) {
-		sigJSON, _ = json.Marshal(sig)
+// signalsJSON is what an alias keeps of the signals it was bound with.
+func signalsJSON(sig Signals) []byte {
+	if !validSignals(sig) {
+		return nil
 	}
+	b, _ := json.Marshal(sig)
+	return b
+}
+
+// bind opens an alias fp → identity from `from` and reports whether it did.
+// A conflict on the partial unique index means someone bound it first
+// (bound = false); the caller re-reads.
+func (s *service) bind(ctx context.Context, projectID, identityID, fp string, src AliasSource, score float64, sig Signals, actor string, from time.Time) (bound bool, err error) {
+	sigJSON := signalsJSON(sig)
 	var scoreArg *float64
 	if src == SourceAutoMatch {
 		scoreArg = &score
 	}
-	_, err := s.db.Q(ctx).Exec(ctx, `
+	tag, err := s.db.Q(ctx).Exec(ctx, `
 		INSERT INTO test_identity_aliases (identity_id, project_id, fingerprint, source, match_score, signals, created_by, valid_from)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (project_id, fingerprint) WHERE valid_to IS NULL DO NOTHING`,
 		identityID, projectID, fp, string(src), scoreArg, sigJSON, actor, from)
-	return mapErr(err)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // autoMatch aliases fp to the matched identity and moves the identity's
 // canonical signals to the new name: the identity follows the rename.
-func (s *service) autoMatch(ctx context.Context, projectID, matched, fp string, sig Signals, v match.Verdict, now time.Time) (string, error) {
-	if err := s.bind(ctx, projectID, matched, fp, SourceAutoMatch, v.Score, sig, "system", now); err != nil {
-		return "", err
+// When fp turns out to be bound already — a concurrent resolve of the same
+// suite committed it after the batch's exact probe — it is that owner's,
+// exactly (bound = false), and nothing is renamed.
+func (s *service) autoMatch(ctx context.Context, projectID, matched, fp string, sig Signals, v match.Verdict, now time.Time) (id string, bound bool, err error) {
+	if bound, err = s.bind(ctx, projectID, matched, fp, SourceAutoMatch, v.Score, sig, "system", now); err != nil {
+		return "", false, err
 	}
-	hits, err := s.exact(ctx, projectID, []string{fp})
-	if err != nil {
-		return "", err
-	}
-	owner, ok := hits[fp]
-	if !ok {
-		return "", fmt.Errorf("identity: auto-match alias for %s vanished", fp)
-	}
-	if owner != matched {
-		return owner, nil // a concurrent resolve bound it first; theirs wins
+	if !bound {
+		hits, err := s.exact(ctx, projectID, []string{fp})
+		if err != nil {
+			return "", false, err
+		}
+		owner, ok := hits[fp]
+		if !ok {
+			return "", false, fmt.Errorf("identity: fingerprint %s was bound but has no alias in force", fp)
+		}
+		return owner, false, nil
 	}
 	ms := toMatch(sig).Normalize()
 	_, err = s.db.Q(ctx).Exec(ctx, `
@@ -312,7 +343,7 @@ func (s *service) autoMatch(ctx context.Context, projectID, matched, fp string, 
 			param_signature = $6, template_key = $7, current_fingerprint = $8, last_seen_at = $9, updated_at = $9
 		WHERE id = $1`,
 		matched, ms.Framework, ms.FilePath, ms.TitlePath, ms.Leaf(), ms.ParamSignature, toMatch(sig).TemplateKey(), fp, now)
-	return matched, mapErr(err)
+	return matched, true, mapErr(err)
 }
 
 func (s *service) enqueueReview(ctx context.Context, projectID, runID, identityID, fp string, v match.Verdict) error {
