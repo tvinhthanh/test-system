@@ -339,7 +339,11 @@ try {
     page.waitForResponse(
       (r) => r.url().endsWith(`/releases/${release.id}/evaluate`) && r.ok(),
     ),
-    page.getByRole("button", { name: "Evaluate gate", exact: true }).click(),
+    // The header and an un-evaluated gate section both offer the button.
+    page
+      .getByRole("region", { name: "Quality gate" })
+      .getByRole("button", { name: "Evaluate gate", exact: true })
+      .click(),
   ]);
   const evaluated = await evaluation.json();
   assert.equal(evaluated.gate.verdict, "no_evidence");
