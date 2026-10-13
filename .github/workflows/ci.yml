@@ -223,7 +223,10 @@ jobs:
           ATP_EMAIL: alice@example.com
           ATP_PASSWORD: correct horse battery staple
           ATP_BROWSER_CHANNEL: bundled
-        run: node scripts/live-check.mjs ../reporter/playwright/node_modules/playwright
+        run: |
+          node scripts/live-check.mjs ../reporter/playwright/node_modules/playwright
+          node scripts/live-manual-history.mjs
+          node scripts/live-case-bulk.mjs
       - name: Logs on failure
         if: failure()
         working-directory: backend
@@ -232,7 +235,11 @@ jobs:
         if: always()
         with:
           name: live-check-screenshots
-          path: frontend/test-results/live-*.png
+          path: |
+            frontend/test-results/live-*.png
+            frontend/test-results/manual-*.png
+            frontend/test-results/case-context-*.png
+            frontend/test-results/case-bulk-*.png
           if-no-files-found: ignore
       - name: Stack down
         if: always()

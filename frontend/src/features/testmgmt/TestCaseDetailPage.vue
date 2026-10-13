@@ -266,7 +266,9 @@ const label = (s: string) => s.replaceAll("_", " ");
         class="mb-4"
         :error="mutation.error.value.error"
       />
-      <section class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <section
+        class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
+      >
         <div class="space-y-6">
           <div class="bg-card space-y-4 rounded-lg border p-4">
             <div class="space-y-2">

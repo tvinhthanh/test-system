@@ -7,11 +7,15 @@ assert(
   process.env.ATP_EMAIL && process.env.ATP_PASSWORD,
   "Demo credentials required",
 );
+const channel = process.env.ATP_BROWSER_CHANNEL || "chrome";
 const browser = await chromium.launch({
   headless: true,
-  channel: process.env.ATP_BROWSER_CHANNEL || "chrome",
+  ...(channel === "bundled" ? {} : { channel }),
 });
-const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+const page = await browser.newPage({
+  viewport: { width: 1440, height: 960 },
+  ignoreHTTPSErrors: new URL(base).hostname === "localhost",
+});
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 mkdirSync("test-results", { recursive: true });

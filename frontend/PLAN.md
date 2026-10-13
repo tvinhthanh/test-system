@@ -25,6 +25,11 @@ draft was removed on 2026-09-18.
 
 ### Active Slice (2026-10-13)
 
+- GĐ2 acceptance harness: extend live-manual-history.mjs to create requirement,
+  case and plan via UI, link coverage, execute/retest with original evidence,
+  then evaluate and explicitly block a release with no automation evidence.
+  This is technical workflow verification, not human team acceptance or GĐ1.
+
 - Continuing GĐ2 bulk/export: selected-case metadata updates in batches of 100,
   mandatory per-case versions, per-item results and transactional audit; CSV
   export of selected cases or the full server filter (5000 cases / 8 MiB cap).
@@ -101,6 +106,22 @@ draft was removed on 2026-09-18.
   npm audit --audit-level=low: 0 vulnerabilities; fixes remain local, not pushed.
 - Next: team acceptance of the complete GĐ2 workflow; complete GĐ1 on the
   intended durable Docker deployment. Native loopback demo uses memory artifacts.
+- Extended live-manual-history.mjs passed with requirement/case/plan created
+  through UI, coverage linking, assignment, failure/bug/evidence, context edits,
+  retest and persisted named release decision. A unique branch without an
+  automation run returns no_evidence even when manual retest passes.
+  Screenshots include manual-release-{desktop,tablet,mobile}.png.
+- A linked requirement exposed an implicit grid's mobile minimum width; case
+  detail now uses a minmax(0,1fr) base grid track. Real 360/768/1440px checks
+  pass. CI E2E now runs both manual-history and bulk scripts through Caddy;
+  bundled Chromium supported, internal TLS bypass limited to localhost.
+- Follow-up CI fixes: gofmt applied; missing bundled emnapi core/runtime lock
+  metadata restored from a fresh npm-generated lock without unrelated version
+  updates. Clean npm ci in an isolated directory passed, audit 0. Committed
+  frontend tests (excluding the unrelated local fixture test): 89 passed;
+  typecheck/build/bundle gate passed. Full new GitHub E2E result still pending.
+- GitHub run 38369144174 (2123c14): frontend job passed including clean npm ci,
+  tests, build and audit; backend gofmt/go vet passed, integration running.
 
 - Phase: **P1-min UI complete** — sign-in, projects, runs, run detail,
   failure detail with attempts / artifacts (screenshots and video inline,

@@ -12,7 +12,10 @@ const browser = await chromium.launch({
   headless: true,
   ...(channel === "bundled" ? {} : { channel }),
 });
-const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+const page = await browser.newPage({
+  viewport: { width: 1440, height: 960 },
+  ignoreHTTPSErrors: new URL(base).hostname === "localhost",
+});
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 mkdirSync("test-results", { recursive: true });
@@ -41,17 +44,94 @@ try {
     return response.json();
   };
   const stamp = Date.now();
-  const testCase = await mutate(`${scope}/test-cases`, {
-    title: `History check ${stamp}`,
-    steps: [{ action: "Original action", expected: "Original receipt" }],
-    expected: "Paid",
-    preconditions: "Original signed-in setup",
-    testData: "Original account=42",
-  });
-  const plan = await mutate(`${scope}/test-plans`, {
-    name: `History plan ${stamp}`,
-    caseIds: [],
-  });
+  const createViaUi = async (suffix) => {
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.url().endsWith(suffix) &&
+          r.request().method() === "POST" &&
+          r.status() === 201,
+      ),
+      page.getByRole("button", { name: "Create", exact: true }).click(),
+    ]);
+    return response.json();
+  };
+  await page.goto(`${base}/p/${project}/requirements`);
+  await page
+    .getByRole("button", { name: "New requirement", exact: true })
+    .first()
+    .click();
+  await page.locator("#req-key").fill(`REQ-${stamp}`);
+  await page.locator("#req-title").fill(`Payment receipt ${stamp}`);
+  await page.locator("#req-priority").selectOption("p0");
+  const requirement = await createViaUi("/requirements");
+  await page
+    .getByLabel(`Status of ${requirement.title}`, { exact: true })
+    .selectOption("active");
+  await page.goto(`${base}/p/${project}/cases`);
+  await page
+    .getByRole("button", { name: "New case", exact: true })
+    .first()
+    .click();
+  await page.locator("#new-title").fill(`History check ${stamp}`);
+  await page
+    .getByLabel("Preconditions", { exact: true })
+    .fill("Original signed-in setup");
+  await page
+    .getByLabel("Test data", { exact: true })
+    .fill("Original account=42");
+  let testCase = await createViaUi("/test-cases");
+  await page.getByRole("button", { name: "Add step", exact: true }).click();
+  await page
+    .getByPlaceholder("Action", { exact: true })
+    .fill("Original action");
+  await page
+    .getByPlaceholder("Expected", { exact: true })
+    .fill("Original receipt");
+  await page.locator("#case-expected").fill("Paid");
+  const [savedCase] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().endsWith(`/test-cases/${testCase.id}`) &&
+        r.request().method() === "PATCH" &&
+        r.ok(),
+    ),
+    page.getByRole("button", { name: "Save changes", exact: true }).click(),
+  ]);
+  testCase = await savedCase.json();
+  const coverage = page.locator('[aria-labelledby="req-title"]');
+  await coverage.locator("select").selectOption(requirement.id);
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes(`/test-cases/${testCase.id}/requirements`) &&
+        r.request().method() === "POST" &&
+        r.ok(),
+    ),
+    coverage.getByRole("button", { name: "Add", exact: true }).click(),
+  ]);
+  await coverage.getByText(requirement.title, { exact: false }).waitFor();
+  const coveredCase = await (
+    await page.request.get(`${scope}/test-cases/${testCase.id}`)
+  ).json();
+  assert(coveredCase.requirements.includes(requirement.id));
+  const requirementList = await (
+    await page.request.get(`${scope}/requirements`)
+  ).json();
+  assert.equal(
+    requirementList.items.find((item) => item.id === requirement.id).coveredBy,
+    1,
+  );
+  await page.goto(`${base}/p/${project}/plans`);
+  await page
+    .getByRole("button", { name: "New plan", exact: true })
+    .first()
+    .click();
+  await page.locator("#plan-name").fill(`History plan ${stamp}`);
+  await page
+    .getByLabel("Include current active cases", { exact: true })
+    .uncheck();
+  const plan = await createViaUi("/test-plans");
   await mutate(`${scope}/test-cases`, { title: `Outside plan ${stamp}` });
   await page.goto(`${base}/p/${project}/plans/${plan.id}`);
   await page.getByText("No cases in this plan", { exact: true }).waitFor();
@@ -161,6 +241,7 @@ try {
   await page
     .getByRole("region", { name: "Case change history" })
     .getByText("Updated", { exact: true })
+    .first()
     .waitFor();
   for (const [name, width, height] of [
     ["desktop", 1440, 960],
@@ -168,16 +249,16 @@ try {
     ["mobile", 360, 844],
   ]) {
     await page.setViewportSize({ width, height });
+    await page.screenshot({
+      path: `test-results/case-context-${name}.png`,
+      fullPage: true,
+    });
     assert(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
       `${name}: case editor horizontal overflow`,
     );
-    await page.screenshot({
-      path: `test-results/case-context-${name}.png`,
-      fullPage: true,
-    });
   }
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto(`${base}/p/${project}/plans/${plan.id}`);
@@ -245,9 +326,60 @@ try {
       fullPage: true,
     });
   }
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.goto(`${base}/p/${project}/releases`);
+  await page
+    .getByRole("button", { name: "New release", exact: true })
+    .first()
+    .click();
+  await page.locator("#rel-version").fill(`manual-acceptance-${stamp}`);
+  await page.locator("#rel-branch").fill(`no-automation-${stamp}`);
+  const release = await createViaUi("/releases");
+  const [evaluation] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/releases/${release.id}/evaluate`) && r.ok(),
+    ),
+    page.getByRole("button", { name: "Evaluate gate", exact: true }).click(),
+  ]);
+  const evaluated = await evaluation.json();
+  assert.equal(evaluated.gate.verdict, "no_evidence");
+  assert.equal(evaluated.gate.runId ?? "", "");
+  assert.equal(evaluated.gate.rules.length, 5);
+  const decisionNote = `Manual retest passed in plan ${plan.id}; no automation run on release branch, hold release.`;
+  await page.locator("#decision-note").fill(decisionNote);
+  const [decision] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/releases/${release.id}/decision`) && r.ok(),
+    ),
+    page.getByRole("button", { name: "Block", exact: true }).click(),
+  ]);
+  const blocked = await decision.json();
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.decidedBy, email);
+  assert.equal(blocked.decisionNote, decisionNote);
+  await page.reload();
+  await page.getByText("Decided: blocked", { exact: true }).waitFor();
+  await page.getByText(decisionNote, { exact: false }).waitFor();
+  for (const [name, width] of [
+    ["desktop", 1440],
+    ["tablet", 768],
+    ["mobile", 360],
+  ]) {
+    await page.setViewportSize({ width, height: 960 });
+    assert(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      `${name}: release horizontal overflow`,
+    );
+    await page.screenshot({
+      path: `test-results/manual-release-${name}.png`,
+      fullPage: true,
+    });
+  }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: real login, fixed scope, assignment, workflow, case context editor/audit, immutable context snapshot, retest, old evidence, desktop/mobile",
+    "PASS: real UI requirement/case/coverage/plan, assignment, workflow, context/audit, immutable snapshot, bug/retest/evidence, no-evidence release and persisted named decision, desktop/tablet/mobile",
   );
 } finally {
   await browser.close();
