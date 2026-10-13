@@ -353,6 +353,14 @@ CI/image (GOTOOLCHAIN=auto) build bằng bản đã vá, laptop pin `GOTOOLCHAIN
 không đổi. `npm audit` reporter + frontend (kể cả dev deps): 0. Lặp lại trước
 mỗi release; kết quả ghi vào đây.
 
+**Dependency review 13-10:** CI 96607e6 đỏ ở govulncheck — 10 lỗ hổng *được gọi*
+(stdlib `net/http`… + 1 module) mà nhánh 1.25 không còn nhận bản vá. Nâng
+`toolchain go1.26.9` (dòng `go 1.25.5` giữ nguyên), `golang.org/x/text` 0.39 →
+0.41, `x/sync` 0.21 → 0.22; CI `setup-go` + `golang:1.26.9-alpine` theo cùng;
+govulncheck pin v1.1.4 → v1.9.0. Local với go1.26.9: `govulncheck ./...` → **0
+được gọi** (18 advisory nằm trong module require nhưng code không gọi), build/vet/
+gofmt/unit sạch.
+
 **Restore drill §11.5 / §14.3 hàng cuối ✅ 17-09-2026 — "backup chưa restore thử
 = chưa có backup".** `test/restore/` (`RESTORE_TEST=1 TEST_DATABASE_URL=… go test
 -v ./test/restore/`, ≈ 10 s, cần `pg_dump`/`pg_restore` — `PG_BIN` hoặc PATH):

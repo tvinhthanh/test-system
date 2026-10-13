@@ -2,10 +2,9 @@ module github.com/vinh/automation-testing-platform/backend
 
 go 1.25.5
 
-// govulncheck 17-09-2026: 18 stdlib advisories fixed between 1.25.6 and 1.25.13.
-// CI and images pick this up (GOTOOLCHAIN=auto); a laptop pinned to
-// GOTOOLCHAIN=local keeps building with its own 1.25.x.
-toolchain go1.25.13
+// Security baseline 13-10-2026: Go 1.26.9 fixes the stdlib advisories
+// reported by govulncheck. CI and the build image use this exact toolchain.
+toolchain go1.26.9
 
 require (
 	github.com/jackc/pgx/v5 v5.11.0
@@ -19,7 +18,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )

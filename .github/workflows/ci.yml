@@ -53,9 +53,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # The patched toolchain go.mod names (govulncheck 17-09); explicit so
+          # The patched toolchain go.mod names (govulncheck 13-10); explicit so
           # GOTOOLCHAIN=local below never has to download one.
-          go-version: "1.25.13"
+          go-version: "1.26.9"
           cache-dependency-path: backend/go.sum
 
       # pg_dump/pg_restore of the server's major, for test/restore. Ubuntu's
@@ -96,12 +96,12 @@ jobs:
           S3_TEST_SECRET_KEY: atptestsecret123
         run: go test -count=1 -timeout 15m ./...
 
-      # Pinned: govulncheck v1.8+ requires Go 1.26, and this job runs the
-      # toolchain go.mod names under GOTOOLCHAIN=local (act caught the
-      # `` failure before the first GitHub run). Bump with the toolchain.
+      # Pinned and built with the toolchain go.mod names (GOTOOLCHAIN=local);
+      # v1.8+ needs Go 1.26, so it moved off v1.1.4 with go1.26.9. Bump with
+      # the toolchain.
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           govulncheck ./...
 
       - name: docker build (deploy/Dockerfile)
