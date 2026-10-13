@@ -2022,6 +2022,92 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/test-cases/export:
+    get:
+      operationId: exportTestCases
+      tags: [testmgmt]
+      summary: Export selected cases or all cases matching a server filter as CSV
+      description: "Needs view. Maximum 5000 cases / 8 MiB; exceeding a cap fails, never truncates. CSV uses steps_json and a version marker for reversible spreadsheet-safe text. Definition export, not a backup of execution history or automation links."
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: ids, in: query, schema: { type: string }, description: "Optional comma-separated IDs, at most 200; all must belong to this project and match the filter." }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: suite, in: query, schema: { type: string } }
+        - { name: automation, in: query, schema: { type: string } }
+        - { name: critical, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Complete CSV and count, never just the displayed page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [csv, count, exportedAt]
+                properties:
+                  csv: { type: string }
+                  count: { type: integer, minimum: 0, maximum: 5000 }
+                  exportedAt: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-cases/bulk:
+    post:
+      operationId: bulkUpdateTestCases
+      tags: [testmgmt]
+      summary: Update selected case metadata with per-case versions and outcomes
+      description: "Needs testmgmt.write and CSRF. Each case is its own audited transaction; partial success is explicit. Versions required; duplicates rejected before any write. Linking automation remains a separate action."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, patch]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [id, expectedUpdatedAt]
+                    properties:
+                      id: { type: string, format: uuid }
+                      expectedUpdatedAt: { type: string, format: date-time }
+                patch:
+                  type: object
+                  minProperties: 1
+                  properties:
+                    priority: { $ref: "#/components/schemas/Priority" }
+                    isCritical: { type: boolean }
+                    suiteId: { type: string, description: "Empty clears; non-empty must be a suite of the project." }
+                    automationStatus: { type: string, enum: [manual_only, automation_candidate, obsolete] }
+      responses:
+        "200":
+          description: Per-case outcomes in input order; refresh before retrying unconfirmed network failures.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, updated, code]
+                      properties:
+                        id: { type: string }
+                        updated: { type: boolean }
+                        code: { type: string, enum: ["", CONFLICT, NOT_FOUND, INVALID_PAYLOAD, INTERNAL] }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/test-cases/import:
     post:
       operationId: importTestCases
@@ -2296,6 +2382,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/projects/{projectId}/test-cases/{testCaseId}/links:
     post:
       operationId: linkTestCaseAutomation
@@ -2411,6 +2498,7 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 200 }
                 environmentId: { type: string, format: uuid }
+                caseIds: { type: array, maxItems: 5000, uniqueItems: true, items: { type: string, format: uuid }, description: "Fixed scope. Omitted selects current non-obsolete cases; empty creates an empty plan. New project cases are not added automatically." }
       responses:
         "201":
           description: Created as `draft`.
@@ -2437,8 +2525,8 @@ paths:
     patch:
       operationId: updateTestPlan
       tags: [testmgmt]
-      summary: Change the plan status
-      description: A `closed` plan refuses new executions. Needs `testmgmt.write`.
+      summary: Change plan status, case scope, assignments or workflow
+      description: A `closed` plan refuses scope, assignment and workflow changes. Cases with executions cannot be removed. Assignees must be verified users authorized for testmgmt.write in this project. Assignment does not grant permissions. Needs `testmgmt.write`.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2449,9 +2537,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [status]
+              minProperties: 1
               properties:
                 status: { type: string, enum: [draft, active, closed] }
+                caseIds: { type: array, maxItems: 5000, uniqueItems: true, items: { type: string, format: uuid } }
+                expectedUpdatedAt: { type: string, format: date-time, description: "Optional optimistic check; UI sends the last read version." }
+                caseUpdate:
+                  type: object
+                  required: [testCaseId]
+                  properties:
+                    testCaseId: { type: string, format: uuid }
+                    assigneeEmail: { type: string, maxLength: 254, description: "Verified authorized tester email; empty clears assignment." }
+                    workStatus: { type: string, enum: [not_run, in_progress], description: "Completed is set only by recording an execution. Cases with history cannot be reset to not_run." }
       responses:
         "200":
           description: Updated.
@@ -2460,12 +2557,13 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/projects/{projectId}/test-plans/{planId}/executions:
     post:
       operationId: recordManualExecution
       tags: [testmgmt]
       summary: Record one manual run of one case (append-only; the latest row per case is the verdict)
-      description: The executor is the session user. A `draft` plan becomes `active`. Needs `testmgmt.write`.
+      description: The executor is the session user. A `draft` plan becomes `active`. Needs `testmgmt.write`. Passed executions cannot contain failed or blocked step results. Case snapshot is captured in the recording transaction.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2482,6 +2580,10 @@ paths:
                 status: { type: string, enum: [passed, failed, blocked, skipped] }
                 note: { type: string, maxLength: 4000 }
                 executedAt: { type: string, format: date-time, description: Defaults to now. }
+                stepResults: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/ManualStepResult" } }
+                bugUrl: { type: string, maxLength: 2000, description: "Empty or an HTTP(S) bug URL without credentials." }
+                retestOf: { type: string, format: uuid, description: "Previous execution of the same case in the same plan and project; omit when not a retest." }
+                caseUpdatedAt: { type: string, format: date-time, description: "Optional optimistic check; a changed case returns 409 before recording." }
       responses:
         "201":
           description: Recorded.
@@ -3243,6 +3345,9 @@ components:
       type: object
       description: Create requires `title`; on PATCH every field is optional and absent means unchanged.
       properties:
+        preconditions: { type: string, maxLength: 16000, description: "Trimmed text, at most 16000 UTF-8 bytes. Empty clears; omitted PATCH keeps." }
+        testData: { type: string, maxLength: 16000, description: "Trimmed text, at most 16000 UTF-8 bytes. Empty clears; omitted PATCH keeps." }
+        expectedUpdatedAt: { type: string, format: date-time, description: "Optional PATCH version check; stale edits return 409." }
         suiteId: { type: string, description: A suite of the same project; empty clears. }
         externalKey: { type: string, maxLength: 100, description: Create only; the import upsert key. }
         title: { type: string, minLength: 1, maxLength: 500 }
@@ -3266,6 +3371,10 @@ components:
       type: object
       required: [id, suiteId, suiteName, externalKey, title, steps, expected, priority, isCritical, automationStatus, ownerId, createdAt, updatedAt]
       properties:
+        preconditions: { type: string }
+        testData: { type: string }
+        audit: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/CaseChange" }, description: "Latest 50 real changes, newest first; present on individual reads. No legacy backfill." }
+        auditTruncated: { type: boolean }
         id: { type: string, format: uuid }
         suiteId: { type: string }
         suiteName: { type: string }
@@ -3281,6 +3390,15 @@ components:
         requirements: { type: array, items: { type: string, format: uuid }, description: "Requirement ids this case covers; present on a single case." }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    CaseChange:
+      type: object
+      required: [id, actor, action, changedFields, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        actor: { type: string }
+        action: { type: string, enum: [case.create, case.update, case.import] }
+        changedFields: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
     ImportReport:
       type: object
       required: [created, updated, skipped, suites, requirements, errors]
@@ -3299,11 +3417,39 @@ components:
         planId: { type: string, format: uuid }
         testCaseId: { type: string, format: uuid }
         caseTitle: { type: string }
+        caseSnapshot:
+          type: [object, "null"]
+          description: "Immutable case at recording time; null for legacy rows (history cannot be reconstructed)."
+          required: [title, steps, expected, updatedAt]
+          properties:
+            preconditions: { type: [string, "null"], description: "Recorded context; null for legacy snapshots." }
+            testData: { type: [string, "null"], description: "Recorded context; null for legacy snapshots." }
+            title: { type: string }
+            steps:
+              type: array
+              items:
+                type: object
+                required: [action, expected]
+                properties:
+                  action: { type: string }
+                  expected: { type: string }
+            expected: { type: string }
+            updatedAt: { type: string, format: date-time }
+        stepResults: { type: array, items: { $ref: "#/components/schemas/ManualStepResult" } }
+        bugUrl: { type: string }
+        retestOf: { type: string, description: "Previous execution ID, or empty string." }
         executedBy: { type: string }
         status: { type: string, enum: [passed, failed, blocked, skipped] }
         note: { type: string }
         executedAt: { type: string, format: date-time }
         evidence: { type: array, items: { $ref: "#/components/schemas/ArtifactRef" }, description: "Verified `manual_evidence` artifacts, oldest first; read each through `getArtifactContent`." }
+    ManualStepResult:
+      type: object
+      required: [stepIndex, status, actual]
+      properties:
+        stepIndex: { type: integer, minimum: 0, maximum: 199 }
+        status: { type: string, enum: [passed, failed, blocked, skipped] }
+        actual: { type: string, maxLength: 4000 }
     TestPlan:
       type: object
       required: [id, name, environmentId, status, createdAt, updatedAt]
@@ -3312,9 +3458,22 @@ components:
         name: { type: string }
         environmentId: { type: string }
         status: { type: string, enum: [draft, active, closed] }
+        cases: { type: [array, "null"], items: { $ref: "#/components/schemas/PlanCase" }, description: "Fixed case membership with current case content, assignment and work status. Null on collection reads." }
         executions: { type: array, items: { $ref: "#/components/schemas/ManualExecution" }, description: "Latest row per case; present on a single plan." }
+        executionHistory: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/ManualExecution" }, description: "Newest 200 executions, ordered by executedAt DESC then id DESC, with original evidence." }
+        historyTruncated: { type: boolean, description: "More than 200 executions exist; older rows are retained." }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    PlanCase:
+      type: object
+      required: [testCase, assigneeUserId, assigneeEmail, assignedBy, assignedAt, workStatus]
+      properties:
+        testCase: { $ref: "#/components/schemas/TestCase" }
+        assigneeUserId: { type: string, description: "Empty when unassigned." }
+        assigneeEmail: { type: string }
+        assignedBy: { type: string }
+        assignedAt: { type: [string, "null"], format: date-time }
+        workStatus: { type: string, enum: [not_run, in_progress, completed] }
     GateRule:
       type: object
       required: [id, level, passed, summary, applies]

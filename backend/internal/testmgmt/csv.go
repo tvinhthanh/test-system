@@ -3,6 +3,7 @@ package testmgmt
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,10 @@ import (
 const maxImportRows = 5000
 
 func (s *service) ImportCSV(ctx context.Context, projectID string, text string) (ImportReport, error) {
+	return s.ImportCSVAs(ctx, projectID, text, "")
+}
+
+func (s *service) ImportCSVAs(ctx context.Context, projectID string, text, actor string) (ImportReport, error) {
 	if !isUUID(projectID) {
 		return ImportReport{}, ErrNotFound
 	}
@@ -53,13 +58,20 @@ func (s *service) ImportCSV(ctx context.Context, projectID string, text string) 
 		if !ok || i >= len(rec) {
 			return ""
 		}
-		return strings.TrimSpace(rec[i])
+		value := strings.TrimSpace(rec[i])
+		if version, ok := col["_atp_csv_version"]; ok && version < len(rec) && strings.TrimSpace(rec[version]) == "1" && strings.HasPrefix(value, "'") {
+			return value[1:]
+		}
+		return value
 	}
 
 	var rep ImportReport
 	suites := map[string]string{}       // name → id
 	requirements := map[string]string{} // external key → id
 	err = s.db.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.caseAuditActor(ctx, actor, "case.import"); err != nil {
+			return err
+		}
 		q := s.db.Q(ctx)
 		// Existing suites and requirements of the project, by name/key.
 		rows, err := q.Query(ctx, `SELECT id, name FROM test_suites WHERE project_id = $1 AND parent_id IS NULL`, projectID)
@@ -122,12 +134,29 @@ func (s *service) ImportCSV(ctx context.Context, projectID string, text string) 
 			}
 			critical := truthy(field(rec, "critical"))
 			steps := parseSteps(field(rec, "steps"))
+			if _, ok := col["steps_json"]; ok {
+				text := field(rec, "steps_json")
+				steps = []Step{}
+				if text != "" {
+					if err := json.Unmarshal([]byte(text), &steps); err != nil {
+						rep.Errors = append(rep.Errors, fmt.Sprintf("row %d: invalid steps_json", line))
+						continue
+					}
+				}
+			}
 			stepsJSON, err := normalizeSteps(steps)
 			if err != nil {
 				rep.Errors = append(rep.Errors, fmt.Sprintf("row %d: %v", line, err))
 				continue
 			}
 			expected := field(rec, "expected")
+			preconditions, testData := field(rec, "preconditions"), field(rec, "test_data")
+			if len(preconditions) > 16000 || len(testData) > 16000 {
+				rep.Errors = append(rep.Errors, fmt.Sprintf("row %d: case context exceeds 16000 bytes", line))
+				continue
+			}
+			_, hasPreconditions := col["preconditions"]
+			_, hasTestData := col["test_data"]
 
 			var suiteID *string
 			if name := field(rec, "suite"); name != "" {
@@ -151,22 +180,25 @@ func (s *service) ImportCSV(ctx context.Context, projectID string, text string) 
 			var inserted bool
 			if key != "" {
 				err = q.QueryRow(ctx, `
-					INSERT INTO test_cases (project_id, suite_id, external_key, title, steps, expected, priority, is_critical)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					INSERT INTO test_cases (project_id, suite_id, external_key, title, steps, expected, priority, is_critical, preconditions, test_data)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 					ON CONFLICT (project_id, external_key) WHERE external_key IS NOT NULL DO UPDATE
 					   SET suite_id = coalesce(EXCLUDED.suite_id, test_cases.suite_id), title = EXCLUDED.title, steps = EXCLUDED.steps,
-					       expected = EXCLUDED.expected, priority = EXCLUDED.priority, is_critical = EXCLUDED.is_critical, updated_at = now()
-					RETURNING id, (xmax = 0)`, projectID, suiteID, key, title, stepsJSON, expected, string(prio), critical).Scan(&caseID, &inserted)
+					       expected = EXCLUDED.expected, priority = EXCLUDED.priority, is_critical = EXCLUDED.is_critical,
+					       preconditions = CASE WHEN $11 THEN EXCLUDED.preconditions ELSE test_cases.preconditions END,
+					       test_data = CASE WHEN $12 THEN EXCLUDED.test_data ELSE test_cases.test_data END, updated_at = clock_timestamp()
+					RETURNING id, (xmax = 0)`, projectID, suiteID, key, title, stepsJSON, expected, string(prio), critical, preconditions, testData, hasPreconditions, hasTestData).Scan(&caseID, &inserted)
 			} else {
 				err = q.QueryRow(ctx, `SELECT id FROM test_cases WHERE project_id = $1 AND external_key IS NULL AND title = $2 ORDER BY created_at LIMIT 1`, projectID, title).Scan(&caseID)
 				switch {
 				case err == nil:
-					_, err = q.Exec(ctx, `UPDATE test_cases SET suite_id = coalesce($2, suite_id), steps = $3, expected = $4, priority = $5, is_critical = $6, updated_at = now() WHERE id = $1`,
-						caseID, suiteID, stepsJSON, expected, string(prio), critical)
+					_, err = q.Exec(ctx, `UPDATE test_cases SET suite_id = coalesce($2, suite_id), steps = $3, expected = $4, priority = $5, is_critical = $6,
+						preconditions = CASE WHEN $9 THEN $7 ELSE preconditions END, test_data = CASE WHEN $10 THEN $8 ELSE test_data END, updated_at = clock_timestamp() WHERE id = $1`,
+						caseID, suiteID, stepsJSON, expected, string(prio), critical, preconditions, testData, hasPreconditions, hasTestData)
 				case mapErr(err) == ErrNotFound:
 					inserted = true
-					err = q.QueryRow(ctx, `INSERT INTO test_cases (project_id, suite_id, title, steps, expected, priority, is_critical) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-						projectID, suiteID, title, stepsJSON, expected, string(prio), critical).Scan(&caseID)
+					err = q.QueryRow(ctx, `INSERT INTO test_cases (project_id, suite_id, title, steps, expected, priority, is_critical, preconditions, test_data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+						projectID, suiteID, title, stepsJSON, expected, string(prio), critical, preconditions, testData).Scan(&caseID)
 				}
 			}
 			if err != nil {

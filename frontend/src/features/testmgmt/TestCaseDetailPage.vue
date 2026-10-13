@@ -25,6 +25,8 @@ import NativeSelect from "../../shared/NativeSelect.vue";
 import PageHeader from "../../shared/PageHeader.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import ErrorNote from "./ErrorNote.vue";
+import CaseContextEditor from "./CaseContextEditor.vue";
+import CaseChangeHistory from "./CaseChangeHistory.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +61,8 @@ const form = ref<{
   isCritical: boolean;
   automationStatus: TestCase["automationStatus"];
   expected: string;
+  preconditions: string;
+  testData: string;
   steps: Step[];
 } | null>(null);
 watch(
@@ -72,6 +76,8 @@ watch(
           isCritical: c.isCritical,
           automationStatus: c.automationStatus,
           expected: c.expected,
+          preconditions: c.preconditions,
+          testData: c.testData,
           steps: c.steps.map((s) => ({ ...s })),
         }
       : null;
@@ -89,18 +95,28 @@ const dirty = computed(() => {
     f.isCritical !== c.isCritical ||
     f.automationStatus !== c.automationStatus ||
     f.expected !== c.expected ||
+    f.preconditions !== c.preconditions ||
+    f.testData !== c.testData ||
     JSON.stringify(f.steps) !== JSON.stringify(c.steps)
   );
 });
 const mutation = useMutation();
+const contextValid = computed(
+  () =>
+    !form.value ||
+    [form.value.preconditions, form.value.testData].every(
+      (value) => new TextEncoder().encode(value.trim()).length <= 16000,
+    ),
+);
 async function save() {
-  if (!form.value) return;
+  if (!form.value || !contextValid.value) return;
   const saved = await mutation.run("save", (signal) =>
     testmgmt.updateTestCase(
       project.value,
       caseId.value,
       {
         ...form.value!,
+        expectedUpdatedAt: tc.data.value!.updatedAt,
         steps: form.value!.steps.filter((s) => s.action || s.expected),
       },
       signal,
@@ -224,7 +240,7 @@ const label = (s: string) => s.replaceAll("_", " ");
     <Button
       v-if="canWrite"
       size="sm"
-      :disabled="!dirty || mutation.busy.value !== null"
+      :disabled="!dirty || !contextValid || mutation.busy.value !== null"
       @click="save"
       ><Save />Save changes</Button
     >
@@ -319,6 +335,11 @@ const label = (s: string) => s.replaceAll("_", " ");
             </div>
           </div>
 
+          <CaseContextEditor
+            v-model:preconditions="form.preconditions"
+            v-model:test-data="form.testData"
+            :readonly="!canWrite"
+          />
           <div class="bg-card overflow-hidden rounded-lg border">
             <div class="flex items-center justify-between border-b px-4 py-2">
               <h2 class="text-sm font-semibold">Steps</h2>
@@ -561,5 +582,10 @@ const label = (s: string) => s.replaceAll("_", " ");
         </div>
       </section>
     </template>
+    <CaseChangeHistory
+      v-if="tc.data.value"
+      :changes="tc.data.value.audit"
+      :truncated="tc.data.value.auditTruncated"
+    />
   </AsyncState>
 </template>

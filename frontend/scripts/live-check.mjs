@@ -616,6 +616,7 @@ await step(
     await page.goto(base + "/p/" + project + "/plans");
     await page.getByRole("button", { name: "New plan" }).first().click();
     await page.fill("#plan-name", "Live check plan " + stamp);
+    await page.getByLabel("Include current active cases", { exact: true }).check();
     await Promise.all([
       page.waitForResponse(v1(/\/test-plans$/, 201), { timeout: 10000 }),
       page.getByRole("button", { name: "Create", exact: true }).click(),
@@ -627,6 +628,7 @@ await step(
       .locator(".execution-list li", { hasText: "Live check case " })
       .first();
     await row.waitFor({ timeout: 10000 });
+    await row.getByText("Record execution", { exact: true }).click();
     await Promise.all([
       page.waitForResponse(v1(/\/executions$/, 201), { timeout: 10000 }),
       row.getByRole("button", { name: "failed", exact: true }).click(),

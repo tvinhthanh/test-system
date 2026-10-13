@@ -69,6 +69,21 @@ test("timeouts and connection failures are retryable network errors", async () =
   await assert.rejects(client(only.fetch, [], { maxAttempts: 1 }).finishRun("x", "now"), (e: any) => e instanceof NetworkError);
 });
 
+test("timeout covers reading the response body after headers arrive", async () => {
+  const fetchWithHangingBody = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener("abort", () => controller.error(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      },
+    });
+    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as unknown as typeof fetch;
+
+  const started = Date.now();
+  await assert.rejects(client(fetchWithHangingBody, [], { timeoutMs: 30, maxAttempts: 1 }).sendEvents("x", []), (e: any) => e instanceof NetworkError && /timeout after 30 ms/.test(e.message));
+  assert.ok(Date.now() - started < 200, "body read should be bounded by the request timeout");
+});
+
 test("presigned PUT sends the pinned headers and returns the ETag", async () => {
   const s = scripted([{ status: 200, headers: { ETag: '"abc"' } }]);
   const res = await client(s.fetch, []).put("http://bucket.test/upload?token=1", new Uint8Array([1, 2, 3]), { "Content-Type": "image/png" });

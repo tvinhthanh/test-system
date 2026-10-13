@@ -1,6 +1,6 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.43 · **Ngày:** 07-10-2026 · **Trạng thái:** 13 ADR đã chốt (QĐ-13 28-09: JUnit backfill, ROI, shadow meter build sẵn; QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09, quản lý member ở cả ba tầng qua UI, MFA TOTP cho org owner và đăng nhập Google/GitHub (bật/tắt bằng cấu hình) từ 27-09, mời qua email và quên mật khẩu (SMTP, bật/tắt) từ 28-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
+> **Phiên bản:** v3.44 · **Ngày:** 13-10-2026 · **Trạng thái:** kế hoạch tester dùng hằng ngày, demo Windows → pilot → VPS tại §4.11 và yêu cầu mở rộng §6.8.7 (chưa nghiệm thu); 13 ADR đã chốt (QĐ-13 28-09: JUnit backfill, ROI, shadow meter build sẵn; QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09, quản lý member ở cả ba tầng qua UI, MFA TOTP cho org owner và đăng nhập Google/GitHub (bật/tắt bằng cấu hình) từ 27-09, mời qua email và quên mật khẩu (SMTP, bật/tắt) từ 28-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
 > **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
 > **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
 
@@ -784,6 +784,49 @@ GATE KỸ THUẬT             ·    T0 T1 T4          ·    T2-EX     ·      ·
 
 **Đường đi ngắn nhất tới câu trả lời "có nên làm tiếp không":** 6 tuần Phase 0 → Gate-0. Không cần build gì để tới đó ngoài prototype identity.
 
+### 4.11 Kế hoạch tester dùng hằng ngày — demo Windows, pilot, rồi VPS (13-10-2026)
+
+**Mục tiêu được chủ dự án xác nhận:** tester dùng platform làm nơi làm việc chính, từ requirement, lập kế hoạch, thực hiện test, ghi bằng chứng, liên kết bug và retest tới quyết định release. Hỗ trợ quản lý nhiều loại testing và giữ kết quả đủ rõ để người dùng kiểm chứng. Đây là kế hoạch triển khai bổ sung cho P2 và tích hợp kết quả; không phải tuyên bố đã hoàn thành hoặc production-ready.
+
+**Điểm xuất phát:** các chức năng đã có theo §0.5 gồm case/suite/requirement/plan, manual execution và evidence, automation mapping, release gate, reporter Playwright và import JUnit XML. Chúng cần kiểm chứng trên stack thật và mở rộng nghiệp vụ theo §6.8.7. Không dùng kết quả unit test/build thay cho bằng chứng E2E, vận hành hoặc pilot.
+
+**Thứ tự triển khai:** GĐ1 → GĐ2 → GĐ3 → GĐ4 → GĐ5 → GĐ6. Các giai đoạn này là mốc triển khai, không đổi tên phase P0–P6; gate sản phẩm §4.5 và gate kỹ thuật §14 vẫn độc lập. Chốt lịch và capacity sau khi rà soát khoảng trống GĐ2; chưa cam kết số tuần khi chưa biết người triển khai và tải pilot.
+
+| Giai đoạn | Trạng thái (13-10-2026) | Phạm vi triển khai | Tiêu chí nghiệm thu / bằng chứng |
+|---|---|---|---|
+| **GĐ1 — Nền tảng demo nội bộ** | `in_progress` — sửa reporter và audit đã kiểm tra local; còn E2E, demo và restore | Kiểm chứng sửa reporter: occurrence theo `TestCase` xuyên retry, timeout gồm response body; audit dependency sạch. Chạy E2E stack thật. Dựng laptop Windows bằng Docker Desktop + Git Bash và `server/atp.sh`; cấu hình artifact bền vững, backup; project demo có manual, automation, failed, flaky, blocked | Tester đăng nhập, hoàn thành vòng test và xem evidence; retry/artifact đúng test; restart giữ database và artifact; restore backup thành công. Lưu kết quả CI/E2E và biên bản demo. Bản sửa chỉ được đánh hoàn tất khi có bằng chứng tương ứng |
+| **GĐ2 — Công việc tester hằng ngày** | `in_progress` — snapshot, step result, retest/lịch sử, plan membership/phân công, context/audit và bulk/export đã kiểm chứng; còn nghiệm thu luồng đầy đủ với team | Precondition, test data, phân công, kết quả từng bước; danh sách case và tiến độ plan; phiên bản case tại execution; liên kết bug và retest; lịch sử, lọc, thao tác hàng loạt, export | Team hoàn thành requirement → case → plan → execution → bug → retest → release trong platform. Case chưa chạy hiện rõ; sửa case không đổi bằng chứng cũ; retest không ghi đè lần trước. Các bước chính không cần Excel để bù |
+| **GĐ3 — Phân loại testing** | `planned` | Các chiều cấp độ, mục đích, nhãn sử dụng, cách thực hiện; subtype Performance theo §6.8.7. API/UI, filter, plan selection, migration và import/export cùng hiểu taxonomy | Một case có thể là System + Functional + E2E + Regression + Automated; dữ liệu cũ vẫn đọc được, không đoán loại từ framework; truy vấn/lập plan theo taxonomy hoạt động |
+| **GĐ4 — Kết quả chuyên biệt** | `planned` | Ưu tiên Performance, sau đó Security, Accessibility, Compatibility, Recovery, Usability theo nhu cầu pilot. Thiết kế contract kết quả, lưu báo cáo gốc, nguồn và phiên bản công cụ; tích hợp công cụ chạy ngoài platform | Mỗi adapter có fixture thật, kiểm mapping và đối chiếu báo cáo gốc; giữ đơn vị/ngưỡng/cấu hình; thiếu dữ liệu hoặc lỗi import không thành passed. Một nhóm chỉ được ghi là hỗ trợ khi có workflow và bằng chứng riêng |
+| **GĐ5 — Pilot và độ tin cậy** | `planned` — chưa nghiệm thu pilot | Một nhóm tester dùng project thật ít nhất hai chu kỳ kiểm thử/release; kiểm quyền và tenant isolation, audit, ingest trùng/mất mạng, restart API/worker, restore. Đo tải pilot và soak 24–72 h theo §14 | Không còn lỗi nghiêm trọng chưa xử lý về mất dữ liệu, gắn nhầm kết quả, truy cập sai quyền hoặc quyết định release. Gate chỉ rõ evidence và dữ liệu thiếu; override có actor/lý do. Có báo cáo pilot thật và kết quả vận hành; không tự điền số đo |
+| **GĐ6 — VPS** | `planned` — triển khai sau pilot | Dựng staging trước, HTTPS, database/artifact bền vững, monitoring, backup ngoài host, rollback; diễn tập di chuyển rồi chuyển dữ liệu pilot và chạy smoke/E2E | Đối chiếu dữ liệu và artifact sau chuyển; restore và rollback đã thử; smoke/E2E xanh trên VPS; đo lại capacity trên host đích. Chuyển VPS không tự động đồng nghĩa đủ điều kiện production hoặc khách trả tiền |
+
+**Ưu tiên hiện tại:** GĐ1 và GĐ2. Phân loại và adapter mở rộng sau khi luồng hằng ngày đủ dùng. GĐ4 có thể triển khai từng nhóm; nhóm chưa nghiệm thu phải hiển thị đúng trạng thái, không quảng bá là đã hỗ trợ. VPS phục vụ mở rộng sau pilot; pentest trước khách trả tiền đầu tiên vẫn theo §11.6.
+
+**Phạm vi vận hành demo:** laptop cắm nguồn, không sleep khi phục vụ; cấu hình địa chỉ LAN, firewall và chứng chỉ HTTPS cho máy truy cập. Artifact phải ở object storage bền vững khi cần giữ bằng chứng; không dùng bộ nhớ API làm kho evidence của pilot. Backup database và artifact phải có bản ngoài laptop, có chính sách retention và diễn tập restore. Chỉ mở phạm vi truy cập đã cấu hình cho demo nội bộ.
+
+**Ranh giới:** mở rộng quản lý và tích hợp kết quả không kéo managed runner, scheduling, agent hay production execution guard lên trước QĐ-5/QĐ-8/QĐ-10. Luật importer theo khách cụ thể ở §6.8.5 vẫn áp dụng; từng adapter mới phải chốt nguồn, contract và phạm vi trước khi build. Gate release hiện tại không tự động đánh giá các nhóm mới cho tới khi có evidence contract và rule tương ứng được nghiệm thu.
+
+**Theo dõi thực thi:** mỗi giai đoạn cần danh sách đầu việc, người chịu trách nhiệm, trạng thái (`planned`, `in_progress`, `verified`) và liên kết bằng chứng. Chỉ cập nhật §0.5 thành đã hoàn thành sau nghiệm thu; kế hoạch này không thay bằng chứng trong `backend/GATES.md`.
+
+#### 4.11.1 Lát triển khai đã kiểm chứng — 13-10-2026
+
+| Hạng mục | Trạng thái | Bằng chứng / phần còn lại |
+|---|---|---|
+| Snapshot case tại execution | `verified` | Migration `0030_manual_execution_history.sql`, test Postgres `TestExecutionSnapshotRetestAndHistory`; thay tên/steps không đổi snapshot cũ. Execution cũ giữ NULL và UI báo thiếu snapshot; kiểm version case để từ chối ghi theo dữ liệu đã bị sửa |
+| Kết quả từng bước, bug URL, retest | `verified` | Contract execution POST bổ sung stepResults/bugUrl/retestOf; retest phải cùng case/plan/project. Passed không chứa step failed/blocked; URL chỉ HTTP(S), không credentials. UI không bỏ âm thầm actual result chưa chọn status |
+| Lịch sử execution và evidence cũ | `verified` | Plan GET trả 200 execution mới nhất, giữ dữ liệu cũ và báo historyTruncated; test giới hạn 201 dòng. UI xem snapshot, actual result, bug và artifact của lần trước |
+| Kiểm chứng UI/API thật cho lát này | `verified` | `frontend/scripts/live-manual-history.mjs`: login thật → execution failed → upload evidence → sửa case → retest passed → đọc lại snapshot/evidence. Chrome desktop 1440×960, mobile 390×844; ảnh `frontend/test-results/manual-history-*.png`; không overflow ngang/page error |
+| Kiểm tra hồi quy | `verified` trong phạm vi đã chạy | Frontend 77 test pass, build/bundle gate pass; reporter 20 pass/1 opt-in skip; npm audit 0. Backend chạy Postgres thật; lần chạy rộng gặp trùng cổng harness restore trên Windows, restore chạy riêng với RESTORE_TEST=1 đã pass. Không coi test S3/load/soak opt-in chưa bật là đã nghiệm thu |
+| Phạm vi case cố định của plan | `verified` | Migration `0031_plan_membership.sql` đóng băng plan cũ, giữ case obsolete có execution; POST nhận caseIds, PATCH thay scope. Test case mới không tự vào plan; không gỡ case có execution; UI lấy case từ plan, không từ danh sách project bị giới hạn |
+| Phân công tester và trạng thái công việc | `verified` | PATCH kiểm email đã verify và quyền testmgmt.write trong project; user ngoài project/viewer/không tồn tại cùng trả 404. Start không tạo verdict; execution đặt completed. Ghi actor/action/details vào test_plan_audit trong transaction; expectedUpdatedAt chặn ghi đè phiên bản cũ |
+| Hồi quy lát membership | `verified` | 81 test frontend pass; build/bundle gate 52,2 KiB gzip; test migration từ schema 0030 giữ evidence/case obsolete, test Postgres testmgmt/API/arch và OpenAPI lint pass (7 warning đã có). live-manual-history.mjs kiểm scope rỗng → chọn case → phân công → start → execution → retest/evidence trên Chrome desktop/mobile |
+| Precondition/test data và audit case | `verified` | Migration 0032, case POST/PATCH/CSV và snapshot execution; giới hạn 16.000 byte UTF-8 mỗi trường. CSV thiếu cột không xóa context cũ; audit actor/action/changedFields và trước/sau trong transaction; API trả 50 summary và báo truncation; không dựng lại lịch sử cũ |
+| Hồi quy lát context/audit | `verified` | 84 test frontend pass; build/bundle gate 52,4 KiB gzip; Postgres testmgmt/API/arch và OpenAPI lint pass. Chrome live kiểm editor/audit và snapshot cũ ở desktop/tablet/mobile (1440/768/360 px); test scope, stale edit, CSV, byte limit và audit 50+ dòng |
+| Bulk metadata và export case | `verified` | POST bulk tối đa 100 case/batch, version bắt buộc, kết quả từng case và audit transaction; không retry tự động khi kết quả chưa xác nhận. GET export kiểm project/tenant, chọn tối đa 200 hoặc toàn bộ filter, giới hạn 5000 dòng/8 MiB không trả CSV một phần; steps_json và chống formula, import round-trip |
+| Hồi quy lát bulk/export | `verified` | 90 test frontend pass, build/bundle gate 52,7 KiB gzip; Postgres testmgmt/API/arch pass. live-case-bulk.mjs kiểm concurrent edit → conflict/success → giữ selection/report → audit actor → download selected/filter thật. Chrome 1440/768/360 px không overflow/page error; npm audit --audit-level=low báo 0 vulnerabilities local, chưa push/không khẳng định CI xanh |
+| Hoàn tất GĐ1 / GĐ2 | `in_progress` | Docker chưa khởi động thành công; native demo chỉ loopback và artifact trong memory. Còn deployment bền vững/E2E toàn stack và nghiệm thu luồng đầy đủ GĐ2 với team. Chưa nghiệm thu pilot, soak dài hoặc VPS |
+
 ---
 
 ## 5. Phase 0 Playbook
@@ -1311,6 +1354,39 @@ Không import được thì chi phí chuyển đổi quá cao, P2 vô nghĩa. Nh
 - Test Management **không** được tự định nghĩa khái niệm test riêng. Mọi liên kết tới automation đi qua `TestIdentity`.
 - Manual execution **không** tạo `Run`. Nó là `ManualExecution`, có thể gom vào một `TestPlan` — trộn vào `Run` sẽ làm bẩn mọi metric flaky và TTRC vốn giả định execution là tự động.
 - Release gate **đọc** từ Intelligence Plane, không tự tính lại flaky hay TTRC.
+
+#### 6.8.7 Mở rộng nghiệp vụ tester và loại testing — kế hoạch theo §4.11
+
+**Trạng thái:** yêu cầu triển khai, chưa phải schema/API đã cài. Giữ các bất biến §6.8.6 và modular monolith §6.9; chốt migration, API contract và quyền cho từng lát nghiệp vụ trước khi sửa code.
+
+**Phân loại nhiều chiều:** không có một enum duy nhất trộn tất cả loại test. `Manual`/`Automated` là cách thực hiện; framework và định dạng báo cáo là nguồn tích hợp, không phải cấp độ hoặc mục đích.
+
+| Chiều | Giá trị khởi đầu | Quy tắc |
+|---|---|---|
+| Cấp độ | Unit, Integration, System, Acceptance | Có thể chưa phân loại; không tự suy từ Playwright/JUnit |
+| Mục đích | Functional, Performance, Security, Usability, Accessibility, Compatibility, Recovery | Có thể gắn nhiều mục đích khi có nghĩa; chỉ chọn giá trị không tạo workflow chuyên biệt |
+| Nhãn sử dụng | Smoke, Regression, E2E | Nhiều nhãn trên cùng case; E2E mô tả phạm vi luồng, không thay thế cấp độ |
+| Cách thực hiện | Manual, Automated | Case có thể được thực hiện theo cả hai cách; giữ `automationStatus` hiện tại và phân biệt cách thực hiện của từng execution |
+| Subtype Performance | Load, Stress, Spike, Soak/Endurance, Volume, Scalability | Chỉ áp dụng khi có mục đích Performance; lưu định nghĩa kịch bản và ngưỡng trước chạy |
+
+**Luồng manual cần bổ sung:** precondition và test data; plan có membership rõ, người được phân công và tiến độ (`not_run`, `in_progress` là trạng thái công việc, không thêm vào verdict hoàn tất một cách ngầm định). Execution giữ phiên bản/snapshot case, kết quả thực tế từng bước, actor, thời điểm và evidence. Verdict hoàn tất tiếp tục passed/failed/blocked/skipped; append-only và plan closed theo contract hiện tại. Sửa case sau chạy không đổi execution cũ; migration execution cũ phải ghi rõ khi không có snapshot hoặc kết quả từng bước, không dựng lại lịch sử từ case hiện tại.
+
+**Bug và retest:** trước tiên hỗ trợ liên kết bug bằng external key/URL, trạng thái và quan hệ tới case/execution; không mặc định xây issue tracker đầy đủ. Retest tạo execution mới có liên kết lần trước; giữ nguyên evidence cũ. Đồng bộ tracker hai chiều là scope riêng cần nguồn cụ thể. Thao tác hàng loạt phải kiểm quyền/tình trạng từng tài nguyên và trả lỗi rõ; export tuân thủ project/tenant và phân quyền.
+
+**Contract kết quả chuyên biệt tối thiểu:**
+
+| Nhóm | Nội dung bắt buộc để người dùng đánh giá |
+|---|---|
+| Performance | Kịch bản/subtype, môi trường và phiên bản ứng dụng, cấu hình tải/dữ liệu, thời lượng, latency p95/p99, throughput, error rate với đơn vị và cửa sổ đo; ngưỡng đã chọn, giá trị thực tế và báo cáo gốc. Scalability ghi cấu hình tài nguyên từng lần so sánh |
+| Security | Phát hiện, severity theo nguồn, vị trí, bằng chứng được kiểm soát quyền truy cập, trạng thái xử lý và retest |
+| Accessibility | Bộ tiêu chí/phiên bản được áp dụng, vị trí vi phạm, evidence; phân biệt kiểm tự động và đánh giá thủ công |
+| Compatibility | Ma trận trình duyệt/hệ điều hành/thiết bị/phiên bản; kết quả và evidence theo từng tổ hợp, tổ hợp chưa chạy hiển thị rõ |
+| Recovery | Sự cố được tạo, điều kiện ban đầu, mục tiêu phục hồi, thời gian thực tế, mất dữ liệu và evidence |
+| Usability | Nhiệm vụ, tiêu chí đánh giá, phương pháp, quan sát/phản hồi và kết luận; không tự suy passed chỉ từ số người tham gia |
+
+Mọi kết quả nhập giữ source, phiên bản adapter/công cụ, môi trường, thời gian chạy, báo cáo gốc và trạng thái import; có khóa idempotency và lỗi mapping rõ ràng. Dữ liệu thiếu, import lỗi, không chạy và không áp dụng phải phân biệt; không biến thành passed hoặc bằng chứng release đầy đủ.
+
+Không ép findings hoặc time series vào `TestResult`/`Attempt` và metric flaky/TTRC. Chốt model theo domain cho nhóm mới; chỉ liên kết automation qua `TestIdentity` khi có identity phù hợp. Gate tiêu thụ evidence qua contract; từng rule khai báo phạm vi, độ mới dữ liệu, ngưỡng và xử lý thiếu dữ liệu. Bổ sung audit cho sửa case, phân công, verdict, bug link, retest, policy và override theo quyền; không tự động mở rộng gate hiện có chỉ vì thêm taxonomy.
 
 ### 6.9 Bố cục module của monolith — thi hành từ 11-09-2026 theo QĐ-11
 

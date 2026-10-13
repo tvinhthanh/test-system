@@ -13,8 +13,19 @@ import { useRoute } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { ApiError } from "../../core/api/client";
 import { useResource } from "../../core/state/useResource";
-import { executionStatuses, type ExecutionStatus } from "./enums";
-import type { Evidence, Execution, Plan, TestCase } from "./testmgmtRepository";
+import type {
+  Evidence,
+  Execution,
+  Plan,
+  TestCase,
+  StepResult,
+  PlanCaseUpdate,
+} from "./testmgmtRepository";
+import type { ExecutionStatus } from "./enums";
+import ExecutionRecorder from "./ExecutionRecorder.vue";
+import ExecutionHistory from "./ExecutionHistory.vue";
+import PlanScopeEditor from "./PlanScopeEditor.vue";
+import PlanCaseControls from "./PlanCaseControls.vue";
 import { useMutation } from "./useMutation";
 import { useProjectPermission } from "../reports/useProjectPermission";
 import { bytes, time } from "../../shared/format";
@@ -37,61 +48,78 @@ const planId = computed(() => String(route.params.plan));
 const base = () => `/p/${encodeURIComponent(project.value)}`;
 
 const plan = useResource<Plan>();
-const cases = useResource<TestCase[]>();
 function refresh() {
   void plan.load((signal) =>
     testmgmt.plan(project.value, planId.value, signal),
   );
-  void cases.load((signal) => testmgmt.testCases(project.value, {}, signal));
 }
 watch(() => [project.value, planId.value], refresh, { immediate: true });
 
-// Every non-obsolete case is a row; the plan's latest execution per case
-// is its verdict. Recording is one click per status, note optional.
 const filter = ref("");
 const verdicts = computed(() => {
   const m = new Map<string, Execution>();
   for (const e of plan.data.value?.executions ?? []) m.set(e.testCaseId, e);
   return m;
 });
+const planCases = computed(() =>
+  (plan.data.value?.cases ?? []).map((item) => item.testCase),
+);
+const assignments = computed(
+  () =>
+    new Map(
+      (plan.data.value?.cases ?? []).map((item) => [item.testCase.id, item]),
+    ),
+);
 const rows = computed(() => {
   const q = filter.value.trim().toLowerCase();
-  return (cases.data.value ?? []).filter(
+  return planCases.value.filter(
     (c) =>
-      c.automationStatus !== "obsolete" &&
-      (!q ||
-        c.title.toLowerCase().includes(q) ||
-        c.externalKey.toLowerCase().includes(q)),
+      !q ||
+      c.title.toLowerCase().includes(q) ||
+      c.externalKey.toLowerCase().includes(q),
   );
 });
 const counts = computed(() => {
-  const out: Record<ExecutionStatus | "pending", number> = {
+  const out: Record<ExecutionStatus | "pending" | "running", number> = {
     passed: 0,
     failed: 0,
     blocked: 0,
     skipped: 0,
     pending: 0,
+    running: 0,
   };
-  for (const c of rows.value) {
+  for (const c of planCases.value) {
+    if (assignments.value.get(c.id)?.workStatus === "in_progress") {
+      out.running++;
+      continue;
+    }
     const v = verdicts.value.get(c.id);
     out[v ? v.status : "pending"]++;
   }
   return out;
 });
-const notes = ref<Record<string, string>>({});
 const mutation = useMutation();
 const closed = computed(() => plan.data.value?.status === "closed");
-async function record(c: TestCase, status: ExecutionStatus) {
+async function record(
+  c: TestCase,
+  input: {
+    status: ExecutionStatus;
+    note: string;
+    bugUrl: string;
+    retestOf: string;
+    stepResults: StepResult[];
+    caseUpdatedAt: string;
+  },
+) {
   const exec = await mutation.run(c.id, (signal) =>
     testmgmt.recordExecution(
       project.value,
       planId.value,
-      { testCaseId: c.id, status, note: notes.value[c.id] ?? "" },
+      { testCaseId: c.id, ...input },
       signal,
     ),
   );
   if (exec) {
-    delete notes.value[c.id];
     void plan.load((signal) =>
       testmgmt.plan(project.value, planId.value, signal),
     );
@@ -100,6 +128,21 @@ async function record(c: TestCase, status: ExecutionStatus) {
 async function setStatus(status: Plan["status"]) {
   const updated = await mutation.run("status", (signal) =>
     testmgmt.setPlanStatus(project.value, planId.value, status, signal),
+  );
+  if (updated) plan.data.value = updated;
+}
+async function updatePlan(
+  key: string,
+  patch: { caseIds?: string[]; caseUpdate?: PlanCaseUpdate },
+) {
+  if (!plan.data.value) return;
+  const updated = await mutation.run(key, (signal) =>
+    testmgmt.updatePlan(
+      project.value,
+      planId.value,
+      { ...patch, expectedUpdatedAt: plan.data.value!.updatedAt },
+      signal,
+    ),
   );
   if (updated) plan.data.value = updated;
 }
@@ -207,20 +250,33 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
   />
 
   <AsyncState
-    :loading="plan.loading.value || cases.loading.value"
-    :error="plan.error.value ?? cases.error.value"
+    :loading="plan.loading.value"
+    :error="plan.error.value"
     @retry="refresh"
   >
     <section
-      class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5"
+      class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"
       aria-label="Plan progress"
     >
       <StatTile label="Pending" :value="counts.pending" />
+      <StatTile label="In progress" :value="counts.running" />
       <StatTile label="Passed" :value="counts.passed" />
       <StatTile label="Failed" :value="counts.failed" />
       <StatTile label="Blocked" :value="counts.blocked" />
       <StatTile label="Skipped" :value="counts.skipped" />
     </section>
+    <PlanScopeEditor
+      v-if="canWrite && plan.data.value"
+      :project="project"
+      :plan="plan.data.value"
+      :disabled="closed || mutation.busy.value !== null"
+      @save="updatePlan('scope', { caseIds: $event })"
+    />
+    <ErrorNote
+      v-if="mutation.error.value?.key === 'scope'"
+      class="mb-4"
+      :error="mutation.error.value.error"
+    />
 
     <label class="relative mb-4 block max-w-md">
       <span class="sr-only">Filter cases</span>
@@ -236,21 +292,24 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
         placeholder="Filter cases…"
       />
     </label>
+    <p
+      v-if="plan.data.value?.historyTruncated"
+      class="text-muted-foreground mb-4 text-sm"
+      role="status"
+    >
+      Showing the latest 200 executions in this plan. Older executions are
+      retained.
+    </p>
 
     <EmptyState
       v-if="!rows.length"
-      title="Nothing to execute"
-      description="Add test cases first; every non-obsolete case appears here."
+      :title="filter ? 'No matching cases' : 'No cases in this plan'"
     />
     <ul
       v-else
       class="execution-list bg-card divide-y overflow-hidden rounded-lg border"
     >
-      <li
-        v-for="c in rows"
-        :key="c.id"
-        class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,18rem)_auto] lg:items-center"
-      >
+      <li v-for="c in rows" :key="c.id" class="grid min-w-0 gap-3 px-4 py-3">
         <div class="min-w-0">
           <RouterLink
             :to="`${base()}/cases/${encodeURIComponent(c.id)}`"
@@ -323,12 +382,31 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
             :error="mutation.error.value.error"
           />
         </div>
-        <Input
-          v-model="notes[c.id]"
-          :disabled="closed || !canWrite"
-          placeholder="Note (optional)"
-          maxlength="4000"
-          :aria-label="`Note for ${c.title}`"
+        <PlanCaseControls
+          v-if="assignments.get(c.id)"
+          :item="assignments.get(c.id)!"
+          :disabled="closed || !canWrite || mutation.busy.value !== null"
+          @update="updatePlan(c.id, { caseUpdate: $event })"
+        />
+        <ExecutionHistory
+          :executions="
+            (plan.data.value?.executionHistory ?? []).filter(
+              (e) => e.testCaseId === c.id,
+            )
+          "
+          :content-url="(id) => testmgmt.evidenceContentUrl(project, id)"
+        />
+        <ExecutionRecorder
+          v-if="canWrite"
+          :key="`${c.id}-${verdicts.get(c.id)?.id ?? 'new'}`"
+          :test-case="c"
+          :latest="verdicts.get(c.id)"
+          :disabled="
+            closed ||
+            c.automationStatus === 'obsolete' ||
+            mutation.busy.value !== null
+          "
+          @record="record(c, $event)"
         />
         <div
           v-if="canWrite"
@@ -336,15 +414,6 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
           role="group"
           :aria-label="`Record ${c.title}`"
         >
-          <Button
-            v-for="s in executionStatuses"
-            :key="s"
-            :variant="s === 'passed' ? 'default' : 'outline'"
-            size="xs"
-            :disabled="closed || mutation.busy.value !== null"
-            @click="record(c, s)"
-            >{{ s }}</Button
-          >
           <!-- Only a recorded execution can carry evidence: the file is an
                Artifact of that execution, not of the case. -->
           <Button

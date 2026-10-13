@@ -173,6 +173,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"PATCH /v1/projects/{projectId}/requirements/{requirementId}":  map[string]any{"title": "Walk"},
 		"POST /v1/projects/{projectId}/test-cases":                     map[string]any{"title": "Walk"},
 		"POST /v1/projects/{projectId}/test-cases/import":              map[string]any{"csv": "title\nWalk"},
+		"POST /v1/projects/{projectId}/test-cases/bulk":                map[string]any{"items": []map[string]any{{"id": caseA, "expectedUpdatedAt": "2026-10-13T09:00:00Z"}}, "patch": map[string]any{"priority": "p1"}},
 		"PATCH /v1/projects/{projectId}/test-cases/{testCaseId}":       map[string]any{"title": "Walk"},
 		"POST /v1/projects/{projectId}/test-cases/{testCaseId}/links":  map[string]any{"stableTestId": identityA},
 		"POST /v1/projects/{projectId}/test-plans":                     map[string]any{"name": "Walk"},

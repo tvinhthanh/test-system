@@ -57,6 +57,10 @@ export interface AutomationLink {
   createdAt: string;
 }
 export interface TestCase {
+  preconditions: string;
+  testData: string;
+  audit: CaseChange[];
+  auditTruncated: boolean;
   id: string;
   suiteId: string;
   suiteName: string;
@@ -72,6 +76,13 @@ export interface TestCase {
   requirements: string[]; // requirement ids; [] on lists
   createdAt: string;
   updatedAt: string;
+}
+export interface CaseChange {
+  id: string;
+  actor: string;
+  action: "case.create" | "case.update" | "case.import";
+  changedFields: string[];
+  createdAt: string;
 }
 // A manual_evidence artifact (SPEC §6.8.2 "Artifact dùng lại") attached to
 // an execution; bytes come from evidenceContentUrl, the same content route
@@ -93,14 +104,48 @@ export interface Execution {
   note: string;
   executedAt: string;
   evidence: Evidence[];
+  caseSnapshot: CaseSnapshot | null;
+  stepResults: StepResult[];
+  bugUrl: string;
+  retestOf: string;
+}
+export interface CaseSnapshot {
+  preconditions: string | null;
+  testData: string | null;
+  title: string;
+  steps: Step[];
+  expected: string;
+  updatedAt: string;
+}
+export interface StepResult {
+  stepIndex: number;
+  status: ExecutionStatus;
+  actual: string;
 }
 export interface Plan {
+  cases: PlanCase[];
   id: string;
   name: string;
   environmentId: string;
   status: PlanStatus;
   executions: Execution[]; // latest per case; [] on lists
+  executionHistory: Execution[];
+  historyTruncated: boolean;
   createdAt: string;
+  updatedAt: string;
+}
+export interface PlanCase {
+  testCase: TestCase;
+  assigneeUserId: string;
+  assigneeEmail: string;
+  assignedBy: string;
+  assignedAt: string | null;
+  workStatus: "not_run" | "in_progress" | "completed";
+}
+export interface PlanCaseUpdate {
+  testCaseId: string;
+  assigneeEmail?: string;
+  workStatus?: "not_run" | "in_progress";
 }
 export interface GateRule {
   id: string;
@@ -188,6 +233,11 @@ function link(value: unknown): AutomationLink {
 function testCase(value: unknown): TestCase {
   const x = d.record(value);
   return {
+    preconditions: optionalString(x.preconditions),
+    testData: optionalString(x.testData),
+    audit: d.array(x.audit ?? [], caseChange, 50),
+    auditTruncated:
+      x.auditTruncated === undefined ? false : bool(x.auditTruncated),
     id: d.string(x.id),
     suiteId: d.string(x.suiteId),
     suiteName: d.string(x.suiteName),
@@ -230,18 +280,86 @@ function execution(value: unknown): Execution {
     note: d.string(x.note),
     executedAt: d.date(x.executedAt),
     evidence: d.array(x.evidence ?? [], evidence, 50),
+    caseSnapshot: x.caseSnapshot == null ? null : caseSnapshot(x.caseSnapshot),
+    stepResults: d.array(x.stepResults ?? [], stepResult, 200),
+    bugUrl: bugUrl(x.bugUrl),
+    retestOf: optionalString(x.retestOf),
+  };
+}
+function caseSnapshot(value: unknown): CaseSnapshot {
+  const x = d.record(value);
+  return {
+    preconditions: x.preconditions == null ? null : d.string(x.preconditions),
+    testData: x.testData == null ? null : d.string(x.testData),
+    title: d.string(x.title),
+    steps: d.array(x.steps, step, 200),
+    expected: d.string(x.expected),
+    updatedAt: d.date(x.updatedAt),
+  };
+}
+function caseChange(value: unknown): CaseChange {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    actor: d.string(x.actor),
+    action: oneOf(x.action, ["case.create", "case.update", "case.import"]),
+    changedFields: d.array(x.changedFields, d.string, 30),
+    createdAt: d.date(x.createdAt),
+  };
+}
+function bugUrl(value: unknown): string {
+  const text = optionalString(value);
+  if (!text) return text;
+  try {
+    const url = new URL(text);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password
+    )
+      return d.invalid();
+  } catch {
+    return d.invalid();
+  }
+  return text;
+}
+function stepResult(value: unknown): StepResult {
+  const x = d.record(value);
+  const index = d.integer(x.stepIndex);
+  if (index < 0 || index >= 200) return d.invalid();
+  return {
+    stepIndex: index,
+    status: oneOf(x.status, executionStatuses),
+    actual: d.string(x.actual),
   };
 }
 function plan(value: unknown): Plan {
   const x = d.record(value);
   return {
+    cases: d.array(x.cases ?? [], planCase, 5000),
     id: d.string(x.id),
     name: d.string(x.name),
     environmentId: d.string(x.environmentId),
     status: oneOf(x.status, ["draft", "active", "closed"]),
     executions:
       x.executions === undefined ? [] : d.array(x.executions, execution, 5000),
+    executionHistory: d.array(x.executionHistory ?? [], execution, 200),
+    historyTruncated:
+      x.historyTruncated === undefined ? false : bool(x.historyTruncated),
     createdAt: d.date(x.createdAt),
+    updatedAt: d.date(x.updatedAt ?? x.createdAt),
+  };
+}
+function planCase(value: unknown): PlanCase {
+  const x = d.record(value);
+  return {
+    testCase: testCase(x.testCase),
+    assigneeUserId: d.string(x.assigneeUserId),
+    assigneeEmail: d.string(x.assigneeEmail),
+    assignedBy: d.string(x.assignedBy),
+    assignedAt: x.assignedAt == null ? null : d.date(x.assignedAt),
+    workStatus: oneOf(x.workStatus, ["not_run", "in_progress", "completed"]),
   };
 }
 function gateRule(value: unknown): GateRule {
@@ -317,6 +435,9 @@ export interface CaseFilter {
   q?: string;
 }
 export interface TestCaseInput {
+  preconditions?: string;
+  testData?: string;
+  expectedUpdatedAt?: string;
   suiteId?: string;
   externalKey?: string;
   title?: string;
@@ -325,6 +446,20 @@ export interface TestCaseInput {
   priority?: Priority;
   isCritical?: boolean;
   automationStatus?: AutomationStatus;
+}
+export type BulkCasePatch = Pick<
+  TestCaseInput,
+  "priority" | "isCritical" | "suiteId" | "automationStatus"
+>;
+export interface BulkCaseResult {
+  id: string;
+  updated: boolean;
+  code: string;
+}
+export interface CaseExport {
+  csv: string;
+  count: number;
+  exportedAt: string;
 }
 
 // ---- ROI (SPEC §6.8.3, QĐ-13) ----
@@ -421,6 +556,75 @@ function roi(value: unknown): Roi {
 
 export class TestmgmtRepository {
   constructor(private api: ApiClient) {}
+  async bulkUpdateCases(
+    projectId: string,
+    targets: { id: string; expectedUpdatedAt: string }[],
+    patch: BulkCasePatch,
+    signal: AbortSignal,
+  ): Promise<BulkCaseResult[]> {
+    const x = d.record(
+      await this.api.request(`${scope(projectId)}/test-cases/bulk`, {
+        body: { items: targets, patch },
+        signal,
+      }),
+    );
+    const results = d.array(
+      x.items,
+      (value) => {
+        const item = d.record(value);
+        return {
+          id: d.string(item.id),
+          updated: d.boolean(item.updated),
+          code: oneOf(item.code, [
+            "",
+            "CONFLICT",
+            "NOT_FOUND",
+            "INVALID_PAYLOAD",
+            "INTERNAL",
+          ]),
+        };
+      },
+      100,
+    );
+    if (
+      results.length !== targets.length ||
+      results.some(
+        (item, index) =>
+          item.id !== targets[index]?.id || item.updated !== (item.code === ""),
+      )
+    )
+      return d.invalid();
+    return results;
+  }
+  async exportCases(
+    projectId: string,
+    filter: CaseFilter,
+    ids: string[] | undefined,
+    signal: AbortSignal,
+  ): Promise<CaseExport> {
+    const query = new URLSearchParams(
+      params({
+        q: filter.q ?? "",
+        suite: filter.suite ?? "",
+        automation: filter.automation ?? "",
+        critical: filter.critical ?? "",
+      }),
+    );
+    if (ids !== undefined) query.set("ids", ids.join(","));
+    const x = d.record(
+      await this.api.request(`${scope(projectId)}/test-cases/export?${query}`, {
+        signal,
+        timeoutMs: 60000,
+      }),
+    );
+    const count = d.integer(x.count);
+    if (count < 0 || count > 5000) return d.invalid();
+    return {
+      csv: d.string(x.csv),
+      count,
+      exportedAt: d.date(x.exportedAt),
+    };
+  }
 
   // ---- suites & requirements ----
   async suites(projectId: string, signal: AbortSignal) {
@@ -595,10 +799,15 @@ export class TestmgmtRepository {
       }),
     );
   }
-  async createPlan(projectId: string, name: string, signal: AbortSignal) {
+  async createPlan(
+    projectId: string,
+    name: string,
+    signal: AbortSignal,
+    caseIds?: string[],
+  ) {
     return plan(
       await this.api.request(`${scope(projectId)}/test-plans`, {
-        body: { name },
+        body: { name, ...(caseIds === undefined ? {} : { caseIds }) },
         signal,
       }),
     );
@@ -617,10 +826,36 @@ export class TestmgmtRepository {
       }),
     );
   }
+  async updatePlan(
+    projectId: string,
+    id: string,
+    input: {
+      caseIds?: string[];
+      caseUpdate?: PlanCaseUpdate;
+      expectedUpdatedAt: string;
+    },
+    signal: AbortSignal,
+  ) {
+    return plan(
+      await this.api.request(`${scope(projectId)}/test-plans/${enc(id)}`, {
+        method: "PATCH",
+        body: input,
+        signal,
+      }),
+    );
+  }
   async recordExecution(
     projectId: string,
     planId: string,
-    input: { testCaseId: string; status: ExecutionStatus; note?: string },
+    input: {
+      testCaseId: string;
+      status: ExecutionStatus;
+      note?: string;
+      stepResults?: StepResult[];
+      bugUrl?: string;
+      retestOf?: string;
+      caseUpdatedAt?: string;
+    },
     signal: AbortSignal,
   ) {
     return execution(

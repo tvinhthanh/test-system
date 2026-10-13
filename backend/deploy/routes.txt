@@ -43,6 +43,8 @@ PATCH /v1/projects/{projectId}/requirements/{requirementId}
 GET /v1/projects/{projectId}/test-cases
 POST /v1/projects/{projectId}/test-cases
 POST /v1/projects/{projectId}/test-cases/import
+POST /v1/projects/{projectId}/test-cases/bulk
+GET /v1/projects/{projectId}/test-cases/export
 POST /v1/projects/{projectId}/imports/junit
 GET /v1/projects/{projectId}/roi
 GET /v1/projects/{projectId}/roi/baselines

@@ -109,18 +109,24 @@ export class Client {
   /** Raw PUT to a presigned URL (endpoint 5 of §7.2): no auth header, same retry policy. */
   async put(url: string, body: Uint8Array, headers: Record<string, string>): Promise<{ etag: string }> {
     return this.retrying(async () => {
-      const res = await this.withTimeout((signal) => this.doFetch(url, { method: "PUT", body, headers, signal }));
-      if (res.status >= 200 && res.status < 300) return { etag: res.headers.get("etag") ?? "" };
-      const text = await res.text().catch(() => "");
-      throw new ApiError(res.status, "UPLOAD_FAILED", `PUT ${res.status}: ${text.slice(0, 200)}`, undefined, retryAfter(res));
+      const outcome = await this.withTimeout(async (signal) => {
+        const res = await this.doFetch(url, { method: "PUT", body, headers, signal });
+        if (res.status >= 200 && res.status < 300) return { ok: true as const, etag: res.headers.get("etag") ?? "" };
+        const text = await res.text().catch(() => "");
+        return { ok: false as const, status: res.status, text, retryAfterMs: retryAfter(res) };
+      });
+      if (outcome.ok) return { etag: outcome.etag };
+      throw new ApiError(outcome.status, "UPLOAD_FAILED", `PUT ${outcome.status}: ${outcome.text.slice(0, 200)}`, undefined, outcome.retryAfterMs);
     }, false);
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
     const payload = JSON.stringify(body);
     return this.retrying(async () => {
-      const res = await this.withTimeout((signal) => this.doFetch(this.base + path, { method: "POST", body: payload, headers: this.headers, signal }));
-      const text = await res.text();
+      const { res, text } = await this.withTimeout(async (signal) => {
+        const res = await this.doFetch(this.base + path, { method: "POST", body: payload, headers: this.headers, signal });
+        return { res, text: await res.text() };
+      });
       let json: any = {};
       try {
         json = text ? JSON.parse(text) : {};

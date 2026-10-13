@@ -419,6 +419,99 @@ Team → an owner's organization row has a "Usage" link to
 
 ## Handoff And Verification
 
+### Bulk Case Updates And CSV Export (2026-10-13)
+
+`POST /v1/projects/{projectId}/test-cases/bulk` requires `testmgmt.write`.
+Body: `{ items: [{ id, expectedUpdatedAt }], patch }`, 1-100 distinct cases,
+16 KiB request cap. Patch supports priority, isCritical, suiteId and
+automationStatus (not automated; linking an identity remains separate).
+Versions are mandatory. Each case is independently updated and audited in
+one transaction. Ordered response `items` contain `{ id, updated, code }`:
+empty code means success; otherwise CONFLICT, NOT_FOUND, INVALID_PAYLOAD or
+INTERNAL. A batch is not atomic. Frontend validates response identity/count,
+keeps failed selections and never auto-retries uncertain network outcomes.
+
+`GET /v1/projects/{projectId}/test-cases/export` requires project read access.
+It accepts the list filters q/suite/automation/critical and optional comma-
+separated ids (at most 200). Without ids it exports all server-filter matches,
+not the displayed 200 cases. Response `{ csv, count, exportedAt }` has
+Cache-Control no-store. Exceeding 5000 rows or 8 MiB returns 400, with no
+partial CSV; missing/foreign selected cases return 404. Frontend creates a
+UTF-8 BOM download, not a persisted public URL.
+
+CSV uses standard quoting, steps_json and `_atp_csv_version=1`. Formula-like
+text and literal leading apostrophes are prefixed with one apostrophe, which
+the marked-format importer removes once. Multiline/separator-containing
+steps round-trip; exports are case definitions, not execution evidence.
+
+Verified: real Postgres service/API/tenant tests; 90 frontend tests; real
+Chrome conflict plus success, retained failure report after refresh, actor
+audit, selected/full-filter downloads and 1440/768/360px layouts.
+
+### Case Context And Change Audit (2026-10-13)
+
+Case POST/PATCH accept `preconditions` and `testData`, trimmed text limited to
+16000 UTF-8 bytes each. Omitted PATCH fields keep their values; empty clears.
+Optional PATCH `expectedUpdatedAt` detects concurrent edits (409); the editor
+sends the version it loaded. Case GET/POST/PATCH return these fields plus
+`audit` (latest 50 actor/action/changedFields/createdAt summaries) and
+`auditTruncated`. Lists omit audit entries. Audit is captured transactionally
+for real content changes, including CSV and automation-status edits; no audit
+is fabricated for legacy data. Before/after values are retained server-side;
+the API sends summaries, not repeated copies of potentially large test data.
+
+CSV accepts `preconditions` and `test_data` columns. Absent columns preserve
+existing context on upsert; explicit blank columns clear it. Imports record the
+session actor. Oversized rows report a line error. Execution `caseSnapshot`
+adds nullable `preconditions`/`testData`; null means unavailable in an older
+snapshot, and is never reconstructed from the current case.
+
+### Fixed Plan Scope And Assignment (2026-10-13)
+
+Plan POST accepts `caseIds` (unique project case IDs, at most 5000). Missing
+selects the current non-obsolete cases; `[]` creates an empty plan. Scope is
+fixed at creation; newly created project cases never appear automatically.
+Migration 0031 freezes legacy scope and includes obsolete cases with executions.
+Plan GET adds `cases: [{testCase, assigneeUserId, assigneeEmail, assignedBy,
+assignedAt, workStatus}]`; collection reads return `cases: null`. Case content
+is current; execution snapshots remain immutable. UI renders these members,
+not a bounded project list, so plan progress is independent of search results.
+
+Existing plan PATCH accepts any combination of `status`, `caseIds`, and
+`caseUpdate: {testCaseId, assigneeEmail?, workStatus?}`, with optional
+`expectedUpdatedAt` (UI sends it; stale versions return 409). A closed plan
+rejects scope/assignment/workflow changes. Cases with executions cannot be
+removed. Assign by verified tester email, including inherited project access;
+unknown, foreign or read-only users all return generic 404. Empty email clears
+assignment; assignment grants no access and does not restrict other authorized
+testers from executing. `workStatus` writes accept `not_run` or `in_progress`;
+recording sets `completed`. Cases with history cannot be reset to `not_run`.
+Starting work activates a draft plan. Execution forms send the case version
+actually displayed, even when other plan changes bring back newer case content;
+the tester explicitly reloads and clears step results before using that revision.
+Out-of-scope or obsolete case executions are rejected. Plan changes and
+executions write actor/action/details to `test_plan_audit` in the same transaction.
+PATCH responses preserve original evidence, just like plan GET.
+
+### Manual Execution History (2026-10-13, SPEC 4.11 / 6.8.7)
+
+Existing execution POST accepts optional `stepResults: [{stepIndex, status,
+actual}]` (unique zero-based case step indices, existing execution verdicts,
+actual at most 4000 characters), `bugUrl` (empty or HTTP(S), no credentials,
+at most 2000 characters), and `retestOf` (prior execution of the same case,
+plan and project; omit or empty for a normal execution).
+The response adds `caseSnapshot: {title, steps, expected, updatedAt} | null`,
+`stepResults`, `bugUrl` and `retestOf`. Snapshot is captured atomically with
+recording; legacy executions have no reconstructed snapshot.
+Plan GET keeps `executions` as latest per case and adds `executionHistory`
+(newest 200 by executedAt DESC/id DESC, including evidence) and
+`historyTruncated`. Old rows remain stored when this bounded view truncates.
+No new endpoint; view/write authorization and closed-plan rules remain.
+`caseUpdatedAt` optionally checks the version displayed by the client (409
+if edited meanwhile); the UI sends it. Passed verdicts cannot contain failed
+or blocked step results. Actual results without a selected step status are
+blocked in the form rather than silently discarded.
+
 Backend owner must confirm session bootstrap semantics, list limits, query
 field names, result ordering, and DTO count definitions before live acceptance.
 Fixture preview implements only these contracts and is not backend evidence.

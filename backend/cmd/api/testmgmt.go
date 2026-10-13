@@ -45,6 +45,8 @@ func (d *dashboard) testmgmtRoutes(handle func(pattern string, fn http.HandlerFu
 	handle("GET /v1/projects/{projectId}/test-cases", d.tmCases)
 	handle("POST /v1/projects/{projectId}/test-cases", d.tmCreateCase)
 	handle("POST /v1/projects/{projectId}/test-cases/import", d.tmImport)
+	handle("POST /v1/projects/{projectId}/test-cases/bulk", d.tmBulkCases)
+	handle("GET /v1/projects/{projectId}/test-cases/export", d.tmExportCases)
 	handle("GET /v1/projects/{projectId}/test-cases/{testCaseId}", d.tmCase)
 	handle("PATCH /v1/projects/{projectId}/test-cases/{testCaseId}", d.tmPatchCase)
 	handle("POST /v1/projects/{projectId}/test-cases/{testCaseId}/links", d.tmLink)
@@ -95,33 +97,41 @@ type linkDTO struct {
 }
 
 type testCaseDTO struct {
-	ID               string          `json:"id"`
-	SuiteID          string          `json:"suiteId"`
-	SuiteName        string          `json:"suiteName"`
-	ExternalKey      string          `json:"externalKey"`
-	Title            string          `json:"title"`
-	Steps            []testmgmt.Step `json:"steps"`
-	Expected         string          `json:"expected"`
-	Priority         string          `json:"priority"`
-	IsCritical       bool            `json:"isCritical"`
-	AutomationStatus string          `json:"automationStatus"`
-	OwnerID          string          `json:"ownerId"`
-	Links            []linkDTO       `json:"links,omitempty"`
-	Requirements     []string        `json:"requirements,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	Preconditions    string                `json:"preconditions"`
+	TestData         string                `json:"testData"`
+	Audit            []testmgmt.CaseChange `json:"audit,omitempty"`
+	AuditTruncated   bool                  `json:"auditTruncated"`
+	ID               string                `json:"id"`
+	SuiteID          string                `json:"suiteId"`
+	SuiteName        string                `json:"suiteName"`
+	ExternalKey      string                `json:"externalKey"`
+	Title            string                `json:"title"`
+	Steps            []testmgmt.Step       `json:"steps"`
+	Expected         string                `json:"expected"`
+	Priority         string                `json:"priority"`
+	IsCritical       bool                  `json:"isCritical"`
+	AutomationStatus string                `json:"automationStatus"`
+	OwnerID          string                `json:"ownerId"`
+	Links            []linkDTO             `json:"links,omitempty"`
+	Requirements     []string              `json:"requirements,omitempty"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
 }
 
 type executionDTO struct {
-	ID         string        `json:"id"`
-	PlanID     string        `json:"planId"`
-	TestCaseID string        `json:"testCaseId"`
-	CaseTitle  string        `json:"caseTitle"`
-	ExecutedBy string        `json:"executedBy"`
-	Status     string        `json:"status"`
-	Note       string        `json:"note"`
-	ExecutedAt time.Time     `json:"executedAt"`
-	Evidence   []evidenceDTO `json:"evidence"`
+	ID           string                 `json:"id"`
+	PlanID       string                 `json:"planId"`
+	TestCaseID   string                 `json:"testCaseId"`
+	CaseTitle    string                 `json:"caseTitle"`
+	ExecutedBy   string                 `json:"executedBy"`
+	Status       string                 `json:"status"`
+	Note         string                 `json:"note"`
+	ExecutedAt   time.Time              `json:"executedAt"`
+	Evidence     []evidenceDTO          `json:"evidence"`
+	CaseSnapshot *testmgmt.CaseSnapshot `json:"caseSnapshot"`
+	StepResults  []testmgmt.StepResult  `json:"stepResults"`
+	BugURL       string                 `json:"bugUrl"`
+	RetestOf     string                 `json:"retestOf"`
 }
 
 // evidenceDTO is the ArtifactRef of the contract, as the failure detail
@@ -140,13 +150,25 @@ func evidenceOut(a artifact.Artifact) evidenceDTO {
 }
 
 type planDTO struct {
-	ID            string         `json:"id"`
-	Name          string         `json:"name"`
-	EnvironmentID string         `json:"environmentId"`
-	Status        string         `json:"status"`
-	Executions    []executionDTO `json:"executions,omitempty"`
-	CreatedAt     time.Time      `json:"createdAt"`
-	UpdatedAt     time.Time      `json:"updatedAt"`
+	Cases            []planCaseDTO  `json:"cases"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	EnvironmentID    string         `json:"environmentId"`
+	Status           string         `json:"status"`
+	Executions       []executionDTO `json:"executions,omitempty"`
+	ExecutionHistory []executionDTO `json:"executionHistory,omitempty"`
+	HistoryTruncated bool           `json:"historyTruncated"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	UpdatedAt        time.Time      `json:"updatedAt"`
+}
+
+type planCaseDTO struct {
+	TestCase       testCaseDTO `json:"testCase"`
+	AssigneeUserID string      `json:"assigneeUserId"`
+	AssigneeEmail  string      `json:"assigneeEmail"`
+	AssignedBy     string      `json:"assignedBy"`
+	AssignedAt     *time.Time  `json:"assignedAt"`
+	WorkStatus     string      `json:"workStatus"`
 }
 
 type releaseDTO struct {
@@ -189,6 +211,8 @@ func caseOut(c testmgmt.TestCase) testCaseDTO {
 	out := testCaseDTO{ID: c.ID, SuiteID: c.SuiteID, SuiteName: c.SuiteName, ExternalKey: c.ExternalKey, Title: c.Title, Steps: c.Steps,
 		Expected: c.Expected, Priority: string(c.Priority), IsCritical: c.IsCritical, AutomationStatus: string(c.AutomationStatus),
 		OwnerID: c.OwnerID, Requirements: c.Requirements, CreatedAt: c.CreatedAt.UTC(), UpdatedAt: c.UpdatedAt.UTC()}
+	out.Preconditions, out.TestData = c.Preconditions, c.TestData
+	out.Audit, out.AuditTruncated = c.Audit, c.AuditTruncated
 	if out.Steps == nil {
 		out.Steps = []testmgmt.Step{}
 	}
@@ -204,6 +228,13 @@ func caseOut(c testmgmt.TestCase) testCaseDTO {
 func executionOut(e testmgmt.Execution, evidence []artifact.Artifact) executionDTO {
 	out := executionDTO{ID: e.ID, PlanID: e.PlanID, TestCaseID: e.TestCaseID, CaseTitle: e.CaseTitle, ExecutedBy: e.ExecutedBy, Status: string(e.Status), Note: e.Note, ExecutedAt: e.ExecutedAt.UTC(),
 		Evidence: make([]evidenceDTO, 0, len(evidence))}
+	out.CaseSnapshot = e.CaseSnapshot
+	out.StepResults = e.StepResults
+	if out.StepResults == nil {
+		out.StepResults = []testmgmt.StepResult{}
+	}
+	out.BugURL = e.BugURL
+	out.RetestOf = e.RetestOf
 	for _, a := range evidence {
 		out.Evidence = append(out.Evidence, evidenceOut(a))
 	}
@@ -219,6 +250,19 @@ func planOut(p testmgmt.Plan, evidence map[string][]artifact.Artifact) planDTO {
 		out.Executions = make([]executionDTO, 0, len(p.Executions))
 		for _, e := range p.Executions {
 			out.Executions = append(out.Executions, executionOut(e, evidence[e.ID]))
+		}
+	}
+	out.HistoryTruncated = p.HistoryTruncated
+	if p.Cases != nil {
+		out.Cases = make([]planCaseDTO, 0, len(p.Cases))
+		for _, c := range p.Cases {
+			out.Cases = append(out.Cases, planCaseDTO{TestCase: caseOut(c.TestCase), AssigneeUserID: c.AssigneeUserID, AssigneeEmail: c.AssigneeEmail, AssignedBy: c.AssignedBy, AssignedAt: c.AssignedAt, WorkStatus: c.WorkStatus})
+		}
+	}
+	if p.ExecutionHistory != nil {
+		out.ExecutionHistory = make([]executionDTO, 0, len(p.ExecutionHistory))
+		for _, e := range p.ExecutionHistory {
+			out.ExecutionHistory = append(out.ExecutionHistory, executionOut(e, evidence[e.ID]))
 		}
 	}
 	return out
@@ -375,16 +419,7 @@ func (d *dashboard) tmCases(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	q := r.URL.Query()
-	f := testmgmt.CaseFilter{SuiteID: q.Get("suite"), AutomationStatus: testmgmt.AutomationStatus(q.Get("automation")), Query: q.Get("q"), Limit: limitParam(r, 200)}
-	switch q.Get("critical") {
-	case "true":
-		v := true
-		f.Critical = &v
-	case "false":
-		v := false
-		f.Critical = &v
-	}
+	f := caseFilterFromRequest(r)
 	items, err := d.tm.ListTestCases(r.Context(), string(scope.ProjectID), f)
 	if err != nil {
 		d.tmErr(w, r, err)
@@ -393,16 +428,123 @@ func (d *dashboard) tmCases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listOut(items, caseOut))
 }
 
+func caseFilterFromRequest(r *http.Request) testmgmt.CaseFilter {
+	q := r.URL.Query()
+	f := testmgmt.CaseFilter{SuiteID: q.Get("suite"), AutomationStatus: testmgmt.AutomationStatus(q.Get("automation")), Query: q.Get("q"), Limit: limitParam(r, 200)}
+	if q.Get("critical") == "true" || q.Get("critical") == "false" {
+		v := q.Get("critical") == "true"
+		f.Critical = &v
+	}
+	return f
+}
+
+func (d *dashboard) tmExportCases(w http.ResponseWriter, r *http.Request) {
+	scope, ok := d.viewer(w, r)
+	if !ok {
+		return
+	}
+	var ids []string
+	if text, exists := r.URL.Query()["ids"]; exists {
+		ids = []string{}
+		if len(text) == 1 && text[0] != "" {
+			ids = strings.Split(text[0], ",")
+		}
+		if len(text) != 1 {
+			d.tmErr(w, r, testmgmt.ErrInvalid)
+			return
+		}
+	}
+	out, err := d.tm.ExportCases(r.Context(), string(scope.ProjectID), caseFilterFromRequest(r), ids)
+	if err != nil {
+		d.tmErr(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
+}
+
+type bulkCaseResult struct {
+	ID      string `json:"id"`
+	Updated bool   `json:"updated"`
+	Code    string `json:"code"`
+}
+
+func (d *dashboard) tmBulkCases(w http.ResponseWriter, r *http.Request) {
+	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
+	if !ok {
+		return
+	}
+	var req struct {
+		Items []struct {
+			ID                string    `json:"id"`
+			ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
+		} `json:"items"`
+		Patch struct {
+			Priority         *testmgmt.Priority         `json:"priority"`
+			IsCritical       *bool                      `json:"isCritical"`
+			SuiteID          *string                    `json:"suiteId"`
+			AutomationStatus *testmgmt.AutomationStatus `json:"automationStatus"`
+		} `json:"patch"`
+	}
+	if !decodeSmall(w, r, &req) {
+		return
+	}
+	if len(req.Items) == 0 || len(req.Items) > 100 {
+		d.tmErr(w, r, testmgmt.ErrInvalid)
+		return
+	}
+	if req.Patch.Priority == nil && req.Patch.IsCritical == nil && req.Patch.SuiteID == nil && req.Patch.AutomationStatus == nil {
+		d.tmErr(w, r, testmgmt.ErrInvalid)
+		return
+	}
+	if req.Patch.AutomationStatus != nil && *req.Patch.AutomationStatus == testmgmt.Automated { d.tmErr(w, r, testmgmt.ErrInvalid); return }
+	seen := map[string]bool{}
+	for _, item := range req.Items {
+		if seen[item.ID] || item.ExpectedUpdatedAt.IsZero() {
+			d.tmErr(w, r, testmgmt.ErrInvalid)
+			return
+		}
+		seen[item.ID] = true
+	}
+	out := struct {
+		Items []bulkCaseResult `json:"items"`
+	}{Items: []bulkCaseResult{}}
+	for _, item := range req.Items {
+		if r.Context().Err() != nil {
+			return
+		}
+		_, err := d.tm.UpdateTestCase(r.Context(), project, item.ID, testmgmt.TestCasePatch{Actor: actor, ExpectedUpdatedAt: item.ExpectedUpdatedAt, Priority: req.Patch.Priority, IsCritical: req.Patch.IsCritical, SuiteID: req.Patch.SuiteID, AutomationStatus: req.Patch.AutomationStatus})
+		result := bulkCaseResult{ID: item.ID, Updated: err == nil, Code: ""}
+		switch {
+		case err == nil:
+		case errors.Is(err, testmgmt.ErrConflict):
+			result.Code = "CONFLICT"
+		case errors.Is(err, testmgmt.ErrNotFound):
+			result.Code = "NOT_FOUND"
+		case errors.Is(err, testmgmt.ErrInvalid):
+			result.Code = "INVALID_PAYLOAD"
+		default:
+			result.Code = "INTERNAL"
+			httpx.Cause(r.Context(), err)
+		}
+		out.Items = append(out.Items, result)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 type caseBody struct {
-	SuiteID          *string          `json:"suiteId"`
-	ExternalKey      string           `json:"externalKey"`
-	Title            *string          `json:"title"`
-	Steps            *[]testmgmt.Step `json:"steps"`
-	Expected         *string          `json:"expected"`
-	Priority         *string          `json:"priority"`
-	IsCritical       *bool            `json:"isCritical"`
-	AutomationStatus *string          `json:"automationStatus"`
-	OwnerID          *string          `json:"ownerId"`
+	Preconditions     *string          `json:"preconditions"`
+	TestData          *string          `json:"testData"`
+	ExpectedUpdatedAt *time.Time       `json:"expectedUpdatedAt"`
+	SuiteID           *string          `json:"suiteId"`
+	ExternalKey       string           `json:"externalKey"`
+	Title             *string          `json:"title"`
+	Steps             *[]testmgmt.Step `json:"steps"`
+	Expected          *string          `json:"expected"`
+	Priority          *string          `json:"priority"`
+	IsCritical        *bool            `json:"isCritical"`
+	AutomationStatus  *string          `json:"automationStatus"`
+	OwnerID           *string          `json:"ownerId"`
 }
 
 func decodeCase(w http.ResponseWriter, r *http.Request) (caseBody, bool) {
@@ -420,11 +562,17 @@ func (d *dashboard) tmCreateCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	project, _, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
+	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
 	if !ok {
 		return
 	}
-	in := testmgmt.NewTestCase{ExternalKey: req.ExternalKey}
+	in := testmgmt.NewTestCase{ExternalKey: req.ExternalKey, Actor: actor}
+	if req.Preconditions != nil {
+		in.Preconditions = *req.Preconditions
+	}
+	if req.TestData != nil {
+		in.TestData = *req.TestData
+	}
 	if req.SuiteID != nil {
 		in.SuiteID = *req.SuiteID
 	}
@@ -472,13 +620,18 @@ func (d *dashboard) tmPatchCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	project, _, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
+	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
 	if !ok {
 		return
 	}
-	out, err := d.tm.UpdateTestCase(r.Context(), project, r.PathValue("testCaseId"), testmgmt.TestCasePatch{
+	patch := testmgmt.TestCasePatch{
+		Preconditions: req.Preconditions, TestData: req.TestData, Actor: actor,
 		SuiteID: req.SuiteID, Title: req.Title, Steps: req.Steps, Expected: req.Expected, Priority: (*testmgmt.Priority)(req.Priority),
-		IsCritical: req.IsCritical, AutomationStatus: (*testmgmt.AutomationStatus)(req.AutomationStatus), OwnerID: req.OwnerID})
+		IsCritical: req.IsCritical, AutomationStatus: (*testmgmt.AutomationStatus)(req.AutomationStatus), OwnerID: req.OwnerID}
+	if req.ExpectedUpdatedAt != nil {
+		patch.ExpectedUpdatedAt = *req.ExpectedUpdatedAt
+	}
+	out, err := d.tm.UpdateTestCase(r.Context(), project, r.PathValue("testCaseId"), patch)
 	if err != nil {
 		d.tmErr(w, r, err)
 		return
@@ -489,7 +642,7 @@ func (d *dashboard) tmPatchCase(w http.ResponseWriter, r *http.Request) {
 // tmImport takes the sheet as text/csv (or a JSON {csv} for clients that
 // cannot post raw bodies), bounded at 8 MiB.
 func (d *dashboard) tmImport(w http.ResponseWriter, r *http.Request) {
-	project, _, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
+	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
 	if !ok {
 		return
 	}
@@ -512,7 +665,7 @@ func (d *dashboard) tmImport(w http.ResponseWriter, r *http.Request) {
 		}
 		text = string(raw)
 	}
-	rep, err := d.tm.ImportCSV(r.Context(), project, text)
+	rep, err := d.tm.ImportCSVAs(r.Context(), project, text, actor)
 	if err != nil {
 		d.tmErr(w, r, err)
 		return
@@ -593,17 +746,18 @@ func (d *dashboard) tmPlans(w http.ResponseWriter, r *http.Request) {
 
 func (d *dashboard) tmCreatePlan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name          string `json:"name"`
-		EnvironmentID string `json:"environmentId"`
+		CaseIDs       *[]string `json:"caseIds"`
+		Name          string    `json:"name"`
+		EnvironmentID string    `json:"environmentId"`
 	}
 	if !decodeSmall(w, r, &req) {
 		return
 	}
-	project, _, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
+	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
 	if !ok {
 		return
 	}
-	out, err := d.tm.CreatePlan(r.Context(), project, testmgmt.NewPlan{Name: req.Name, EnvironmentID: req.EnvironmentID})
+	out, err := d.tm.CreatePlan(r.Context(), project, testmgmt.NewPlan{Name: req.Name, EnvironmentID: req.EnvironmentID, CaseIDs: req.CaseIDs, Actor: actor})
 	if err != nil {
 		d.tmErr(w, r, err)
 		return
@@ -621,11 +775,18 @@ func (d *dashboard) tmPlan(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
+	d.writePlan(w, r, out)
+}
+
+func (d *dashboard) writePlan(w http.ResponseWriter, r *http.Request, out testmgmt.Plan) {
 	ids := make([]string, 0, len(out.Executions))
 	for _, e := range out.Executions {
 		ids = append(ids, e.ID)
 	}
-	evidence, err := d.artifact.ListEvidence(r.Context(), string(scope.ProjectID), ids)
+	for _, e := range out.ExecutionHistory {
+		ids = append(ids, e.ID)
+	}
+	evidence, err := d.artifact.ListEvidence(r.Context(), out.ProjectID, ids)
 	if err != nil {
 		d.internal(w, r, err)
 		return
@@ -635,29 +796,14 @@ func (d *dashboard) tmPlan(w http.ResponseWriter, r *http.Request) {
 
 func (d *dashboard) tmPatchPlan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Status string `json:"status"`
-	}
-	if !decodeSmall(w, r, &req) {
-		return
-	}
-	project, _, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
-	if !ok {
-		return
-	}
-	out, err := d.tm.SetPlanStatus(r.Context(), project, r.PathValue("planId"), testmgmt.PlanStatus(req.Status))
-	if err != nil {
-		d.tmErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, planOut(out, nil))
-}
-
-func (d *dashboard) tmExecute(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		TestCaseID string     `json:"testCaseId"`
-		Status     string     `json:"status"`
-		Note       string     `json:"note"`
-		ExecutedAt *time.Time `json:"executedAt"`
+		Status            *string    `json:"status"`
+		CaseIDs           *[]string  `json:"caseIds"`
+		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
+		CaseUpdate        *struct {
+			TestCaseID    string  `json:"testCaseId"`
+			AssigneeEmail *string `json:"assigneeEmail"`
+			WorkStatus    *string `json:"workStatus"`
+		} `json:"caseUpdate"`
 	}
 	if !decodeSmall(w, r, &req) {
 		return
@@ -666,7 +812,74 @@ func (d *dashboard) tmExecute(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in := testmgmt.NewExecution{TestCaseID: req.TestCaseID, Status: testmgmt.ExecutionStatus(req.Status), Note: req.Note}
+	patch := testmgmt.PlanPatch{Status: (*testmgmt.PlanStatus)(req.Status), CaseIDs: req.CaseIDs}
+	if req.ExpectedUpdatedAt != nil {
+		patch.ExpectedUpdatedAt = *req.ExpectedUpdatedAt
+	}
+	if update := req.CaseUpdate; update != nil {
+		patch.CaseUpdate = &testmgmt.PlanCaseUpdate{TestCaseID: update.TestCaseID, WorkStatus: update.WorkStatus}
+		if update.AssigneeEmail != nil {
+			email := strings.ToLower(strings.TrimSpace(*update.AssigneeEmail))
+			userID := ""
+			if email != "" {
+				u, err := d.authz.GetUserByEmail(r.Context(), email)
+				if err != nil && !errors.Is(err, authz.ErrNotFound) {
+					d.internal(w, r, err)
+					return
+				}
+				if errors.Is(err, authz.ErrNotFound) || u.EmailVerifiedAt.IsZero() {
+					d.tmErr(w, r, testmgmt.ErrNotFound)
+					return
+				}
+				scope, err := d.tenancy.ProjectScope(r.Context(), tenancy.ProjectID(project))
+				if err != nil {
+					d.internal(w, r, err)
+					return
+				}
+				if err := d.authz.Authorize(r.Context(), authz.Principal{Kind: authz.PrincipalUser, UserID: u.ID}, resourceOf(scope), authz.ActionTestmgmtWrite); err != nil {
+					if errors.Is(err, authz.ErrForbidden) || errors.Is(err, authz.ErrNoAccess) {
+						d.tmErr(w, r, testmgmt.ErrNotFound)
+					} else {
+						d.internal(w, r, err)
+					}
+					return
+				}
+				userID = u.ID
+			}
+			patch.CaseUpdate.AssigneeUserID = &userID
+			patch.CaseUpdate.AssigneeEmail = &email
+		}
+	}
+	out, err := d.tm.UpdatePlan(r.Context(), project, r.PathValue("planId"), patch, actor)
+	if err != nil {
+		d.tmErr(w, r, err)
+		return
+	}
+	d.writePlan(w, r, out)
+}
+
+func (d *dashboard) tmExecute(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CaseUpdatedAt *time.Time            `json:"caseUpdatedAt"`
+		TestCaseID    string                `json:"testCaseId"`
+		Status        string                `json:"status"`
+		Note          string                `json:"note"`
+		ExecutedAt    *time.Time            `json:"executedAt"`
+		StepResults   []testmgmt.StepResult `json:"stepResults"`
+		BugURL        string                `json:"bugUrl"`
+		RetestOf      string                `json:"retestOf"`
+	}
+	if !decodeSmall(w, r, &req) {
+		return
+	}
+	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
+	if !ok {
+		return
+	}
+	in := testmgmt.NewExecution{TestCaseID: req.TestCaseID, Status: testmgmt.ExecutionStatus(req.Status), Note: req.Note, StepResults: req.StepResults, BugURL: req.BugURL, RetestOf: req.RetestOf}
+	if req.CaseUpdatedAt != nil {
+		in.CaseUpdatedAt = *req.CaseUpdatedAt
+	}
 	if req.ExecutedAt != nil {
 		in.ExecutedAt = *req.ExecutedAt
 	}

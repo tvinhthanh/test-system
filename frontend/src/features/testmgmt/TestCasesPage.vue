@@ -25,6 +25,8 @@ import PageHeader from "../../shared/PageHeader.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import ErrorNote from "./ErrorNote.vue";
 import TmTabs from "./TmTabs.vue";
+import CaseContextEditor from "./CaseContextEditor.vue";
+import CaseBulkTools from "./CaseBulkTools.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +61,27 @@ watch(search, (v) => {
 
 const cases = useResource<TestCase[]>();
 const suites = useResource<Suite[]>();
+const selectedIds = ref<string[]>([]);
+const bulkBusy = ref(false);
+const selectedCases = computed(() =>
+  (cases.data.value ?? []).filter((item) =>
+    selectedIds.value.includes(item.id),
+  ),
+);
+const allVisibleSelected = computed(
+  () =>
+    !!cases.data.value?.length &&
+    selectedCases.value.length === cases.data.value.length,
+);
+function selectAll(event: Event) {
+  selectedIds.value = (event.target as HTMLInputElement).checked
+    ? (cases.data.value ?? []).map((item) => item.id)
+    : [];
+}
+async function bulkUpdated(ids: string[]) {
+  selectedIds.value = selectedIds.value.filter((id) => !ids.includes(id));
+  await refresh();
+}
 function refresh() {
   return cases.load((signal) =>
     testmgmt.testCases(
@@ -78,7 +101,10 @@ function refreshSuites() {
 }
 watch(
   () => [project.value, q.value, suite.value, automation.value, critical.value],
-  refresh,
+  () => {
+    selectedIds.value = [];
+    void refresh();
+  },
   {
     immediate: true,
   },
@@ -88,6 +114,8 @@ watch(project, refreshSuites, { immediate: true });
 // Create + import live in two collapsible panels; both end in a refresh.
 const panel = ref<"" | "new" | "suite" | "import">("");
 const draft = ref({
+  preconditions: "",
+  testData: "",
   title: "",
   suiteId: "",
   priority: "p2" as Priority,
@@ -103,6 +131,8 @@ async function create() {
   );
   if (created) {
     draft.value = {
+      preconditions: "",
+      testData: "",
       title: "",
       suiteId: "",
       priority: "p2",
@@ -224,7 +254,7 @@ const label = (s: string) => s.replaceAll("_", " ");
         id="new-suite"
         v-model="draft.suiteId"
         class="w-full"
-        :disabled="suites.loading.value"
+        :disabled="suites.loading.value || bulkBusy"
       >
         <option value="">No suite</option>
         <option v-for="s in suites.data.value ?? []" :key="s.id" :value="s.id">
@@ -249,6 +279,11 @@ const label = (s: string) => s.replaceAll("_", " ");
     <Button type="submit" size="sm" :disabled="mutation.busy.value !== null"
       >Create</Button
     >
+    <CaseContextEditor
+      v-model:preconditions="draft.preconditions"
+      v-model:test-data="draft.testData"
+      class="md:col-span-5"
+    />
     <ErrorNote
       v-if="mutation.error.value?.key === 'new'"
       class="md:col-span-5"
@@ -335,6 +370,7 @@ const label = (s: string) => s.replaceAll("_", " ");
       />
       <Input
         v-model="search"
+        :disabled="bulkBusy"
         type="search"
         class="pl-9"
         placeholder="Search title or key…"
@@ -360,6 +396,7 @@ const label = (s: string) => s.replaceAll("_", " ");
       <NativeSelect
         class="w-full md:w-48"
         :model-value="automation"
+        :disabled="bulkBusy"
         @update:model-value="setFilter({ automation: $event })"
       >
         <option value="">Any status</option>
@@ -373,6 +410,7 @@ const label = (s: string) => s.replaceAll("_", " ");
       <NativeSelect
         class="w-full md:w-36"
         :model-value="critical"
+        :disabled="bulkBusy"
         @update:model-value="setFilter({ critical: $event })"
       >
         <option value="">All</option>
@@ -382,6 +420,7 @@ const label = (s: string) => s.replaceAll("_", " ");
     </label>
     <Button
       v-if="filtered"
+      :disabled="bulkBusy"
       variant="ghost"
       size="sm"
       type="button"
@@ -393,11 +432,38 @@ const label = (s: string) => s.replaceAll("_", " ");
     >
   </form>
 
+  <CaseBulkTools
+    :key="project"
+    :project="project"
+    :selected="selectedCases"
+    :filter="{
+      q,
+      suite,
+      automation: automation as never,
+      critical: critical as never,
+    }"
+    :suites="suites.data.value ?? []"
+    :can-write="canWrite"
+    :disabled="cases.loading.value || !!cases.error.value"
+    @updated="bulkUpdated"
+    @clear="selectedIds = []"
+    @busy="bulkBusy = $event"
+  />
   <AsyncState
     :loading="cases.loading.value"
     :error="cases.error.value"
     @retry="refresh"
   >
+    <label
+      v-if="cases.data.value?.length"
+      class="mb-3 flex items-center gap-2 text-sm"
+      ><input
+        type="checkbox"
+        :checked="allVisibleSelected"
+        :disabled="bulkBusy"
+        @change="selectAll"
+      />Select visible cases ({{ cases.data.value.length }})</label
+    >
     <EmptyState
       v-if="!cases.data.value?.length"
       :icon="ClipboardList"
@@ -423,10 +489,22 @@ const label = (s: string) => s.replaceAll("_", " ");
       v-else
       class="case-list bg-card divide-y overflow-hidden rounded-lg border"
     >
-      <li v-for="c in cases.data.value" :key="c.id">
+      <li
+        v-for="c in cases.data.value"
+        :key="c.id"
+        class="flex min-w-0 items-center"
+      >
+        <input
+          v-model="selectedIds"
+          type="checkbox"
+          :value="c.id"
+          :disabled="bulkBusy"
+          :aria-label="`Select ${c.title}`"
+          class="ml-3 shrink-0"
+        />
         <RouterLink
           :to="`${base()}/cases/${encodeURIComponent(c.id)}`"
-          class="case-row hover:bg-accent focus-visible:bg-accent group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-4 py-3 transition-colors outline-none md:grid-cols-[minmax(0,1fr)_4rem_auto_1.25rem]"
+          class="case-row hover:bg-accent focus-visible:bg-accent group grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-4 py-3 transition-colors outline-none md:grid-cols-[minmax(0,1fr)_4rem_auto_1.25rem]"
         >
           <span class="min-w-0">
             <span class="flex min-w-0 items-center gap-2">

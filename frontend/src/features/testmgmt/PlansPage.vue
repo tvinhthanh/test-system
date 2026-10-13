@@ -31,10 +31,16 @@ function refresh() {
 watch(project, refresh, { immediate: true });
 const panel = ref(false);
 const name = ref("");
+const includeAll = ref(false);
 const mutation = useMutation();
 async function create() {
   const created = await mutation.run("new", (signal) =>
-    testmgmt.createPlan(project.value, name.value, signal),
+    testmgmt.createPlan(
+      project.value,
+      name.value,
+      signal,
+      includeAll.value ? undefined : [],
+    ),
   );
   if (created) {
     name.value = "";
@@ -43,11 +49,7 @@ async function create() {
 }
 </script>
 <template>
-  <PageHeader
-    eyebrow="Test management"
-    title="Test plans"
-    description="A plan is one round of manual testing. Executions are recorded per case; the latest verdict counts. Manual runs never become automated runs (§6.8.6)."
-  >
+  <PageHeader eyebrow="Test management" title="Test plans">
     <Button
       v-if="canWrite"
       size="sm"
@@ -81,6 +83,10 @@ async function create() {
         placeholder="Release 2026.10 regression"
       />
     </div>
+    <label class="flex items-center gap-2 text-sm sm:col-span-2"
+      ><input v-model="includeAll" type="checkbox" />Include current active
+      cases</label
+    >
     <Button type="submit" size="sm" :disabled="mutation.busy.value !== null"
       >Create</Button
     >

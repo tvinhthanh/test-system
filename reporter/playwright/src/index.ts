@@ -74,6 +74,7 @@ export default class AtpReporter implements Reporter {
   private repoRoot = "";
   private environment = "local";
   private readonly occurrences = new Map<string, number>();
+  private readonly testOccurrences = new WeakMap<TestCase, number>();
   private readonly uploads: Promise<UploadOutcome>[] = [];
   private uploadsInFlight = 0;
   private readonly uploadWaiters: (() => void)[] = [];
@@ -156,7 +157,7 @@ export default class AtpReporter implements Reporter {
     try {
       const signals = this.signalsOf(test);
       const ct = clientTestId(signals);
-      const occurrence = this.occurrenceOf(ct, result.retry);
+      const occurrence = this.occurrenceOf(test, ct);
       const started = result.startTime;
       const finished = new Date(started.getTime() + result.duration);
       const event: Record<string, unknown> = {
@@ -267,12 +268,12 @@ export default class AtpReporter implements Reporter {
   }
 
   /** occurrenceIndex (N03): the n-th test with this fingerprint in the run. Retries of the same test keep their index. */
-  private occurrenceOf(ct: string, retry: number): number {
-    const key = ct;
-    if (retry > 0) return this.occurrences.get(key + "#last") ?? 0;
-    const n = this.occurrences.get(key) ?? 0;
-    this.occurrences.set(key, n + 1);
-    this.occurrences.set(key + "#last", n);
+  private occurrenceOf(test: TestCase, ct: string): number {
+    const existing = this.testOccurrences.get(test);
+    if (existing !== undefined) return existing;
+    const n = this.occurrences.get(ct) ?? 0;
+    this.occurrences.set(ct, n + 1);
+    this.testOccurrences.set(test, n);
     return n;
   }
 

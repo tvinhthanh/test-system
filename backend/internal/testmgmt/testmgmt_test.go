@@ -3,8 +3,10 @@ package testmgmt
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
@@ -189,6 +191,289 @@ func TestPlansAndManualExecutions(t *testing.T) {
 	if _, err := svc.RecordExecution(ctx, projectA, plan.ID, NewExecution{TestCaseID: tc.ID, Status: ExecPassed}, "bob"); !errors.Is(err, ErrConflict) {
 		t.Errorf("executing in a closed plan: %v", err)
 	}
+}
+
+func TestExecutionSnapshotRetestAndHistory(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	c, err := svc.CreateTestCase(ctx, projectA, NewTestCase{Title: "Original", Steps: []Step{{Action: "Click", Expected: "Open"}}, Expected: "Ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.CreatePlan(ctx, projectA, NewPlan{Name: "History"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: c.ID, Status: ExecFailed, BugURL: "https://bugs.example/123", StepResults: []StepResult{{StepIndex: 0, Status: ExecFailed, Actual: "Nothing"}}}, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.CaseSnapshot == nil || first.CaseSnapshot.Title != "Original" {
+		t.Fatalf("snapshot: %+v", first)
+	}
+	_, err = svc.UpdateTestCase(ctx, projectA, c.ID, TestCasePatch{Title: ptr("Renamed"), Steps: &[]Step{{Action: "Changed", Expected: "Different"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: c.ID, Status: ExecPassed, CaseUpdatedAt: c.UpdatedAt}, "alice"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale case accepted: %v", err)
+	}
+	second, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: c.ID, Status: ExecPassed, RetestOf: first.ID}, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := svc.GetPlan(ctx, projectA, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ExecutionHistory) != 2 || plan.ExecutionHistory[0].ID != second.ID || plan.ExecutionHistory[1].CaseTitle != "Original" || plan.ExecutionHistory[1].CaseSnapshot.Steps[0].Action != "Click" || plan.Executions[0].RetestOf != first.ID {
+		t.Fatalf("history: %+v", plan)
+	}
+	if plan.ExecutionHistory[1].BugURL != "https://bugs.example/123" || plan.ExecutionHistory[1].StepResults[0].Actual != "Nothing" {
+		t.Fatal("lost execution details")
+	}
+	for _, input := range []NewExecution{
+		{BugURL: "javascript:alert(1)"}, {BugURL: "https://user:pass@bugs.example/123"},
+		{StepResults: []StepResult{{StepIndex: 1, Status: ExecPassed}}},
+		{StepResults: []StepResult{{StepIndex: 0, Status: ExecPassed}, {StepIndex: 0, Status: ExecFailed}}},
+		{StepResults: []StepResult{{StepIndex: 0, Status: "unknown"}}},
+		{StepResults: []StepResult{{StepIndex: 0, Status: ExecFailed}}},
+	} {
+		input.TestCaseID = c.ID
+		input.Status = ExecPassed
+		if _, err := svc.RecordExecution(ctx, projectA, p.ID, input, "alice"); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("accepted invalid input %+v: %v", input, err)
+		}
+	}
+	otherPlan, err := svc.CreatePlan(ctx, projectA, NewPlan{Name: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RecordExecution(ctx, projectA, otherPlan.ID, NewExecution{TestCaseID: c.ID, Status: ExecPassed, RetestOf: first.ID}, "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-plan retest: %v", err)
+	}
+	if _, err := svc.GetPlan(ctx, projectB, p.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant history: %v", err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO manual_executions(project_id, test_plan_id, test_case_id, executed_by, status, executed_at)
+		SELECT $1, $2, $3, 'history fixture', 'passed', now() + n * interval '1 second' FROM generate_series(1, 201) n`, projectA, otherPlan.ID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	bounded, err := svc.GetPlan(ctx, projectA, otherPlan.ID)
+	if err != nil || len(bounded.ExecutionHistory) != 200 || !bounded.HistoryTruncated {
+		t.Fatalf("history bound: %+v %v", bounded, err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE manual_executions SET case_snapshot = NULL WHERE id = $1`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = svc.GetPlan(ctx, projectA, p.ID)
+	if err != nil || plan.ExecutionHistory[1].CaseSnapshot != nil {
+		t.Fatalf("legacy snapshot reconstructed: %+v %v", plan, err)
+	}
+}
+
+func TestPlanMembershipMigrationPreservesLegacyEvidence(t *testing.T) {
+	files, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := fstest.MapFS{}
+	for _, name := range files {
+		if name >= "0031" {
+			continue
+		}
+		data, err := fs.ReadFile(migrations.FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[name] = &fstest.MapFile{Data: data}
+	}
+	db := pgtest.New(t, before)
+	ctx := context.Background()
+	var active, obsolete, planID string
+	q := db.Q(ctx)
+	if err := q.QueryRow(ctx, `INSERT INTO test_cases(project_id, title) VALUES ($1, 'Active') RETURNING id`, projectA).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.QueryRow(ctx, `INSERT INTO test_cases(project_id, title, automation_status) VALUES ($1, 'Old proof', 'obsolete') RETURNING id`, projectA).Scan(&obsolete); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.QueryRow(ctx, `INSERT INTO test_plans(project_id, name) VALUES ($1, 'Legacy') RETURNING id`, projectA).Scan(&planID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Exec(ctx, `INSERT INTO manual_executions(project_id, test_plan_id, test_case_id, executed_by, status) VALUES ($1, $2, $3, 'alice', 'failed')`, projectA, planID, obsolete); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.Migrate(ctx, db, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db, identity.New(db), &fakeEvidence{}, Policy{})
+	p, err := svc.GetPlan(ctx, projectA, planID)
+	if err != nil || len(p.Cases) != 2 || len(p.ExecutionHistory) != 1 {
+		t.Fatalf("legacy data lost: %+v %v", p, err)
+	}
+	for _, c := range p.Cases {
+		if c.TestCase.ID == obsolete && c.WorkStatus != "completed" {
+			t.Fatalf("legacy completion: %+v", c)
+		}
+		if c.TestCase.ID == active && c.WorkStatus != "not_run" {
+			t.Fatalf("legacy unexecuted case: %+v", c)
+		}
+	}
+}
+
+func TestFixedPlanScopeWorkflowAndAudit(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	first, err := svc.CreateTestCase(ctx, projectA, NewTestCase{Title: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.CreatePlan(ctx, projectA, NewPlan{Name: "Fixed", Actor: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CreateTestCase(ctx, projectA, NewTestCase{Title: "Later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = svc.GetPlan(ctx, projectA, p.ID)
+	if err != nil || len(p.Cases) != 1 || p.Cases[0].TestCase.ID != first.ID {
+		t.Fatalf("scope changed automatically: %+v %v", p, err)
+	}
+	if _, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: second.ID, Status: ExecPassed}, "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("executed outside scope: %v", err)
+	}
+	ids := []string{first.ID, second.ID}
+	stale := p.UpdatedAt
+	p, err = svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseIDs: &ids, ExpectedUpdatedAt: stale}, "alice")
+	if err != nil || len(p.Cases) != 2 {
+		t.Fatalf("scope update: %+v %v", p, err)
+	}
+	if _, err := svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseIDs: &ids, ExpectedUpdatedAt: stale}, "bob"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale scope overwrite: %v", err)
+	}
+	p, err = svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseUpdate: &PlanCaseUpdate{TestCaseID: first.ID, WorkStatus: ptr("in_progress")}}, "alice")
+	if err != nil || p.Cases[0].WorkStatus != "in_progress" || len(p.Executions) != 0 || p.Status != PlanActive {
+		t.Fatalf("start fabricated verdict: %+v %v", p, err)
+	}
+	if _, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: first.ID, Status: ExecPassed}, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	p, err = svc.GetPlan(ctx, projectA, p.ID)
+	if err != nil || p.Cases[0].WorkStatus != "completed" {
+		t.Fatalf("completion: %+v %v", p, err)
+	}
+	if _, err := svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseIDs: &[]string{second.ID}}, "alice"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("removed recorded case: %v", err)
+	}
+	if _, err := svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseUpdate: &PlanCaseUpdate{TestCaseID: first.ID, WorkStatus: ptr("not_run")}}, "alice"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("reset historical verdict: %v", err)
+	}
+	foreign, err := svc.CreateTestCase(ctx, projectB, NewTestCase{Title: "Foreign"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseIDs: &[]string{first.ID, foreign.ID}}, "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign membership: %v", err)
+	}
+	empty, err := svc.CreatePlan(ctx, projectA, NewPlan{Name: "Empty", CaseIDs: &[]string{}})
+	if err != nil || len(empty.Cases) != 0 {
+		t.Fatalf("explicit empty scope: %+v %v", empty, err)
+	}
+	if _, err := svc.SetPlanStatus(ctx, projectA, p.ID, PlanClosed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdatePlan(ctx, projectA, p.ID, PlanPatch{CaseIDs: &ids}, "alice"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("closed scope changed: %v", err)
+	}
+	var count int
+	if err := db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM test_plan_audit WHERE test_plan_id = $1 AND actor = 'alice'`, p.ID).Scan(&count); err != nil || count != 4 {
+		t.Fatalf("audit count %d %v", count, err)
+	}
+}
+
+func TestCaseContextAuditImportAndSnapshots(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	c, err := svc.CreateTestCase(ctx, projectA, NewTestCase{Title: "Context", ExternalKey: "TC-CONTEXT", Preconditions: "  Signed in  ", TestData: "account=42", Actor: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Preconditions != "Signed in" || len(c.Audit) != 1 || c.Audit[0].Actor != "alice" || c.Audit[0].Action != "case.create" {
+		t.Fatalf("create context/audit: %+v", c)
+	}
+	p, err := svc.CreatePlan(ctx, projectA, NewPlan{Name: "Context plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: c.ID, Status: ExecPassed}, "alice")
+	if err != nil || execution.CaseSnapshot == nil || execution.CaseSnapshot.Preconditions == nil || *execution.CaseSnapshot.Preconditions != "Signed in" || *execution.CaseSnapshot.TestData != "account=42" {
+		t.Fatalf("snapshot context: %+v %v", execution, err)
+	}
+	updated, err := svc.UpdateTestCase(ctx, projectA, c.ID, TestCasePatch{Preconditions: ptr("New setup"), TestData: ptr("new=99"), ExpectedUpdatedAt: c.UpdatedAt, Actor: "bob"})
+	if err != nil || len(updated.Audit) != 2 || updated.Audit[0].Actor != "bob" {
+		t.Fatalf("update audit: %+v %v", updated, err)
+	}
+	if !containsField(updated.Audit[0].ChangedFields, "preconditions") || !containsField(updated.Audit[0].ChangedFields, "test_data") {
+		t.Fatalf("changed fields: %+v", updated.Audit)
+	}
+	if _, err := svc.UpdateTestCase(ctx, projectA, c.ID, TestCasePatch{Title: ptr("Stale"), ExpectedUpdatedAt: c.UpdatedAt, Actor: "carol"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale edit accepted: %v", err)
+	}
+	if _, err := svc.ImportCSVAs(ctx, projectA, "key,title\nTC-CONTEXT,Imported title", "importer"); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := svc.GetTestCase(ctx, projectA, c.ID)
+	if err != nil || imported.Preconditions != "New setup" || imported.TestData != "new=99" || imported.Audit[0].Actor != "importer" || imported.Audit[0].Action != "case.import" {
+		t.Fatalf("CSV erased context or missing actor: %+v %v", imported, err)
+	}
+	if _, err := svc.ImportCSVAs(ctx, projectA, "key,title,preconditions,test_data\nTC-CONTEXT,Imported title,CSV setup,CSV data", "importer"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateTestCase(ctx, projectA, c.ID, TestCasePatch{Preconditions: ptr(""), Actor: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := svc.GetPlan(ctx, projectA, p.ID)
+	if err != nil || *plan.ExecutionHistory[0].CaseSnapshot.Preconditions != "Signed in" || *plan.ExecutionHistory[0].CaseSnapshot.TestData != "account=42" {
+		t.Fatalf("snapshot changed after edits/import: %+v %v", plan, err)
+	}
+	if _, err := svc.GetTestCase(ctx, projectB, c.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign audit leak: %v", err)
+	}
+	for _, value := range []string{strings.Repeat("x", 16001), strings.Repeat("\u00e9", 8001)} {
+		if _, err := svc.UpdateTestCase(ctx, projectA, c.ID, TestCasePatch{TestData: &value}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("oversized context accepted: %v", err)
+		}
+	}
+	var before, after string
+	if err := db.Q(ctx).QueryRow(ctx, `SELECT before_values->>'preconditions', after_values->>'preconditions' FROM test_case_audit WHERE test_case_id = $1 AND actor = 'bob'`, c.ID).Scan(&before, &after); err != nil || before != "Signed in" || after != "New setup" {
+		t.Fatalf("stored audit values: %q %q %v", before, after, err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE manual_executions SET case_snapshot = case_snapshot - 'preconditions' - 'testData' WHERE id = $1`, execution.ID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = svc.GetPlan(ctx, projectA, p.ID)
+	if err != nil || plan.ExecutionHistory[0].CaseSnapshot.Preconditions != nil {
+		t.Fatalf("legacy context fabricated: %+v %v", plan, err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO test_case_audit(project_id, test_case_id, actor, action, changed_fields, after_values, created_at)
+		SELECT $1, $2, 'audit fixture', 'case.update', ARRAY['title'], '{}'::jsonb, now() + n * interval '1 second' FROM generate_series(1,51) n`, projectA, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	bounded, err := svc.GetTestCase(ctx, projectA, c.ID)
+	if err != nil || len(bounded.Audit) != 50 || !bounded.AuditTruncated {
+		t.Fatalf("audit bound: %+v %v", bounded, err)
+	}
+}
+
+func containsField(fields []string, value string) bool {
+	for _, field := range fields {
+		if field == value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestReleaseGate(t *testing.T) {

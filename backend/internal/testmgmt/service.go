@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -245,14 +246,25 @@ func (s *service) GetRequirement(ctx context.Context, projectID, id string) (Req
 // ------------------------------------------------------------ test cases
 
 const caseColumns = `c.id, c.project_id, c.suite_id, coalesce(s.name, ''), c.external_key, c.title, c.steps, c.expected, c.priority,
-	c.is_critical, c.automation_status, c.owner_id, c.created_at, c.updated_at`
+	c.is_critical, c.automation_status, c.owner_id, c.created_at, c.updated_at, c.preconditions, c.test_data`
+
+const caseFilterWhere = `c.project_id = $1
+	AND ($2 = '' OR c.suite_id = $2::uuid)
+	AND ($3 = '' OR c.automation_status = $3)
+	AND ($4::boolean IS NULL OR c.is_critical = $4)
+	AND ($5 = '' OR c.title ILIKE '%' || $5 || '%' OR c.external_key ILIKE '%' || $5 || '%')`
 
 func scanCase(row interface{ Scan(dest ...any) error }) (TestCase, error) {
+	return scanCaseExtra(row)
+}
+
+func scanCaseExtra(row interface{ Scan(dest ...any) error }, extra ...any) (TestCase, error) {
 	var c TestCase
 	var suite, key, owner *string
 	var steps []byte
-	if err := row.Scan(&c.ID, &c.ProjectID, &suite, &c.SuiteName, &key, &c.Title, &steps, &c.Expected, &c.Priority,
-		&c.IsCritical, &c.AutomationStatus, &owner, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	dest := []any{&c.ID, &c.ProjectID, &suite, &c.SuiteName, &key, &c.Title, &steps, &c.Expected, &c.Priority,
+		&c.IsCritical, &c.AutomationStatus, &owner, &c.CreatedAt, &c.UpdatedAt, &c.Preconditions, &c.TestData}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return TestCase{}, err
 	}
 	c.SuiteID, c.ExternalKey, c.OwnerID = deref(suite), deref(key), deref(owner)
@@ -300,6 +312,11 @@ func (s *service) CreateTestCase(ctx context.Context, projectID string, in NewTe
 		return TestCase{}, ErrNotFound
 	}
 	in.Title = strings.TrimSpace(in.Title)
+	in.Preconditions = strings.TrimSpace(in.Preconditions)
+	in.TestData = strings.TrimSpace(in.TestData)
+	if len(in.Preconditions) > 16000 || len(in.TestData) > 16000 {
+		return TestCase{}, fmt.Errorf("%w: case context exceeds 16000 bytes", ErrInvalid)
+	}
 	in.ExternalKey = strings.TrimSpace(in.ExternalKey)
 	if in.Title == "" || len(in.Title) > 500 {
 		return TestCase{}, fmt.Errorf("%w: title", ErrInvalid)
@@ -321,10 +338,15 @@ func (s *service) CreateTestCase(ctx context.Context, projectID string, in NewTe
 		return TestCase{}, err
 	}
 	var id string
-	err = s.db.Q(ctx).QueryRow(ctx, `
-		INSERT INTO test_cases (project_id, suite_id, external_key, title, steps, expected, priority, is_critical, owner_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		projectID, nullable(in.SuiteID), nullable(in.ExternalKey), in.Title, steps, strings.TrimSpace(in.Expected), string(in.Priority), in.IsCritical, nullable(in.OwnerID)).Scan(&id)
+	err = s.db.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.caseAuditActor(ctx, in.Actor, ""); err != nil {
+			return err
+		}
+		return s.db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO test_cases (project_id, suite_id, external_key, title, steps, expected, priority, is_critical, owner_id, preconditions, test_data)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+			projectID, nullable(in.SuiteID), nullable(in.ExternalKey), in.Title, steps, strings.TrimSpace(in.Expected), string(in.Priority), in.IsCritical, nullable(in.OwnerID), in.Preconditions, in.TestData).Scan(&id)
+	})
 	if err != nil {
 		return TestCase{}, mapErr(err)
 	}
@@ -334,6 +356,14 @@ func (s *service) CreateTestCase(ctx context.Context, projectID string, in NewTe
 func (s *service) UpdateTestCase(ctx context.Context, projectID, id string, p TestCasePatch) (TestCase, error) {
 	if !isUUID(projectID) || !isUUID(id) {
 		return TestCase{}, ErrNotFound
+	}
+	for _, field := range []*string{p.Preconditions, p.TestData} {
+		if field != nil {
+			*field = strings.TrimSpace(*field)
+			if len(*field) > 16000 {
+				return TestCase{}, fmt.Errorf("%w: case context exceeds 16000 bytes", ErrInvalid)
+			}
+		}
 	}
 	if p.Title != nil {
 		t := strings.TrimSpace(*p.Title)
@@ -381,23 +411,48 @@ func (s *service) UpdateTestCase(ctx context.Context, projectID, id string, p Te
 		e := strings.TrimSpace(*p.Expected)
 		expected = &e
 	}
-	tag, err := s.db.Q(ctx).Exec(ctx, `
+	err := s.db.WithTx(ctx, func(ctx context.Context) error {
+		q := s.db.Q(ctx)
+		var version time.Time
+		if err := q.QueryRow(ctx, `SELECT updated_at FROM test_cases WHERE id = $1 AND project_id = $2 FOR UPDATE`, id, projectID).Scan(&version); err != nil {
+			return mapErr(err)
+		}
+		if !p.ExpectedUpdatedAt.IsZero() && !p.ExpectedUpdatedAt.Equal(version) {
+			return fmt.Errorf("%w: case changed; refresh before saving", ErrConflict)
+		}
+		if err := s.caseAuditActor(ctx, p.Actor, ""); err != nil {
+			return err
+		}
+		tag, err := q.Exec(ctx, `
 		UPDATE test_cases
 		   SET title = coalesce($3, title), steps = coalesce($4, steps), expected = coalesce($5, expected),
 		       priority = coalesce($6, priority), is_critical = coalesce($7, is_critical),
 		       automation_status = coalesce($8, automation_status),
 		       suite_id = CASE WHEN $9 THEN $10 ELSE suite_id END,
 		       owner_id = CASE WHEN $11 THEN $12 ELSE owner_id END,
-		       updated_at = now()
+		       preconditions = coalesce($13, preconditions), test_data = coalesce($14, test_data), updated_at = clock_timestamp()
 		 WHERE id = $1 AND project_id = $2`,
-		id, projectID, p.Title, steps, expected, (*string)(p.Priority), p.IsCritical, (*string)(p.AutomationStatus), setSuite, suite, setOwner, owner)
+			id, projectID, p.Title, steps, expected, (*string)(p.Priority), p.IsCritical, (*string)(p.AutomationStatus), setSuite, suite, setOwner, owner, p.Preconditions, p.TestData)
+		if err != nil {
+			return mapErr(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 	if err != nil {
-		return TestCase{}, mapErr(err)
-	}
-	if tag.RowsAffected() == 0 {
-		return TestCase{}, ErrNotFound
+		return TestCase{}, err
 	}
 	return s.GetTestCase(ctx, projectID, id)
+}
+
+func (s *service) caseAuditActor(ctx context.Context, actor, action string) error {
+	if actor == "" {
+		actor = "system"
+	}
+	_, err := s.db.Q(ctx).Exec(ctx, `SELECT set_config('app.testmgmt_actor', $1, true), set_config('app.testmgmt_action', $2, true)`, actor, action)
+	return err
 }
 
 func (s *service) ListTestCases(ctx context.Context, projectID string, f CaseFilter) ([]TestCase, error) {
@@ -413,11 +468,7 @@ func (s *service) ListTestCases(ctx context.Context, projectID string, f CaseFil
 	rows, err := s.db.Q(ctx).Query(ctx, `
 		SELECT `+caseColumns+`
 		  FROM test_cases c LEFT JOIN test_suites s ON s.id = c.suite_id
-		 WHERE c.project_id = $1
-		   AND ($2 = '' OR c.suite_id = $2::uuid)
-		   AND ($3 = '' OR c.automation_status = $3)
-		   AND ($4::boolean IS NULL OR c.is_critical = $4)
-		   AND ($5 = '' OR c.title ILIKE '%' || $5 || '%' OR c.external_key ILIKE '%' || $5 || '%')
+		 WHERE `+caseFilterWhere+`
 		 ORDER BY c.priority, c.created_at LIMIT $6`,
 		projectID, f.SuiteID, string(f.AutomationStatus), f.Critical, strings.TrimSpace(f.Query), f.Limit)
 	if err != nil {
@@ -460,6 +511,7 @@ func (s *service) GetTestCase(ctx context.Context, projectID, id string) (TestCa
 	if err := rows.Err(); err != nil {
 		return TestCase{}, err
 	}
+	rows.Close()
 	reqs, err := q.Query(ctx, `SELECT requirement_id FROM requirement_coverage WHERE test_case_id = $1 ORDER BY created_at`, id)
 	if err != nil {
 		return TestCase{}, err
@@ -473,7 +525,28 @@ func (s *service) GetTestCase(ctx context.Context, projectID, id string) (TestCa
 		}
 		c.Requirements = append(c.Requirements, r)
 	}
-	return c, reqs.Err()
+	if err := reqs.Err(); err != nil {
+		return TestCase{}, err
+	}
+	reqs.Close()
+	audit, err := q.Query(ctx, `SELECT id, actor, action, changed_fields, created_at FROM test_case_audit WHERE test_case_id = $1 AND project_id = $2 ORDER BY created_at DESC, id DESC LIMIT 51`, id, projectID)
+	if err != nil {
+		return TestCase{}, err
+	}
+	defer audit.Close()
+	c.Audit = []CaseChange{}
+	for audit.Next() {
+		var item CaseChange
+		if err := audit.Scan(&item.ID, &item.Actor, &item.Action, &item.ChangedFields, &item.CreatedAt); err != nil {
+			return TestCase{}, err
+		}
+		if len(c.Audit) == 50 {
+			c.AuditTruncated = true
+			break
+		}
+		c.Audit = append(c.Audit, item)
+	}
+	return c, audit.Err()
 }
 
 func (s *service) LinkAutomation(ctx context.Context, projectID, testCaseID, stableTestID string, t LinkType, actor string) (Link, error) {
@@ -509,6 +582,9 @@ func (s *service) LinkAutomation(ctx context.Context, projectID, testCaseID, sta
 	}
 	var out Link
 	err = s.db.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.caseAuditActor(ctx, actor, ""); err != nil {
+			return err
+		}
 		q := s.db.Q(ctx)
 		var n int
 		if err := q.QueryRow(ctx, `SELECT count(*) FROM test_cases WHERE id = $1 AND project_id = $2`, testCaseID, projectID).Scan(&n); err != nil {
@@ -623,14 +699,45 @@ func (s *service) CreatePlan(ctx context.Context, projectID string, in NewPlan) 
 	if in.EnvironmentID != "" && !isUUID(in.EnvironmentID) {
 		return Plan{}, fmt.Errorf("%w: environmentId", ErrInvalid)
 	}
-	p, err := scanPlan(s.db.Q(ctx).QueryRow(ctx, `
-		INSERT INTO test_plans (project_id, name, environment_id) VALUES ($1, $2, $3) RETURNING `+planColumns,
-		projectID, in.Name, nullable(in.EnvironmentID)))
+	var p Plan
+	err := s.db.WithTx(ctx, func(ctx context.Context) error {
+		q := s.db.Q(ctx)
+		var err error
+		p, err = scanPlan(q.QueryRow(ctx, `INSERT INTO test_plans (project_id, name, environment_id) VALUES ($1, $2, $3) RETURNING `+planColumns, projectID, in.Name, nullable(in.EnvironmentID)))
+		if err != nil {
+			return mapErr(err)
+		}
+		ids := in.CaseIDs
+		if ids == nil {
+			rows, err := q.Query(ctx, `SELECT id FROM test_cases WHERE project_id = $1 AND automation_status <> 'obsolete' ORDER BY id LIMIT 5001`, projectID)
+			if err != nil {
+				return err
+			}
+			selected := []string{}
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return err
+				}
+				selected = append(selected, id)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			ids = &selected
+		}
+		if err := s.setPlanCases(ctx, projectID, p.ID, *ids); err != nil {
+			return err
+		}
+		return s.auditPlan(ctx, projectID, p.ID, in.Actor, "plan.create", map[string]any{"caseIds": *ids})
+	})
 	if err != nil {
-		return Plan{}, mapErr(err)
+		return Plan{}, err
 	}
-	p.Executions = []Execution{}
-	return p, nil
+	return s.GetPlan(ctx, projectID, p.ID)
 }
 
 func (s *service) ListPlans(ctx context.Context, projectID string) ([]Plan, error) {
@@ -662,44 +769,255 @@ func (s *service) GetPlan(ctx context.Context, projectID, id string) (Plan, erro
 	if err != nil {
 		return Plan{}, mapErr(err)
 	}
+	members, err := q.Query(ctx, `SELECT `+caseColumns+`, pc.assignee_user_id, pc.assignee_email, pc.assigned_by, pc.assigned_at, pc.work_status
+		FROM test_plan_cases pc JOIN test_cases c ON c.id = pc.test_case_id AND c.project_id = pc.project_id
+		LEFT JOIN test_suites s ON s.id = c.suite_id WHERE pc.test_plan_id = $1 AND pc.project_id = $2 ORDER BY c.priority, c.title, c.id`, id, projectID)
+	if err != nil {
+		return Plan{}, err
+	}
+	p.Cases = []PlanCase{}
+	for members.Next() {
+		var item PlanCase
+		var user *string
+		item.TestCase, err = scanCaseExtra(members, &user, &item.AssigneeEmail, &item.AssignedBy, &item.AssignedAt, &item.WorkStatus)
+		if err != nil {
+			members.Close()
+			return Plan{}, err
+		}
+		item.AssigneeUserID = deref(user)
+		p.Cases = append(p.Cases, item)
+	}
+	err = members.Err()
+	members.Close()
+	if err != nil {
+		return Plan{}, err
+	}
 	// Latest verdict per case (append-only rows, §6.8.2 ManualExecution).
 	rows, err := q.Query(ctx, `
-		SELECT DISTINCT ON (e.test_case_id) e.id, e.test_plan_id, e.test_case_id, c.title, e.executed_by, e.status, e.note, e.executed_at
+		SELECT DISTINCT ON (e.test_case_id) `+executionColumns+`
 		  FROM manual_executions e JOIN test_cases c ON c.id = e.test_case_id
-		 WHERE e.test_plan_id = $1
-		 ORDER BY e.test_case_id, e.executed_at DESC`, id)
+		 WHERE e.test_plan_id = $1 AND e.project_id = $2
+		 ORDER BY e.test_case_id, e.executed_at DESC, e.id DESC`, id, projectID)
 	if err != nil {
 		return Plan{}, err
 	}
 	defer rows.Close()
 	p.Executions = []Execution{}
 	for rows.Next() {
-		var e Execution
-		if err := rows.Scan(&e.ID, &e.PlanID, &e.TestCaseID, &e.CaseTitle, &e.ExecutedBy, &e.Status, &e.Note, &e.ExecutedAt); err != nil {
+		e, err := scanExecution(rows)
+		if err != nil {
 			return Plan{}, err
 		}
 		p.Executions = append(p.Executions, e)
 	}
-	return p, rows.Err()
+	if err := rows.Err(); err != nil {
+		return Plan{}, err
+	}
+	rows.Close()
+	history, err := q.Query(ctx, `SELECT `+executionColumns+`
+		FROM manual_executions e JOIN test_cases c ON c.id = e.test_case_id
+		WHERE e.test_plan_id = $1 AND e.project_id = $2
+		ORDER BY e.executed_at DESC, e.id DESC LIMIT 201`, id, projectID)
+	if err != nil {
+		return Plan{}, err
+	}
+	defer history.Close()
+	p.ExecutionHistory = []Execution{}
+	for history.Next() {
+		e, err := scanExecution(history)
+		if err != nil {
+			return Plan{}, err
+		}
+		if len(p.ExecutionHistory) == 200 {
+			p.HistoryTruncated = true
+			break
+		}
+		p.ExecutionHistory = append(p.ExecutionHistory, e)
+	}
+	return p, history.Err()
+}
+
+const executionColumns = `e.id, e.test_plan_id, e.test_case_id,
+	COALESCE(e.case_snapshot->>'title', c.title), e.executed_by, e.status, e.note,
+	e.executed_at, e.case_snapshot, e.step_results, e.bug_url, e.retest_of`
+
+func scanExecution(row interface{ Scan(...any) error }) (Execution, error) {
+	var e Execution
+	var snapshot, steps []byte
+	var retest *string
+	if err := row.Scan(&e.ID, &e.PlanID, &e.TestCaseID, &e.CaseTitle, &e.ExecutedBy,
+		&e.Status, &e.Note, &e.ExecutedAt, &snapshot, &steps, &e.BugURL, &retest); err != nil {
+		return e, err
+	}
+	if snapshot != nil {
+		if err := json.Unmarshal(snapshot, &e.CaseSnapshot); err != nil {
+			return e, err
+		}
+	}
+	if err := json.Unmarshal(steps, &e.StepResults); err != nil {
+		return e, err
+	}
+	e.RetestOf = deref(retest)
+	return e, nil
 }
 
 func (s *service) SetPlanStatus(ctx context.Context, projectID, id string, status PlanStatus) (Plan, error) {
+	return s.UpdatePlan(ctx, projectID, id, PlanPatch{Status: &status}, "")
+}
+
+func (s *service) UpdatePlan(ctx context.Context, projectID, id string, patch PlanPatch, actor string) (Plan, error) {
 	if !isUUID(projectID) || !isUUID(id) {
 		return Plan{}, ErrNotFound
 	}
-	switch status {
-	case PlanDraft, PlanActive, PlanClosed:
-	default:
-		return Plan{}, fmt.Errorf("%w: status %q", ErrInvalid, status)
+	if patch.Status == nil && patch.CaseIDs == nil && patch.CaseUpdate == nil {
+		return Plan{}, fmt.Errorf("%w: empty plan patch", ErrInvalid)
 	}
-	tag, err := s.db.Q(ctx).Exec(ctx, `UPDATE test_plans SET status = $3, updated_at = now() WHERE id = $1 AND project_id = $2`, id, projectID, string(status))
+	if patch.Status != nil {
+		switch *patch.Status {
+		case PlanDraft, PlanActive, PlanClosed:
+		default:
+			return Plan{}, fmt.Errorf("%w: status", ErrInvalid)
+		}
+	}
+	err := s.db.WithTx(ctx, func(ctx context.Context) error {
+		q := s.db.Q(ctx)
+		p, err := scanPlan(q.QueryRow(ctx, `SELECT `+planColumns+` FROM test_plans WHERE id = $1 AND project_id = $2 FOR UPDATE`, id, projectID))
+		if err != nil {
+			return mapErr(err)
+		}
+		if !patch.ExpectedUpdatedAt.IsZero() && !patch.ExpectedUpdatedAt.Equal(p.UpdatedAt) {
+			return fmt.Errorf("%w: plan changed; refresh before saving", ErrConflict)
+		}
+		if (patch.CaseIDs != nil || patch.CaseUpdate != nil) && p.Status == PlanClosed {
+			return fmt.Errorf("%w: plan is closed", ErrConflict)
+		}
+		if patch.CaseIDs != nil {
+			if err := s.setPlanCases(ctx, projectID, id, *patch.CaseIDs); err != nil {
+				return err
+			}
+			if err := s.auditPlan(ctx, projectID, id, actor, "plan.scope", map[string]any{"caseIds": *patch.CaseIDs}); err != nil {
+				return err
+			}
+		}
+		if update := patch.CaseUpdate; update != nil {
+			if !isUUID(update.TestCaseID) {
+				return ErrNotFound
+			}
+			if update.AssigneeUserID == nil && update.WorkStatus == nil {
+				return fmt.Errorf("%w: empty case update", ErrInvalid)
+			}
+			if update.AssigneeUserID != nil {
+				if update.AssigneeEmail == nil || (*update.AssigneeUserID != "" && !isUUID(*update.AssigneeUserID)) {
+					return fmt.Errorf("%w: assignee", ErrInvalid)
+				}
+				tag, err := q.Exec(ctx, `UPDATE test_plan_cases SET assignee_user_id = $4, assignee_email = $5, assigned_by = $6, assigned_at = now() WHERE test_plan_id = $1 AND project_id = $2 AND test_case_id = $3`, id, projectID, update.TestCaseID, nullable(*update.AssigneeUserID), *update.AssigneeEmail, actor)
+				if err != nil {
+					return mapErr(err)
+				}
+				if tag.RowsAffected() == 0 {
+					return ErrNotFound
+				}
+				if err := s.auditPlan(ctx, projectID, id, actor, "plan.assignment", map[string]any{"testCaseId": update.TestCaseID, "assigneeUserId": *update.AssigneeUserID, "assigneeEmail": *update.AssigneeEmail}); err != nil {
+					return err
+				}
+			}
+			if update.WorkStatus != nil {
+				if *update.WorkStatus != "in_progress" && *update.WorkStatus != "not_run" {
+					return fmt.Errorf("%w: workStatus", ErrInvalid)
+				}
+				if *update.WorkStatus == "not_run" {
+					var hasResult bool
+					if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM manual_executions WHERE test_plan_id = $1 AND test_case_id = $2)`, id, update.TestCaseID).Scan(&hasResult); err != nil {
+						return err
+					}
+					if hasResult {
+						return fmt.Errorf("%w: recorded case cannot become not_run", ErrConflict)
+					}
+				}
+				tag, err := q.Exec(ctx, `UPDATE test_plan_cases pc SET work_status = $4 FROM test_cases c WHERE pc.test_plan_id = $1 AND pc.project_id = $2 AND pc.test_case_id = $3 AND c.id = pc.test_case_id AND c.automation_status <> 'obsolete'`, id, projectID, update.TestCaseID, *update.WorkStatus)
+				if err != nil {
+					return mapErr(err)
+				}
+				if tag.RowsAffected() == 0 {
+					return ErrNotFound
+				}
+				if err := s.auditPlan(ctx, projectID, id, actor, "plan.workflow", map[string]any{"testCaseId": update.TestCaseID, "workStatus": *update.WorkStatus}); err != nil {
+					return err
+				}
+			}
+		}
+		status := p.Status
+		if patch.CaseUpdate != nil && patch.CaseUpdate.WorkStatus != nil && *patch.CaseUpdate.WorkStatus == "in_progress" && status == PlanDraft {
+			status = PlanActive
+		}
+		if patch.Status != nil {
+			status = *patch.Status
+		}
+		if _, err := q.Exec(ctx, `UPDATE test_plans SET status = $3, updated_at = clock_timestamp() WHERE id = $1 AND project_id = $2`, id, projectID, status); err != nil {
+			return mapErr(err)
+		}
+		if patch.Status != nil {
+			return s.auditPlan(ctx, projectID, id, actor, "plan.status", map[string]any{"status": status})
+		}
+		return nil
+	})
 	if err != nil {
-		return Plan{}, mapErr(err)
-	}
-	if tag.RowsAffected() == 0 {
-		return Plan{}, ErrNotFound
+		return Plan{}, err
 	}
 	return s.GetPlan(ctx, projectID, id)
+}
+
+func (s *service) setPlanCases(ctx context.Context, projectID, planID string, ids []string) error {
+	if len(ids) > 5000 {
+		return fmt.Errorf("%w: more than 5000 plan cases", ErrInvalid)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if !isUUID(id) {
+			return ErrNotFound
+		}
+		if seen[id] {
+			return fmt.Errorf("%w: duplicate case", ErrInvalid)
+		}
+		seen[id] = true
+	}
+	q := s.db.Q(ctx)
+	var invalid bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM unnest($3::uuid[]) selected(id)
+		WHERE NOT EXISTS(SELECT 1 FROM test_cases c WHERE c.id = selected.id AND c.project_id = $1
+		AND (c.automation_status <> 'obsolete' OR EXISTS(SELECT 1 FROM test_plan_cases pc WHERE pc.test_plan_id = $2 AND pc.test_case_id = c.id))))`, projectID, planID, ids).Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid {
+		return ErrNotFound
+	}
+	var removesEvidence bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM manual_executions WHERE test_plan_id = $1 AND NOT (test_case_id = ANY($2::uuid[])))`, planID, ids).Scan(&removesEvidence); err != nil {
+		return err
+	}
+	if removesEvidence {
+		return fmt.Errorf("%w: cannot remove cases with recorded executions", ErrConflict)
+	}
+	if _, err := q.Exec(ctx, `DELETE FROM test_plan_cases WHERE test_plan_id = $1 AND project_id = $2 AND NOT (test_case_id = ANY($3::uuid[]))`, planID, projectID, ids); err != nil {
+		return err
+	}
+	_, err := q.Exec(ctx, `INSERT INTO test_plan_cases(test_plan_id, test_case_id, project_id) SELECT $1, selected, $2 FROM unnest($3::uuid[]) selected ON CONFLICT DO NOTHING`, planID, projectID, ids)
+	return mapErr(err)
+}
+
+func (s *service) auditPlan(ctx context.Context, projectID, planID, actor, action string, details map[string]any) error {
+	if actor == "" {
+		actor = "system"
+	}
+	data, err := json.Marshal(details)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Q(ctx).Exec(ctx, `INSERT INTO test_plan_audit(project_id, test_plan_id, actor, action, details) VALUES ($1, $2, $3, $4, $5)`, projectID, planID, actor, action, data)
+	return err
 }
 
 func (s *service) RecordExecution(ctx context.Context, projectID, planID string, in NewExecution, actor string) (Execution, error) {
@@ -717,6 +1035,16 @@ func (s *service) RecordExecution(ctx context.Context, projectID, planID string,
 	if len(in.Note) > 4000 {
 		return Execution{}, fmt.Errorf("%w: note too long", ErrInvalid)
 	}
+	in.BugURL = strings.TrimSpace(in.BugURL)
+	if in.BugURL != "" {
+		u, err := url.Parse(in.BugURL)
+		if err != nil || len(in.BugURL) > 2000 || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil {
+			return Execution{}, fmt.Errorf("%w: bugUrl must be an http(s) URL without credentials", ErrInvalid)
+		}
+	}
+	if in.RetestOf != "" && !isUUID(in.RetestOf) {
+		return Execution{}, ErrNotFound
+	}
 	at := in.ExecutedAt
 	if at.IsZero() {
 		at = s.now()
@@ -725,29 +1053,86 @@ func (s *service) RecordExecution(ctx context.Context, projectID, planID string,
 	err := s.db.WithTx(ctx, func(ctx context.Context) error {
 		q := s.db.Q(ctx)
 		var status string
-		if err := q.QueryRow(ctx, `SELECT status FROM test_plans WHERE id = $1 AND project_id = $2`, planID, projectID).Scan(&status); err != nil {
+		if err := q.QueryRow(ctx, `SELECT status FROM test_plans WHERE id = $1 AND project_id = $2 FOR UPDATE`, planID, projectID).Scan(&status); err != nil {
 			return mapErr(err)
 		}
 		if status == string(PlanClosed) {
 			return fmt.Errorf("%w: plan is closed", ErrConflict)
 		}
-		var title string
-		if err := q.QueryRow(ctx, `SELECT title FROM test_cases WHERE id = $1 AND project_id = $2`, in.TestCaseID, projectID).Scan(&title); err != nil {
+		var member bool
+		if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM test_plan_cases WHERE test_plan_id = $1 AND test_case_id = $2 AND project_id = $3)`, planID, in.TestCaseID, projectID).Scan(&member); err != nil {
+			return err
+		}
+		if !member {
+			return ErrNotFound
+		}
+		var snapshot CaseSnapshot
+		var rawSteps []byte
+		var preconditions, testData string
+		if err := q.QueryRow(ctx, `SELECT title, steps, expected, updated_at, preconditions, test_data FROM test_cases WHERE id = $1 AND project_id = $2 AND automation_status <> 'obsolete' FOR SHARE`, in.TestCaseID, projectID).Scan(&snapshot.Title, &rawSteps, &snapshot.Expected, &snapshot.UpdatedAt, &preconditions, &testData); err != nil {
 			return mapErr(err)
 		}
-		err := q.QueryRow(ctx, `
-			INSERT INTO manual_executions (project_id, test_plan_id, test_case_id, executed_by, status, note, executed_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		snapshot.Preconditions = &preconditions
+		snapshot.TestData = &testData
+		if err := json.Unmarshal(rawSteps, &snapshot.Steps); err != nil {
+			return err
+		}
+		if !in.CaseUpdatedAt.IsZero() && !in.CaseUpdatedAt.Equal(snapshot.UpdatedAt) {
+			return fmt.Errorf("%w: test case changed; refresh before recording", ErrConflict)
+		}
+		seen := map[int]bool{}
+		for _, step := range in.StepResults {
+			if in.Status == ExecPassed && (step.Status == ExecFailed || step.Status == ExecBlocked) {
+				return fmt.Errorf("%w: passed execution cannot contain failed or blocked steps", ErrInvalid)
+			}
+			if step.StepIndex < 0 || step.StepIndex >= len(snapshot.Steps) || seen[step.StepIndex] || len(step.Actual) > 4000 {
+				return fmt.Errorf("%w: invalid step results", ErrInvalid)
+			}
+			switch step.Status {
+			case ExecPassed, ExecFailed, ExecBlocked, ExecSkipped:
+			default:
+				return fmt.Errorf("%w: step status", ErrInvalid)
+			}
+			seen[step.StepIndex] = true
+		}
+		if in.RetestOf != "" {
+			var previous string
+			if err := q.QueryRow(ctx, `SELECT id FROM manual_executions WHERE id = $1 AND project_id = $2 AND test_plan_id = $3 AND test_case_id = $4`, in.RetestOf, projectID, planID, in.TestCaseID).Scan(&previous); err != nil {
+				return mapErr(err)
+			}
+		}
+		if in.StepResults == nil {
+			in.StepResults = []StepResult{}
+		}
+		snapshotJSON, err := json.Marshal(snapshot)
+		if err != nil {
+			return err
+		}
+		stepsJSON, err := json.Marshal(in.StepResults)
+		if err != nil {
+			return err
+		}
+		err = q.QueryRow(ctx, `
+			INSERT INTO manual_executions (project_id, test_plan_id, test_case_id, executed_by, status, note, executed_at, case_snapshot, step_results, bug_url, retest_of)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING id, test_plan_id, test_case_id, executed_by, status, note, executed_at`,
-			projectID, planID, in.TestCaseID, actor, string(in.Status), strings.TrimSpace(in.Note), at.UTC()).
+			projectID, planID, in.TestCaseID, actor, string(in.Status), strings.TrimSpace(in.Note), at.UTC(), snapshotJSON, stepsJSON, in.BugURL, nullable(in.RetestOf)).
 			Scan(&out.ID, &out.PlanID, &out.TestCaseID, &out.ExecutedBy, &out.Status, &out.Note, &out.ExecutedAt)
 		if err != nil {
 			return mapErr(err)
 		}
-		out.CaseTitle = title
-		// A plan with its first execution is active by definition.
-		_, err = q.Exec(ctx, `UPDATE test_plans SET status = 'active', updated_at = now() WHERE id = $1 AND status = 'draft'`, planID)
-		return err
+		out.CaseTitle = snapshot.Title
+		out.CaseSnapshot = &snapshot
+		out.StepResults = in.StepResults
+		out.BugURL = in.BugURL
+		out.RetestOf = in.RetestOf
+		if _, err := q.Exec(ctx, `UPDATE test_plan_cases SET work_status = 'completed' WHERE test_plan_id = $1 AND test_case_id = $2`, planID, in.TestCaseID); err != nil {
+			return err
+		}
+		if _, err := q.Exec(ctx, `UPDATE test_plans SET status = CASE WHEN status = 'draft' THEN 'active' ELSE status END, updated_at = clock_timestamp() WHERE id = $1`, planID); err != nil {
+			return err
+		}
+		return s.auditPlan(ctx, projectID, planID, actor, "plan.execution", map[string]any{"executionId": out.ID, "testCaseId": in.TestCaseID, "status": in.Status})
 	})
 	if err != nil {
 		return Execution{}, err
@@ -762,7 +1147,7 @@ func (s *service) ExecutionForEvidence(ctx context.Context, projectID, planID, i
 	var e Execution
 	var planStatus string
 	err := s.db.Q(ctx).QueryRow(ctx, `
-		SELECT e.id, e.test_plan_id, e.test_case_id, c.title, e.executed_by, e.status, e.note, e.executed_at, p.status
+		SELECT e.id, e.test_plan_id, e.test_case_id, COALESCE(e.case_snapshot->>'title', c.title), e.executed_by, e.status, e.note, e.executed_at, p.status
 		  FROM manual_executions e
 		  JOIN test_cases c ON c.id = e.test_case_id
 		  JOIN test_plans p ON p.id = e.test_plan_id

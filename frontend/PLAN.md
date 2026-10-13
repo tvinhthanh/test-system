@@ -23,6 +23,85 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Active Slice (2026-10-13)
+
+- Continuing GĐ2 bulk/export: selected-case metadata updates in batches of 100,
+  mandatory per-case versions, per-item results and transactional audit; CSV
+  export of selected cases or the full server filter (5000 cases / 8 MiB cap).
+- New routes: POST test-cases/bulk, GET test-cases/export. Export uses Go CSV,
+  spreadsheet-safe text and steps_json for lossless step definitions; imports
+  recognize the format. Permissions, stale partial success and live UI verified.
+
+- Continuing SPEC GĐ2: case preconditions/test data in create/edit/import and
+  execution snapshots; transactional case-change audit, bounded case history,
+  and optimistic case editing. Existing case routes only.
+
+- Continuing GĐ2: fixed plan membership, project-authorized assignment by email,
+  explicit not_run/in_progress/completed workflow, server-side scope validation,
+  concurrent-edit protection and audit. Extend existing plan POST/GET/PATCH.
+
+- SPEC 4.11 GĐ2: immutable manual execution case snapshots, bounded execution
+  history with previous evidence, explicit retest links, bug URLs and step results.
+- Extend existing plan GET and execution POST contracts; no new HTTP routes.
+- Verify real Postgres migration/service/API tests, frontend decoding/rendering,
+  unit suite and build. Full demo/E2E and the other GĐ2 features remain pending.
+
+#### Completed And Verified
+
+- Migration 0030 captures a case snapshot, step results, bug URL and same-case /
+  same-plan retest link; legacy rows retain a null snapshot. Case version checked
+  before saving; passed verdicts reject failed/blocked steps.
+- Plan reads include the latest 200 executions and their original evidence with
+  an explicit truncation flag. UI has execution recorder and history components;
+  search does not change progress totals; executed obsolete cases stay visible.
+- Real Postgres service/API/architecture tests passed. All frontend unit tests:
+  77 passed; reporter: 20 passed, 1 opt-in outage test skipped; dependency audit: 0.
+- `scripts/live-manual-history.mjs`: real login/API, step results, bug link,
+  edited case preserves original snapshot, linked retest and original evidence;
+  Chrome screenshots at 1440x960 and 390x844, no horizontal overflow/page errors.
+- Full backend suite had a Windows harness port collision in restore; standalone
+  restore drill with RESTORE_TEST=1 and PostgreSQL tools passed on rerun.
+- Migration 0031 and the existing plan POST/GET/PATCH now fix plan case scope,
+  assign verified project-authorized testers by email, and track not_run /
+  in_progress / completed independently of execution verdicts. Changes write
+  test_plan_audit in the same transaction. Recorded cases cannot be removed;
+  closed plans reject changes and stale plan versions return 409.
+- Scope editor, assignment and start controls passed the real Chrome/API flow
+  in live-manual-history.mjs on desktop/mobile. New project cases do not enter
+  an existing plan automatically; PATCH retains old execution evidence.
+- Membership slice verification: 81 frontend unit tests passed; typecheck,
+  build/bundle gate (initial JS 52.2 KiB gzip), real Postgres testmgmt/API/arch
+  tests and OpenAPI lint passed (7 pre-existing warnings).
+- Migration test starts from schema 0030 with legacy data, then applies 0031:
+  existing evidence and obsolete recorded cases remain accessible. Execution
+  forms retain the case version being filled and require explicit reload after
+  a newer case arrives; unsaved step results cannot silently move to new steps.
+- Migration 0032 adds bounded UTF-8 case preconditions/test data and captures
+  transactional case audit for create/update/CSV/automation-status changes. Audit
+  records the authenticated actor and server-side before/after data; API/UI expose
+  the latest 50 summaries with an explicit truncation flag, no legacy backfill.
+- Create/edit forms and CSV support context; absent CSV columns preserve existing
+  context. Execution forms/history use immutable context snapshots and label
+  unavailable legacy fields. Case edits send expectedUpdatedAt to prevent stale
+  saves. Real Postgres tests verify preservation, limits, audit scope and actors.
+- Context/audit verification: 84 frontend tests passed; typecheck/build and
+  bundle gate passed (52.4 KiB gzip), backend testmgmt/API/architecture and
+  OpenAPI lint passed (7 existing warnings). Live case edit/audit and original
+  snapshot/evidence passed on Chrome at 1440, 768 and 360px widths, no horizontal
+  overflow/page errors; screenshots test-results/case-context-*.png.
+- Backup/restore drill rerun with migration 0032 and RESTORE_TEST=1 passed on
+  the local PostgreSQL 17 instance; git diff --check passed.
+- Bulk/export verification: 90 frontend tests passed; typecheck/build and bundle
+  gate passed (52.7 KiB gzip). Postgres testmgmt/API/architecture tests passed:
+  foreign project and viewer write denied, audit actor, stale partial success,
+  full-filter export beyond 200 rows, 5000-row/8-MiB limits and CSV round-trip.
+  Real Chrome script live-case-bulk.mjs verifies retained conflict selection/
+  report, one confirmed success, real selected/full-filter downloads and no
+  overflow at 1440/768/360px. Page header actions now wrap on narrow screens.
+  npm audit --audit-level=low: 0 vulnerabilities; fixes remain local, not pushed.
+- Next: team acceptance of the complete GĐ2 workflow; complete GĐ1 on the
+  intended durable Docker deployment. Native loopback demo uses memory artifacts.
+
 - Phase: **P1-min UI complete** — sign-in, projects, runs, run detail,
   failure detail with attempts / artifacts (screenshots and video inline,
   trace viewer on our origin) / triage, identity history, flaky view —

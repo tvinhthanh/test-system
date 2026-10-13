@@ -159,6 +159,31 @@ test("a run streams begin → events → artifacts → finish, and never throws"
   }
 });
 
+test("interleaved retries keep the occurrence of their original TestCase", async () => {
+  const srv = new FakeServer();
+  await srv.start();
+  const spool = mkdtempSync(join(tmpdir(), "atp-spool-"));
+  try {
+    const client = new Client({ url: srv.url, token: "atp_ing_t", sleep: async () => {} });
+    const r = new AtpReporter({ url: srv.url, token: "atp_ing_t", spoolDir: spool, _client: client });
+    r.onBegin(fakeConfig(), {} as any);
+
+    const a = fakeTest(join(REPO, "tests", "same.spec.ts"), ["same title"]);
+    const b = fakeTest(join(REPO, "tests", "same.spec.ts"), ["same title"]);
+    r.onTestEnd(a, fakeResult("failed", 0));
+    r.onTestEnd(b, fakeResult("failed", 0));
+    r.onTestEnd(b, fakeResult("passed", 1));
+    r.onTestEnd(a, fakeResult("passed", 1));
+    await r.onEnd({ status: "passed" } as any);
+
+    const events = srv.requests.filter((q) => q.path.endsWith("/events")).flatMap((q) => q.body.events);
+    assert.deepEqual(events.map((e: any) => e.occurrenceIndex), [0, 1, 1, 0]);
+    assert.equal(new Set(events.map((e: any) => e.clientTestId)).size, 1, "same fingerprint is still preserved");
+  } finally {
+    await srv.stop();
+  }
+});
+
 test("total outage: events are spooled, the run is not failed", async () => {
   const srv = new FakeServer();
   await srv.start();
