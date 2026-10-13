@@ -497,7 +497,10 @@ func (d *dashboard) tmBulkCases(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, testmgmt.ErrInvalid)
 		return
 	}
-	if req.Patch.AutomationStatus != nil && *req.Patch.AutomationStatus == testmgmt.Automated { d.tmErr(w, r, testmgmt.ErrInvalid); return }
+	if req.Patch.AutomationStatus != nil && *req.Patch.AutomationStatus == testmgmt.Automated {
+		d.tmErr(w, r, testmgmt.ErrInvalid)
+		return
+	}
 	seen := map[string]bool{}
 	for _, item := range req.Items {
 		if seen[item.ID] || item.ExpectedUpdatedAt.IsZero() {
