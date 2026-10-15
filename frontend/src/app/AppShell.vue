@@ -24,6 +24,7 @@ const section = computed(() => {
   if (path.includes("/requirements")) return "Requirements";
   if (path.includes("/plans")) return "Test plans";
   if (path.includes("/releases")) return "Releases";
+  if (path.includes("/specialized-results")) return "Specialized results";
   if (path.includes("/flaky")) return "Flaky tests";
   if (path.includes("/tests")) return "Test intelligence";
   if (path.endsWith("/members")) return "Members";

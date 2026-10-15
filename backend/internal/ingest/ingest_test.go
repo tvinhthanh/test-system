@@ -149,13 +149,16 @@ func (r resp) errCode() string {
 
 const localRun = "0198c3e1-7b1a-7c3d-9e4f-0123456789ab"
 
+// Keep repeated payloads identical and finished evidence inside the 30-day window.
+var fixtureStartedAt = time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+
 func runBody(local string) map[string]any {
 	return map[string]any{
 		"localRunId": local, "environmentKey": "staging",
 		"trigger":   map[string]any{"type": "ci", "provider": "github-actions", "ref": "refs/heads/main", "commitSha": "ab12", "ciRunUrl": "https://ci.example/1"},
 		"framework": map[string]any{"name": "playwright", "version": "1.46.0"},
 		"reporter":  map[string]any{"name": "@platform/playwright-reporter", "version": "0.3.1", "protocolVersion": "1.1"},
-		"startedAt": "2026-09-14T02:11:04.120Z",
+		"startedAt": fixtureStartedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -166,7 +169,7 @@ func ev(seq int, client string, attempt int, status, outcome string) map[string]
 		"status":     status,
 		"outcome":    outcome,
 		"durationMs": 8412,
-		"startedAt":  "2026-09-14T02:11:05Z", "finishedAt": "2026-09-14T02:11:13Z",
+		"startedAt":  fixtureStartedAt.Add(time.Second).Format(time.RFC3339Nano), "finishedAt": fixtureStartedAt.Add(10 * time.Second).Format(time.RFC3339Nano),
 	}
 }
 
@@ -292,7 +295,7 @@ func TestIngestEndToEnd(t *testing.T) {
 	}
 
 	// Finish: failed? No — ct_known ended flaky, ct_pass passed → passed, flakyCount 1.
-	r = e.post(t, e.tokenA, "/v1/runs/"+localRun+"/finish", map[string]any{"finishedAt": "2026-09-14T02:20:00Z"})
+	r = e.post(t, e.tokenA, "/v1/runs/"+localRun+"/finish", map[string]any{"finishedAt": fixtureStartedAt.Add(10 * time.Minute).Format(time.RFC3339Nano)})
 	if r.code != 200 || r.body["status"] != "passed" || r.body["flakyCount"] != float64(1) || r.body["runId"] != runID {
 		t.Fatalf("finish: %d %s", r.code, r.raw)
 	}

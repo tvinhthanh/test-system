@@ -515,6 +515,10 @@ var (
 // another project answers ErrNotFound (§11.3.3: the tenant condition is in
 // the query, never a filter afterwards).
 type Service interface {
+	AddSpecializedResult(ctx context.Context, projectID string, in SpecializedInput, actor string) (SpecializedResult, error)
+	GetSpecializedResult(ctx context.Context, projectID, id string) (SpecializedResult, error)
+	ListSpecializedResults(ctx context.Context, projectID string, filter SpecializedFilter) (SpecializedPage, error)
+	SpecializedOriginal(ctx context.Context, projectID, id string) (string, error)
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:

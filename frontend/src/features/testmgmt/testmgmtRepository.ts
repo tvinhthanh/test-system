@@ -1,6 +1,10 @@
 import type { ApiClient } from "../../core/api/client";
 import * as d from "../../core/api/decode";
 import {
+  readSpecializedResult,
+  type SpecializedInput,
+} from "./specializedReports";
+import {
   levels,
   purposes,
   usageTags,
@@ -593,6 +597,46 @@ function roi(value: unknown): Roi {
 }
 
 export class TestmgmtRepository {
+  async specializedResults(
+    project: string,
+    filter: Record<string, string>,
+    signal: AbortSignal,
+  ) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(project)}/specialized-results?${params(filter)}`,
+        { signal },
+      ),
+    );
+    return {
+      items: d.array(x.items, readSpecializedResult, 50),
+      nextCursor: d.string(x.nextCursor),
+    };
+  }
+  async specializedResult(project: string, id: string, signal: AbortSignal) {
+    return readSpecializedResult(
+      await this.api.request(
+        `${scope(project)}/specialized-results/${enc(id)}`,
+        { signal },
+      ),
+    );
+  }
+  async createSpecializedResult(
+    project: string,
+    input: SpecializedInput,
+    signal: AbortSignal,
+  ) {
+    return readSpecializedResult(
+      await this.api.request(`${scope(project)}/specialized-results`, {
+        body: input,
+        signal,
+        timeoutMs: 60000,
+      }),
+    );
+  }
+  specializedOriginalUrl(project: string, id: string) {
+    return `${scope(project)}/specialized-results/${enc(id)}/original`;
+  }
   constructor(private api: ApiClient) {}
   async bulkUpdateCases(
     projectId: string,

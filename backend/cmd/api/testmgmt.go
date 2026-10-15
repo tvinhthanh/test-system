@@ -37,6 +37,7 @@ import (
 //	GET        /v1/releases/{releaseId}/gate            bearer token with project:read — the CI answer (§6.8.4 #2)
 
 func (d *dashboard) testmgmtRoutes(handle func(pattern string, fn http.HandlerFunc)) {
+	d.specializedRoutes(handle)
 	handle("GET /v1/projects/{projectId}/suites", d.tmSuites)
 	handle("POST /v1/projects/{projectId}/suites", d.tmCreateSuite)
 	handle("GET /v1/projects/{projectId}/requirements", d.tmRequirements)

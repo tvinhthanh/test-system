@@ -550,6 +550,43 @@ Fixture preview implements only these contracts and is not backend evidence.
 Current client contract tests validate fields, cursor encoding, error handling,
 and request lifecycle; cross-tenant server tests remain a backend gate.
 
+### Specialized Results (2026-10-15, SPEC 6.8.7)
+
+Project path `/v1/projects/{projectId}/specialized-results` provides GET list
+(`kind`, `outcome`, `testCaseId`, opaque `cursor`) and POST ATP report v1.
+`/{id}` GET reads details; `/{id}/original` GET downloads text/plain UTF-8 as
+attachment with no-store/nosniff. View permission reads; testmgmt.write creates,
+with session CSRF and Origin. Foreign resources never bypass project scope.
+
+Input fields: `schemaVersion:1`, `idempotencyKey`, `kind`, `title`, optional
+`testCaseId`/`retestOf`, `state`, `notes`, `environment`, `applicationVersion`,
+`source`, `toolVersion`, `adapterVersion`, `startedAt`, `finishedAt`, `details`,
+`originalReport`. Kinds: performance/security/accessibility/compatibility/
+recovery/usability. States: completed/not_run/not_applicable/import_error.
+Completed requires ordered execution times and original text; other states
+require notes, import_error also original text. Original <=512 KiB, details
+<=64 KiB, notes <=4000 bytes; UTF-8 byte limits, not JS string lengths.
+Metadata required and <=128 bytes, title <=500. Details have typed kind-specific
+fields in backend/deploy/openapi.yaml; unknown fields or invalid units/values
+return 400, not a successful empty report. No arbitrary vendor report parsing.
+
+Server returns `{id,kind,title,outcome,reasons,input,createdBy,createdAt}`;
+outcome is passed/failed/inconclusive/not_run/not_applicable/import_error.
+Original text is blank in JSON; list sets input.details=null and contains at
+most 50 items plus `nextCursor` (empty string at end). UI replaces the page,
+renders at most 50 rows, and keeps cursor in the URL without parsing it.
+Identical normalized payload replay returns the existing ID/actor (201);
+changed payload under the same project/key returns 409. Retest creates a new
+immutable result of the same project/kind/case. No update/delete UI or route.
+
+Performance numbers retain ms/requests-per-second/percent/seconds. Missing
+metrics or pre-start source-declared thresholds yield inconclusive; known
+breaches fail. Source timestamps are not independently proven preregistration.
+Findings/coverage, platform matrix, recovery objectives and usability tasks
+have separate typed forms; server owns assessment. These records neither
+create automation Runs/Attempts nor change flaky/TTRC or release-gate rules.
+Native vendor adapters and human operational acceptance remain separate scope.
+
 ## Backend status (16-09-2026)
 
 Implemented by `backend/` as the single dashboard contract — the earlier

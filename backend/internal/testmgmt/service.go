@@ -1315,6 +1315,7 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 	}
 	return s.db.WithTx(ctx, func(ctx context.Context) error {
 		for _, q := range []string{
+			"DELETE FROM specialized_results WHERE project_id = $1",
 			"DELETE FROM manual_executions WHERE project_id = $1",
 			"DELETE FROM test_plans WHERE project_id = $1",
 			"DELETE FROM releases WHERE project_id = $1",

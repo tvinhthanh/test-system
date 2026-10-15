@@ -79,6 +79,11 @@ export function makeRouter(
               import("../../features/testmgmt/TestCasesPage.vue"),
           },
           {
+            path: "p/:project/specialized-results",
+            component: () =>
+              import("../../features/testmgmt/SpecializedResultsPage.vue"),
+          },
+          {
             path: "p/:project/cases/:case",
             component: () =>
               import("../../features/testmgmt/TestCaseDetailPage.vue"),

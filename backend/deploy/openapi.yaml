@@ -48,6 +48,84 @@ tags:
 security: []
 
 paths:
+  /v1/projects/{projectId}/specialized-results:
+    get:
+      operationId: listSpecializedResults
+      tags: [testmgmt]
+      summary: Specialized results, newest first with scoped cursor pagination
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/SpecializedKind" } }
+        - { name: outcome, in: query, schema: { $ref: "#/components/schemas/SpecializedOutcome" } }
+        - { name: testCaseId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string }, description: "Opaque cursor bound to project and filters; changing filters requires restarting pagination." }
+      responses:
+        "200":
+          description: Up to 50 summaries; input.details is null and originalReport is empty. Fetch detail/original separately.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/SpecializedResult" } }
+                  nextCursor: { type: string, description: Empty when there are no further rows. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addSpecializedResult
+      tags: [testmgmt]
+      summary: Record or import an append-only ATP structured report v1
+      description: "Needs testmgmt.write. Not a runner or a vendor parser. 4 MiB body, 64 KiB details and 512 KiB original text. Same project/idempotencyKey and normalized content returns the original record; different content is 409. Retest must reference the same project, kind and case. Outcome computed by server; no automatic gate or flaky changes."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpecializedInput" }
+      responses:
+        "201":
+          description: Recorded or idempotently replayed result. Original report is downloaded separately.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SpecializedResult" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/specialized-results/{specializedId}:
+    get:
+      operationId: getSpecializedResult
+      tags: [testmgmt]
+      summary: Read a specialized result with typed details and its recorded actor
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: specializedId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Immutable recorded result, no-store.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SpecializedResult" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/specialized-results/{specializedId}/original:
+    get:
+      operationId: getSpecializedOriginal
+      tags: [testmgmt]
+      summary: Download the original UTF-8 text report under the same project permission
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: specializedId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Text attachment, nosniff and no-store; never rendered as HTML.
+          content: { text/plain: { schema: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /healthz:
     get:
       operationId: healthz
@@ -3352,6 +3430,160 @@ components:
       properties:
         action: { type: string, maxLength: 2000 }
         expected: { type: string, maxLength: 2000 }
+    SpecializedKind:
+      type: string
+      enum: [performance, security, accessibility, compatibility, recovery, usability]
+    SpecializedOutcome:
+      type: string
+      enum: [passed, failed, inconclusive, not_run, not_applicable, import_error]
+    ReportNumber:
+      type: [number, "null"]
+      minimum: 0
+    PerformanceDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        subtype: { type: string, enum: ["", load, stress, spike, soak, volume, scalability] }
+        scenario: { type: string }
+        loadConfiguration: { type: string }
+        dataConfiguration: { type: string }
+        resources: { type: string, description: Required for a conclusive scalability result. }
+        durationSeconds: { $ref: "#/components/schemas/ReportNumber" }
+        windowSeconds: { $ref: "#/components/schemas/ReportNumber" }
+        p95Ms: { $ref: "#/components/schemas/ReportNumber" }
+        p99Ms: { $ref: "#/components/schemas/ReportNumber" }
+        throughputPerSecond: { $ref: "#/components/schemas/ReportNumber" }
+        errorRatePercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+        thresholdsRecordedAt: { type: [string, "null"], format: date-time, description: "Source-declared threshold timestamp; must not follow execution start for passed. Not independent proof of pre-registration." }
+        thresholds:
+          type: object
+          additionalProperties: false
+          properties:
+            p95MaxMs: { $ref: "#/components/schemas/ReportNumber" }
+            p99MaxMs: { $ref: "#/components/schemas/ReportNumber" }
+            throughputMinPerSecond: { $ref: "#/components/schemas/ReportNumber" }
+            errorRateMaxPercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+    ReportFinding:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        severity: { type: string, description: "Severity as reported by the source, not silently remapped." }
+        location: { type: string }
+        summary: { type: string }
+        evidence: { type: string }
+        status: { type: string, enum: [open, resolved, accepted_risk, not_retested] }
+        retested: { type: boolean }
+    FindingsDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        standard: { type: string }
+        standardVersion: { type: string }
+        method: { type: string, enum: ["", manual, automated, combined] }
+        coverage: { type: [array, "null"], maxItems: 200, items: { type: string } }
+        assessmentComplete: { type: boolean }
+        findings: { type: [array, "null"], maxItems: 200, items: { $ref: "#/components/schemas/ReportFinding" } }
+    CompatibilityDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        matrix:
+          type: [array, "null"]
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              browser: { type: string }
+              browserVersion: { type: string }
+              os: { type: string }
+              osVersion: { type: string }
+              device: { type: string }
+              status: { type: string, enum: ["", not_run, passed, failed, blocked, skipped] }
+              evidence: { type: string }
+    RecoveryDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        fault: { type: string }
+        initialConditions: { type: string }
+        recoveryObjective: { type: string }
+        targetRecoverySeconds: { $ref: "#/components/schemas/ReportNumber" }
+        actualRecoverySeconds: { $ref: "#/components/schemas/ReportNumber" }
+        allowedDataLossBytes: { type: [integer, "null"], minimum: 0 }
+        actualDataLossBytes: { type: [integer, "null"], minimum: 0 }
+        evidence: { type: string }
+    UsabilityDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        method: { type: string }
+        participants: { type: [integer, "null"], minimum: 0 }
+        conclusion: { type: string }
+        tasks:
+          type: [array, "null"]
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              task: { type: string }
+              successCriterion: { type: string }
+              observation: { type: string }
+              conclusion: { type: string }
+              status: { type: string, enum: ["", passed, failed, inconclusive] }
+    SpecializedInput:
+      allOf:
+        - { $ref: "#/components/schemas/SpecializedEnvelope" }
+        - type: object
+          properties:
+            details: { type: object }
+    SpecializedEnvelope:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, idempotencyKey, kind, title, environment, applicationVersion, source, toolVersion, adapterVersion]
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+        testCaseId: { type: string, description: "Optional case of this project, empty when absent." }
+        retestOf: { type: string, description: Optional earlier report of same project/kind/case. }
+        kind: { $ref: "#/components/schemas/SpecializedKind" }
+        title: { type: string, minLength: 1, maxLength: 500 }
+        state: { type: string, enum: [completed, not_run, not_applicable, import_error], default: completed }
+        notes: { type: string, maxLength: 4000, description: Required when not completed. }
+        environment: { type: string, minLength: 1, maxLength: 128 }
+        applicationVersion: { type: string, minLength: 1, maxLength: 128 }
+        source: { type: string, minLength: 1, maxLength: 128 }
+        toolVersion: { type: string, minLength: 1, maxLength: 128 }
+        adapterVersion: { type: string, minLength: 1, maxLength: 128 }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        originalReport: { type: string, maxLength: 524288, description: "Required nonempty UTF-8 original text for completed/import-error results; response leaves empty, download separately. Limits are bytes." }
+        details: { type: [object, "null"], description: "Typed by kind on writes; 64 KiB max, strings 16000 bytes max, arrays 200 items max. Null only in list summaries." }
+      allOf:
+        - if: { properties: { kind: { const: performance } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/PerformanceDetails" }] } } }
+        - if: { properties: { kind: { enum: [security, accessibility] } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/FindingsDetails" }] } } }
+        - if: { properties: { kind: { const: compatibility } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/CompatibilityDetails" }] } } }
+        - if: { properties: { kind: { const: recovery } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/RecoveryDetails" }] } } }
+        - if: { properties: { kind: { const: usability } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/UsabilityDetails" }] } } }
+    SpecializedResult:
+      type: object
+      required: [id, kind, title, outcome, reasons, input, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/SpecializedKind" }
+        title: { type: string }
+        outcome: { $ref: "#/components/schemas/SpecializedOutcome" }
+        reasons: { type: array, items: { type: string } }
+        input: { $ref: "#/components/schemas/SpecializedEnvelope" }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     CaseTaxonomy:
       type: object
       additionalProperties: false

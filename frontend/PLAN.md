@@ -25,13 +25,19 @@ draft was removed on 2026-09-18.
 
 ### Active Slice (2026-10-15)
 
-- Owner requested implementation of the remaining product scope before a later
-  bug-fix pass. Start GĐ3 now: atomic multi-dimensional case taxonomy, server
-  filters, create/edit UI, plan search, CSV round-trip and execution snapshots.
-  No inferred framework classification and no new release-gate behavior.
-  GĐ1 deployment and team/pilot acceptance remain independent pending gates.
+- Continuing code-resolvable GĐ4: provider-neutral structured results for
+  Performance, Security, Accessibility, Compatibility, Recovery and Usability.
+  Append-only records, bounded original text report, source/tool/adapter
+  versions, server-computed outcome, idempotency and scoped retest links.
+  New project GET/POST/detail/original-report routes; tester entry/import/view
+  UI. No runner, external URL fetching, vendor parser or automatic release-gate
+  integration is implied. Human/host acceptance remains independent.
 
-Implementation is pushed through `76f6df0`. The GĐ2 code slices below are
+- GĐ3 taxonomy is implemented. GĐ1 deployment and team/pilot acceptance remain
+  independent pending gates. Track work in PLAN/SPEC plus GitHub Issues as
+  requested by the owner, with links to avoid divergent scope/status.
+
+Implementation is pushed through `86cb699`. The GĐ2/GĐ3 code slices below are
 implemented and locally verified; the current work is closing CI and deployment
 gates, not rebuilding those features. Team acceptance remains separate.
 
@@ -45,8 +51,8 @@ gates, not rebuilding those features. Team acceptance remains separate.
 | New complete-stack E2E | verified in CI | Run #42 / 38384680965 on 76f6df0 passed live-check, complete manual workflow and bulk/export through Caddy and the real API; memory-store CI is not durable deployment acceptance |
 | GĐ1 Windows deployment | in_progress | Docker stack too heavy for this laptop (Docker Desktop stopped 14-10); deployment test moves to another machine via `server/atp.sh`. Vercel projects cannot host the backend (needs Postgres, worker, object storage) |
 | GĐ2 team acceptance | planned | Tester team must complete requirement -> case -> plan -> execution -> bug -> retest -> release and record feedback |
-| GĐ3 taxonomy | implemented; locally verified | Migration 0033, case create/edit/bulk, list/export filters, plan search, CSV and immutable execution snapshots; new commit CI pending |
-| GĐ4 specialized results | planned | Next contract: Performance scenarios/thresholds/results and original reports; taxonomy labels alone do not provide metrics or a load engine |
+| GĐ3 taxonomy | implemented; locally verified | Migration 0033, case create/edit/bulk, filters, plan search, CSV and immutable snapshots; CI 38707032612 failed on expired ingest fixture, E2E skipped |
+| GĐ4 specialized results | implemented; locally verified, CI pending | Migration 0034, ATP report v1 for six groups, append-only records, assessment/retest/import/download UI; Postgres/API/arch, frontend tests/build, OpenAPI and Chrome checks passed locally |
 | GĐ5 pilot / GĐ6 VPS | planned | Real pilot cycles, server load/24-72h soak, then staging/migration/rollback on VPS |
 
 Latest verified CI: [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
@@ -54,26 +60,73 @@ on `76f6df0`: frontend, backend, reporter and E2E all passed. Backend includes
 govulncheck, real Postgres/S3 tests, Docker build, compose, promtool and OpenAPI.
 E2E logs confirm both manual workflow and selected/full-filter export.
 
-Current implementation: `server/atp.sh doctor [--pilot]`, read-only deployment
+Current source work: close GĐ4 CI and the expired ingest fixture regression.
+CI 38707032612 on 86cb699: server/frontend/reporter passed; backend failed
+TestIngestEndToEnd because its September 14 finish left the 30-day window on
+October 15, so E2E was skipped. Reproduced locally before the fix; process-fixed
+relative timestamps keep replay payloads stable. Ingest tests passed after the
+fix; production flaky-window behavior is unchanged.
+Owner selected both PLAN/SPEC and GitHub Issues for work tracking.
+
+| Issue | Work | Status / Dependency |
+| --- | --- | --- |
+| [#3](https://github.com/tvinhthanh/test-system/issues/3) | GĐ4 and ingest CI regression | in_progress; local verification passed, new CI pending |
+| [#4](https://github.com/tvinhthanh/test-system/issues/4) | Durable demo host / restart / backup-restore | needs host; after #3 |
+| [#5](https://github.com/tvinhthanh/test-system/issues/5) | Tester workflow acceptance | needs team and #4 |
+| [#6](https://github.com/tvinhthanh/test-system/issues/6) | Pilot load / soak / security | needs #4 and real pilot workload/team |
+| [#7](https://github.com/tvinhthanh/test-system/issues/7) | VPS staging / migration / rollback | after #5 and #6 |
+
+All issues are open with needs-triage. Passing local checks does not close a
+host/team/CI gate; update issue evidence and this plan together.
+The deployment tooling already includes `server/atp.sh doctor [--pilot]`, read-only deployment
 preflight with fake-Docker regression tests and `server/README.md` acceptance
 checklist. On this laptop, --pilot correctly fails: Docker engine unavailable,
 memory artifacts and APP_ENV=dev. No deployment acceptance is claimed.
 
 #### Next Actions
 
-1. Validate the new read-only deployment doctor in CI, without changing the
-   now-green application gates. Security and complete-stack E2E are verified
-   on 76f6df0, not waiting on the old failing run anymore.
+1. Commit/push the locally verified GĐ4 slice and ingest fixture fix; verify a
+   new full CI run. E2E now includes live-specialized-results.mjs. Keep group
+   outcomes separate from automation Run/Attempt and release gates.
+2. Add operational code/tests that can be run independently of the chosen host;
+   record real deployment/pilot acceptance only when actually performed.
+
+Remaining external acceptance:
+
+1. Deployment doctor passed its CI job on 86cb699. Real host acceptance is
+   separate from these simulated preflight checks.
 2. Finish demo deployment on the chosen host with durable artifacts, restart verification,
    backup outside the laptop and stack restore. Do not expose the native
    trust-auth/memory-store demo as the pilot deployment. Use server/README.md
    to record host-specific evidence; doctor is not deployment certification.
 3. Run team acceptance for GĐ2 and record gaps. Per the owner's latest request,
-   product source work proceeds in parallel: GĐ3 implemented; next is the
-   Performance result contract in GĐ4. This does not waive deployment, security
+   product source work proceeds in parallel: GĐ3 and GĐ4 are locally verified.
+   This does not waive deployment, security
    or human acceptance requirements.
 
 No percentage or completion date is assigned to external acceptance gates.
+
+#### GĐ4 Verification In Progress (2026-10-15)
+
+| Check | Current Result |
+| --- | --- |
+| Domain assessment tests | PASS locally: six kinds, missing data, threshold breach, post-run thresholds, findings/retest and recovery/data loss |
+| Postgres persistence tests | PASS locally: original text, idempotent replay/conflict, tenant/case/retest isolation, cursor binding/paging and purge |
+| API/architecture tests | PASS in the latest local run, including the expanded tenant walk |
+| Frontend typecheck/build | PASS; initial JS 54.9 KiB gzip, 27 lazy modules |
+| OpenAPI lint | PASS; 7 pre-existing warnings; summary details=null distinct from typed write details |
+| Dedicated frontend tests | 10 new tests passed; full suite 103 passed including 1 unrelated local fixture test (102 in scoped commit) |
+| Real Chrome/API | PASS: six forms, six typed assessments, missing data inconclusive, retest/not_run, ATP import/replay/conflict, original text, filters and 1440/768/360px; synthetic fixtures only, no page errors/overflow/request loop |
+| Restore drill | PASS with RESTORE_TEST=1 on real PostgreSQL after migration 0034; not host/pilot acceptance |
+| Broad backend regression | go test ./... and go vet ./... passed locally with PostgreSQL; opt-in S3/load/long soak are not host acceptance |
+| Security / existing workflows | npm audit 0; govulncheck 0 called vulnerabilities (18 uncalled module advisories); real Chrome manual-history and bulk/export scripts passed again |
+| CI / deployment | GĐ4 CI pending; migration 0034 applied to loopback demo and API rebuilt. Memory artifacts remain demo-only |
+
+Scope is manual entry plus a provider-neutral ATP structured JSON report v1.
+It does not parse arbitrary k6/JMeter/Locust/SARIF/axe files, execute tests,
+prove source-declared pre-run timestamps, grant compliance certification or
+silently make these reports release-gate evidence. Vendor parsers need a named
+source contract and actual fixtures.
 
 #### Completed And Verified
 

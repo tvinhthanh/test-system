@@ -237,6 +237,7 @@ jobs:
           node scripts/live-check.mjs ../reporter/playwright/node_modules/playwright
           node scripts/live-manual-history.mjs
           node scripts/live-case-bulk.mjs
+          node scripts/live-specialized-results.mjs
       - name: Logs on failure
         if: failure()
         working-directory: backend
@@ -250,6 +251,7 @@ jobs:
             frontend/test-results/manual-*.png
             frontend/test-results/case-context-*.png
             frontend/test-results/case-bulk-*.png
+            frontend/test-results/specialized-*.png
           if-no-files-found: ignore
       - name: Stack down
         if: always()

@@ -36,6 +36,10 @@ POST /v1/projects/{projectId}/identities/{identityId}/merge
 POST /v1/projects/{projectId}/identities/{identityId}/undo-merge
 POST /v1/projects/{projectId}/identities/{identityId}/split
 GET /v1/projects/{projectId}/suites
+GET /v1/projects/{projectId}/specialized-results
+POST /v1/projects/{projectId}/specialized-results
+GET /v1/projects/{projectId}/specialized-results/{specializedId}
+GET /v1/projects/{projectId}/specialized-results/{specializedId}/original
 POST /v1/projects/{projectId}/suites
 GET /v1/projects/{projectId}/requirements
 POST /v1/projects/{projectId}/requirements

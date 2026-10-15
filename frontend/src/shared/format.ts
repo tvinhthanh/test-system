@@ -41,6 +41,7 @@ export function tone(value: string, flaky = 0) {
   if (
     [
       "failed",
+      "import_error",
       "error",
       "timed_out",
       "interrupted",
@@ -56,7 +57,8 @@ export function tone(value: string, flaky = 0) {
     )
   )
     return "success";
-  if (["warn", "automation_candidate"].includes(value)) return "warning";
+  if (["warn", "automation_candidate", "inconclusive"].includes(value))
+    return "warning";
   if (["running", "queued", "active", "open"].includes(value)) return "info";
   return "neutral";
 }

@@ -145,10 +145,16 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Org A's ids by path parameter name. A parameter this map does not
-	// know is a route the walk cannot exercise — fail loudly, do not skip.
+	specializedBody := map[string]any{"schemaVersion": 1, "idempotencyKey": "walk-specialized", "kind": "recovery", "title": "Walk recovery", "state": "not_run", "notes": "Not executed", "environment": "test", "applicationVersion": "1", "source": "manual", "toolVersion": "1", "adapterVersion": "atp-v1", "details": map[string]any{}}
+	specialized := a.user.post(baseA+"/specialized-results", specializedBody)
+	if specialized.code != 201 {
+		t.Fatalf("seed specialized report: %d %s", specialized.code, specialized.raw)
+	}
+	// Org A's ids by path parameter name. An unknown parameter is a route
+	// the walk cannot exercise: fail loudly, do not skip.
 	foreign := map[string]string{
-		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
+		"specializedId": specialized.body["id"].(string),
+		"projectId":     string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
 		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
 		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
 		"userId":      a.userID,
@@ -168,6 +174,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge": map[string]any{},
 		"POST /v1/projects/{projectId}/identities/{identityId}/split":      map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
 		// Test Management (P2). Valid bodies, so only the tenant check can refuse.
+		"POST /v1/projects/{projectId}/specialized-results":            specializedBody,
 		"POST /v1/projects/{projectId}/suites":                         map[string]any{"name": "Walk"},
 		"POST /v1/projects/{projectId}/requirements":                   map[string]any{"title": "Walk"},
 		"PATCH /v1/projects/{projectId}/requirements/{requirementId}":  map[string]any{"title": "Walk"},

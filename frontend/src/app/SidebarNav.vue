@@ -73,6 +73,7 @@ const items = computed(() =>
           active:
             route.path.includes("/cases") ||
             route.path.includes("/requirements") ||
+            route.path.includes("/specialized-results") ||
             route.path.includes("/plans") ||
             route.path.includes("/releases"),
         },
