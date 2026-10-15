@@ -361,6 +361,16 @@ govulncheck pin v1.1.4 → v1.9.0. Local với go1.26.9: `govulncheck ./...` →
 được gọi** (18 advisory nằm trong module require nhưng code không gọi), build/vet/
 gofmt/unit sạch.
 
+**Đối chiếu CI ngày 15-10:** [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
+trên `76f6df0` đã completed/success. Backend pass govulncheck, test Postgres/S3,
+Docker build, Compose config, promtool và OpenAPI; frontend/reporter/E2E đều
+pass. Log E2E có cả `live-manual-history.mjs` và `live-case-bulk.mjs` thành công.
+Scan lỗi cũ có **9 advisory stdlib + 1 x/text**, tổng 10, không phải 10 stdlib
+cộng thêm 1 module. CI dùng memory artifacts nên không thay bằng chứng restart,
+backup/restore database + artifact trên host demo/pilot. Preflight chỉ đọc mới
+ở `server/atp.sh doctor --pilot` phát hiện Docker engine ngừng/memory/dev trên
+laptop; fake-Docker test của lệnh không phải kiểm chứng deployment.
+
 **Restore drill §11.5 / §14.3 hàng cuối ✅ 17-09-2026 — "backup chưa restore thử
 = chưa có backup".** `test/restore/` (`RESTORE_TEST=1 TEST_DATABASE_URL=… go test
 -v ./test/restore/`, ≈ 10 s, cần `pg_dump`/`pg_restore` — `PG_BIN` hoặc PATH):

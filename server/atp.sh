@@ -10,6 +10,7 @@
 #   ./server/atp.sh up              build the dashboard + images, start everything
 #   ./server/atp.sh seed            first organization, project, owner account, CI token
 #   ./server/atp.sh status          what runs, and is the api healthy
+#   ./server/atp.sh doctor [--pilot] read-only deployment prerequisites
 #
 # Everything else:
 #   down | restart | logs [service] | update
@@ -166,6 +167,70 @@ cmd_status() {
 	fi
 }
 
+cmd_doctor() {
+	local pilot=false failures=0 daemon=false value key
+	case "${1:-}" in
+		"") [ "$#" -eq 0 ] || die "usage: $0 doctor [--pilot]" ;;
+		--pilot) [ "$#" -eq 1 ] || die "usage: $0 doctor [--pilot]"; pilot=true ;;
+		*) die "usage: $0 doctor [--pilot]" ;;
+	esac
+	say "read-only deployment checks (no containers started or config changed)"
+	if ! command -v docker >/dev/null 2>&1; then
+		warn "FAIL: docker is not installed"; failures=$((failures + 1))
+	else
+		if docker compose version >/dev/null 2>&1; then say "PASS: Docker Compose available"
+		else warn "FAIL: Docker Compose v2 is unavailable"; failures=$((failures + 1)); fi
+		if value=$(docker info --format '{{.OSType}}' 2>/dev/null); then
+			value=${value//$'\r'/}
+			if [ "$value" = linux ]; then daemon=true; say "PASS: Linux Docker engine reachable"
+			else warn "FAIL: switch Docker Desktop to Linux containers"; failures=$((failures + 1)); fi
+		else warn "FAIL: Docker engine unreachable; start Docker Desktop on the deployment host"; failures=$((failures + 1)); fi
+	fi
+	if ! command -v curl >/dev/null 2>&1; then
+		warn "FAIL: curl is required for deployment health checks"; failures=$((failures + 1))
+	fi
+	if [ ! -f "$ENV_FILE" ]; then
+		warn "FAIL: deployment config missing; run $0 init on the deployment host"
+		failures=$((failures + 1))
+	else
+		for key in POSTGRES_PASSWORD TOKEN_PEPPER DOMAIN DASHBOARD_ORIGINS; do
+			value=$(env_get "$key" || true)
+			case "$value" in
+				""|*change-me*|*'<account>'*) warn "FAIL: $key is missing or still a placeholder"; failures=$((failures + 1)) ;;
+			esac
+		done
+		value=$(env_get TOKEN_PEPPER || true)
+		if [ "${#value}" -lt 32 ]; then warn "FAIL: TOKEN_PEPPER must contain at least 32 bytes"; failures=$((failures + 1)); fi
+		if [ "$(env_get OBJSTORE || true)" = s3 ]; then
+			for key in OBJSTORE_ENDPOINT OBJSTORE_BUCKET OBJSTORE_ACCESS_KEY OBJSTORE_SECRET_KEY; do
+				value=$(env_get "$key" || true)
+				case "$value" in
+					""|*change-me*|*'<'*|*'>'*) warn "FAIL: $key is missing or still a placeholder"; failures=$((failures + 1)) ;;
+				esac
+			done
+			say "S3 storage configured; bucket access and restart persistence still require a real test"
+		elif [ "$(env_get OBJSTORE || true)" = memory ]; then
+			if $pilot; then warn "FAIL: pilot requires durable S3-compatible artifact storage"; failures=$((failures + 1))
+			else warn "Memory artifacts disappear on API restart; this config is only for trying the app"; fi
+		else warn "FAIL: OBJSTORE must be memory or s3"; failures=$((failures + 1)); fi
+		if $pilot; then
+			case "$(env_get APP_ENV || true)" in
+				staging|prod) ;;
+				*) warn "FAIL: pilot requires APP_ENV=staging or prod"; failures=$((failures + 1)) ;;
+			esac
+			if [ "$(env_get COOKIE_SECURE || true)" != true ]; then warn "FAIL: pilot requires COOKIE_SECURE=true"; failures=$((failures + 1)); fi
+		fi
+		if $daemon; then
+			# Never print compose's resolved config: it contains credentials.
+			if dc config --quiet >/dev/null 2>&1; then say "PASS: Compose configuration validates"
+			else warn "FAIL: Compose configuration invalid; review deploy/.env and compose.yml locally"; failures=$((failures + 1)); fi
+		fi
+	fi
+	warn "Manual acceptance still required: trusted HTTPS/LAN, bucket access, restart persistence, off-host DB/artifact backup and restore"
+	if [ "$failures" -ne 0 ]; then warn "$failures prerequisite check(s) failed"; return 1; fi
+	say "prerequisites passed; this is not pilot or production acceptance"
+}
+
 cmd_seed() {
 	need_env
 	local org ws project email password
@@ -265,6 +330,7 @@ case "${1:-help}" in
 	down | stop) need_env; dc down ;;
 	restart) need_env; dc up -d; wait_healthy ;;
 	status | ps) cmd_status ;;
+	doctor) shift; cmd_doctor "$@" ;;
 	logs) need_env; shift; dc logs -f --tail=200 "$@" ;;
 	seed) cmd_seed ;;
 	token) shift; cmd_token "$@" ;;

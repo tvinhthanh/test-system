@@ -25,6 +25,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read-only deployment preflight regression tests
+        run: |
+          bash -n server/atp.sh
+          bash server/tests/doctor.sh
+
   backend:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -172,7 +182,7 @@ jobs:
   e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    needs: [backend, frontend, reporter]
+    needs: [backend, frontend, reporter, server]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

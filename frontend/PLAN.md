@@ -23,33 +23,48 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
-### Active Slice (2026-10-13)
+### Active Slice (2026-10-15)
 
-- GĐ2 acceptance harness: extend live-manual-history.mjs to create requirement,
-  case and plan via UI, link coverage, execute/retest with original evidence,
-  then evaluate and explicitly block a release with no automation evidence.
-  This is technical workflow verification, not human team acceptance or GĐ1.
+Implementation is pushed through `76f6df0`. The GĐ2 code slices below are
+implemented and locally verified; the current work is closing CI and deployment
+gates, not rebuilding those features. Team acceptance remains separate.
 
-- Continuing GĐ2 bulk/export: selected-case metadata updates in batches of 100,
-  mandatory per-case versions, per-item results and transactional audit; CSV
-  export of selected cases or the full server filter (5000 cases / 8 MiB cap).
-- New routes: POST test-cases/bulk, GET test-cases/export. Export uses Go CSV,
-  spreadsheet-safe text and steps_json for lossless step definitions; imports
-  recognize the format. Permissions, stale partial success and live UI verified.
+| Workstream | Status | Evidence / Remaining Work |
+| --- | --- | --- |
+| Reporter retry identity and response-body timeout | verified locally; CI reporter passed | Regression tests and reporter job on 96607e6 |
+| Frontend dependencies / clean install | verified in CI | npm ci, unit tests, build/bundle gate and audit passed on 96607e6 |
+| GĐ2 daily tester workflow | implemented; technically verified locally | Snapshot, step results, bug URL/retest/history, fixed plan scope, assignment/status, context/audit, bulk and CSV; real UI scripts passed |
+| Backend integration | verified in CI | gofmt, go vet and full go test with real Postgres/S3 passed on 96607e6 |
+| Backend security gate | verified in CI | govulncheck failed on 96607e6 (9 stdlib advisories and 1 x/text advisory); 7347b0e moved to go1.26.9 + x/text 0.41 and scanner v1.9.0; backend job green on run #42 |
+| New complete-stack E2E | verified in CI | Run #42 / 38384680965 on 76f6df0 passed live-check, complete manual workflow and bulk/export through Caddy and the real API; memory-store CI is not durable deployment acceptance |
+| GĐ1 Windows deployment | in_progress | Docker stack too heavy for this laptop (Docker Desktop stopped 14-10); deployment test moves to another machine via `server/atp.sh`. Vercel projects cannot host the backend (needs Postgres, worker, object storage) |
+| GĐ2 team acceptance | planned | Tester team must complete requirement -> case -> plan -> execution -> bug -> retest -> release and record feedback |
+| GĐ3 taxonomy / GĐ4 specialized results | planned | Not implemented by the current slices; follow SPEC 6.8.7 after GĐ1/GĐ2 acceptance |
+| GĐ5 pilot / GĐ6 VPS | planned | Real pilot cycles, server load/24-72h soak, then staging/migration/rollback on VPS |
 
-- Continuing SPEC GĐ2: case preconditions/test data in create/edit/import and
-  execution snapshots; transactional case-change audit, bounded case history,
-  and optimistic case editing. Existing case routes only.
+Latest verified CI: [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
+on `76f6df0`: frontend, backend, reporter and E2E all passed. Backend includes
+govulncheck, real Postgres/S3 tests, Docker build, compose, promtool and OpenAPI.
+E2E logs confirm both manual workflow and selected/full-filter export.
 
-- Continuing GĐ2: fixed plan membership, project-authorized assignment by email,
-  explicit not_run/in_progress/completed workflow, server-side scope validation,
-  concurrent-edit protection and audit. Extend existing plan POST/GET/PATCH.
+Current implementation: `server/atp.sh doctor [--pilot]`, read-only deployment
+preflight with fake-Docker regression tests and `server/README.md` acceptance
+checklist. On this laptop, --pilot correctly fails: Docker engine unavailable,
+memory artifacts and APP_ENV=dev. No deployment acceptance is claimed.
 
-- SPEC 4.11 GĐ2: immutable manual execution case snapshots, bounded execution
-  history with previous evidence, explicit retest links, bug URLs and step results.
-- Extend existing plan GET and execution POST contracts; no new HTTP routes.
-- Verify real Postgres migration/service/API tests, frontend decoding/rendering,
-  unit suite and build. Full demo/E2E and the other GĐ2 features remain pending.
+#### Next Actions
+
+1. Validate the new read-only deployment doctor in CI, without changing the
+   now-green application gates. Security and complete-stack E2E are verified
+   on 76f6df0, not waiting on the old failing run anymore.
+2. Finish demo deployment on the chosen host with durable artifacts, restart verification,
+   backup outside the laptop and stack restore. Do not expose the native
+   trust-auth/memory-store demo as the pilot deployment. Use server/README.md
+   to record host-specific evidence; doctor is not deployment certification.
+3. Run team acceptance for GĐ2, record issues and close critical gaps. Then
+   start GĐ3 taxonomy, followed by the Performance result contract in GĐ4.
+
+No percentage or completion date is assigned to external acceptance gates.
 
 #### Completed And Verified
 
@@ -103,9 +118,8 @@ draft was removed on 2026-09-18.
   Real Chrome script live-case-bulk.mjs verifies retained conflict selection/
   report, one confirmed success, real selected/full-filter downloads and no
   overflow at 1440/768/360px. Page header actions now wrap on narrow screens.
-  npm audit --audit-level=low: 0 vulnerabilities; fixes remain local, not pushed.
-- Next: team acceptance of the complete GĐ2 workflow; complete GĐ1 on the
-  intended durable Docker deployment. Native loopback demo uses memory artifacts.
+  npm audit --audit-level=low: 0 vulnerabilities. Fixes were subsequently pushed
+  and the frontend audit passed in CI on 96607e6.
 - Extended live-manual-history.mjs passed with requirement/case/plan created
   through UI, coverage linking, assignment, failure/bug/evidence, context edits,
   retest and persisted named release decision. A unique branch without an
@@ -119,9 +133,14 @@ draft was removed on 2026-09-18.
   metadata restored from a fresh npm-generated lock without unrelated version
   updates. Clean npm ci in an isolated directory passed, audit 0. Committed
   frontend tests (excluding the unrelated local fixture test): 89 passed;
-  typecheck/build/bundle gate passed. Full new GitHub E2E result still pending.
-- GitHub run 38369144174 (2123c14): frontend job passed including clean npm ci,
-  tests, build and audit; backend gofmt/go vet passed, integration running.
+  typecheck/build/bundle gate passed. New GitHub E2E was skipped by the backend
+  govulncheck failure; local script success is not full-stack CI acceptance.
+- Historical GitHub run 38369351402 (96607e6): frontend and reporter passed;
+  backend formatting, vet and real Postgres/S3 tests passed, govulncheck failed.
+  Remaining backend checks and E2E were skipped. Superseded by green run #42.
+- 15-10 verification: authenticated GitHub job/log reads confirm run #42 is
+  fully green, including both new UI scripts. Fresh local scan with Go 1.26.9
+  also reports 0 called vulnerabilities (18 uncalled module advisories remain).
 
 - Phase: **P1-min UI complete** — sign-in, projects, runs, run detail,
   failure detail with attempts / artifacts (screenshots and video inline,
