@@ -27,6 +27,14 @@ import ErrorNote from "./ErrorNote.vue";
 import TmTabs from "./TmTabs.vue";
 import CaseContextEditor from "./CaseContextEditor.vue";
 import CaseBulkTools from "./CaseBulkTools.vue";
+import CaseTaxonomyEditor from "./CaseTaxonomyEditor.vue";
+import TaxonomyFilters from "./TaxonomyFilters.vue";
+import {
+  copyTaxonomy,
+  taxonomyFilterOptions,
+  taxonomySummary,
+  type TaxonomyFilter,
+} from "./taxonomy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,8 +52,26 @@ const q = computed(() => String(route.query.q ?? ""));
 const suite = computed(() => String(route.query.suite ?? ""));
 const automation = computed(() => String(route.query.automation ?? ""));
 const critical = computed(() => String(route.query.critical ?? ""));
+const taxonomyFilters = computed<TaxonomyFilter>(() =>
+  Object.fromEntries(
+    Object.keys(taxonomyFilterOptions).map((key) => [
+      key,
+      String(route.query[key] ?? ""),
+    ]),
+  ),
+);
+const clearTaxonomyFilters = Object.fromEntries(
+  Object.keys(taxonomyFilterOptions).map((key) => [key, ""]),
+);
 const filtered = computed(
-  () => !!(q.value || suite.value || automation.value || critical.value),
+  () =>
+    !!(
+      q.value ||
+      suite.value ||
+      automation.value ||
+      critical.value ||
+      Object.values(taxonomyFilters.value).some(Boolean)
+    ),
 );
 function setFilter(patch: Record<string, string>) {
   const query = { ...route.query, ...patch };
@@ -87,6 +113,7 @@ function refresh() {
     testmgmt.testCases(
       project.value,
       {
+        ...taxonomyFilters.value,
         q: q.value,
         suite: suite.value,
         automation: automation.value as never,
@@ -100,7 +127,14 @@ function refreshSuites() {
   return suites.load((signal) => testmgmt.suites(project.value, signal));
 }
 watch(
-  () => [project.value, q.value, suite.value, automation.value, critical.value],
+  () => [
+    project.value,
+    q.value,
+    suite.value,
+    automation.value,
+    critical.value,
+    JSON.stringify(taxonomyFilters.value),
+  ],
   () => {
     selectedIds.value = [];
     void refresh();
@@ -114,6 +148,7 @@ watch(project, refreshSuites, { immediate: true });
 // Create + import live in two collapsible panels; both end in a refresh.
 const panel = ref<"" | "new" | "suite" | "import">("");
 const draft = ref({
+  taxonomy: copyTaxonomy(),
   preconditions: "",
   testData: "",
   title: "",
@@ -131,6 +166,7 @@ async function create() {
   );
   if (created) {
     draft.value = {
+      taxonomy: copyTaxonomy(),
       preconditions: "",
       testData: "",
       title: "",
@@ -279,6 +315,7 @@ const label = (s: string) => s.replaceAll("_", " ");
     <Button type="submit" size="sm" :disabled="mutation.busy.value !== null"
       >Create</Button
     >
+    <CaseTaxonomyEditor v-model="draft.taxonomy" class="md:col-span-5" />
     <CaseContextEditor
       v-model:preconditions="draft.preconditions"
       v-model:test-data="draft.testData"
@@ -426,17 +463,29 @@ const label = (s: string) => s.replaceAll("_", " ");
       type="button"
       @click="
         search = '';
-        setFilter({ q: '', suite: '', automation: '', critical: '' });
+        setFilter({
+          q: '',
+          suite: '',
+          automation: '',
+          critical: '',
+          ...clearTaxonomyFilters,
+        });
       "
       ><ListFilter />Clear</Button
     >
   </form>
 
+  <TaxonomyFilters
+    :model-value="taxonomyFilters"
+    :disabled="bulkBusy"
+    @change="setFilter"
+  />
   <CaseBulkTools
     :key="project"
     :project="project"
     :selected="selectedCases"
     :filter="{
+      ...taxonomyFilters,
       q,
       suite,
       automation: automation as never,
@@ -531,6 +580,9 @@ const label = (s: string) => s.replaceAll("_", " ");
                 }}</template
               >
             </span>
+            <span class="text-muted-foreground block truncate text-xs">{{
+              taxonomySummary(c.taxonomy)
+            }}</span>
           </span>
           <Badge variant="outline" class="font-mono uppercase">{{
             c.priority

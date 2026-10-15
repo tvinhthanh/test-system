@@ -1,5 +1,14 @@
 import type { ApiClient } from "../../core/api/client";
 import * as d from "../../core/api/decode";
+import {
+  levels,
+  purposes,
+  usageTags,
+  executionModes,
+  performanceTypes,
+  copyTaxonomy,
+  type Taxonomy,
+} from "./taxonomy";
 
 // Test Management Plane (SPEC §6.8, P2). The repository owns every path and
 // the field-by-field decoding of the contract in API_CONTRACT.md ("Test
@@ -57,6 +66,7 @@ export interface AutomationLink {
   createdAt: string;
 }
 export interface TestCase {
+  taxonomy?: Taxonomy;
   preconditions: string;
   testData: string;
   audit: CaseChange[];
@@ -110,6 +120,7 @@ export interface Execution {
   retestOf: string;
 }
 export interface CaseSnapshot {
+  taxonomy?: Taxonomy | null;
   preconditions: string | null;
   testData: string | null;
   title: string;
@@ -230,10 +241,30 @@ function link(value: unknown): AutomationLink {
     createdAt: d.date(x.createdAt),
   };
 }
+function taxonomy(value: unknown): Taxonomy {
+  if (value === undefined) return copyTaxonomy();
+  const x = d.record(value);
+  const read = <T extends string>(value: unknown, options: readonly T[]) => {
+    const values = d.array(value, (v) => oneOf(v, options), options.length);
+    if (new Set(values).size !== values.length) return d.invalid();
+    return values;
+  };
+  const out: Taxonomy = {
+    level: oneOf(x.level, ["", ...levels]),
+    purposes: read(x.purposes, purposes),
+    tags: read(x.tags, usageTags),
+    executionModes: read(x.executionModes, executionModes),
+    performanceTypes: read(x.performanceTypes, performanceTypes),
+  };
+  if (out.performanceTypes.length && !out.purposes.includes("performance"))
+    return d.invalid();
+  return out;
+}
 function testCase(value: unknown): TestCase {
   const x = d.record(value);
   return {
     preconditions: optionalString(x.preconditions),
+    taxonomy: taxonomy(x.taxonomy),
     testData: optionalString(x.testData),
     audit: d.array(x.audit ?? [], caseChange, 50),
     auditTruncated:
@@ -289,6 +320,7 @@ function execution(value: unknown): Execution {
 function caseSnapshot(value: unknown): CaseSnapshot {
   const x = d.record(value);
   return {
+    taxonomy: x.taxonomy == null ? null : taxonomy(x.taxonomy),
     preconditions: x.preconditions == null ? null : d.string(x.preconditions),
     testData: x.testData == null ? null : d.string(x.testData),
     title: d.string(x.title),
@@ -429,12 +461,18 @@ function params(values: Record<string, string>) {
 }
 
 export interface CaseFilter {
+  level?: string;
+  purpose?: string;
+  tag?: string;
+  executionMode?: string;
+  performanceType?: string;
   suite?: string;
   automation?: AutomationStatus | "";
   critical?: "" | "true" | "false";
   q?: string;
 }
 export interface TestCaseInput {
+  taxonomy?: Taxonomy;
   preconditions?: string;
   testData?: string;
   expectedUpdatedAt?: string;
@@ -449,7 +487,7 @@ export interface TestCaseInput {
 }
 export type BulkCasePatch = Pick<
   TestCaseInput,
-  "priority" | "isCritical" | "suiteId" | "automationStatus"
+  "priority" | "isCritical" | "suiteId" | "automationStatus" | "taxonomy"
 >;
 export interface BulkCaseResult {
   id: string;
@@ -608,6 +646,11 @@ export class TestmgmtRepository {
         suite: filter.suite ?? "",
         automation: filter.automation ?? "",
         critical: filter.critical ?? "",
+        level: filter.level ?? "",
+        purpose: filter.purpose ?? "",
+        tag: filter.tag ?? "",
+        executionMode: filter.executionMode ?? "",
+        performanceType: filter.performanceType ?? "",
       }),
     );
     if (ids !== undefined) query.set("ids", ids.join(","));
@@ -688,6 +731,11 @@ export class TestmgmtRepository {
           automation: f.automation ?? "",
           critical: f.critical ?? "",
           q: f.q ?? "",
+          level: f.level ?? "",
+          purpose: f.purpose ?? "",
+          tag: f.tag ?? "",
+          executionMode: f.executionMode ?? "",
+          performanceType: f.performanceType ?? "",
           limit: "500",
         })}`,
         { signal },

@@ -97,6 +97,7 @@ type linkDTO struct {
 }
 
 type testCaseDTO struct {
+	Taxonomy         testmgmt.Taxonomy     `json:"taxonomy"`
 	Preconditions    string                `json:"preconditions"`
 	TestData         string                `json:"testData"`
 	Audit            []testmgmt.CaseChange `json:"audit,omitempty"`
@@ -212,6 +213,7 @@ func caseOut(c testmgmt.TestCase) testCaseDTO {
 		Expected: c.Expected, Priority: string(c.Priority), IsCritical: c.IsCritical, AutomationStatus: string(c.AutomationStatus),
 		OwnerID: c.OwnerID, Requirements: c.Requirements, CreatedAt: c.CreatedAt.UTC(), UpdatedAt: c.UpdatedAt.UTC()}
 	out.Preconditions, out.TestData = c.Preconditions, c.TestData
+	out.Taxonomy = c.Taxonomy
 	out.Audit, out.AuditTruncated = c.Audit, c.AuditTruncated
 	if out.Steps == nil {
 		out.Steps = []testmgmt.Step{}
@@ -431,6 +433,7 @@ func (d *dashboard) tmCases(w http.ResponseWriter, r *http.Request) {
 func caseFilterFromRequest(r *http.Request) testmgmt.CaseFilter {
 	q := r.URL.Query()
 	f := testmgmt.CaseFilter{SuiteID: q.Get("suite"), AutomationStatus: testmgmt.AutomationStatus(q.Get("automation")), Query: q.Get("q"), Limit: limitParam(r, 200)}
+	f.Level, f.Purpose, f.Tag, f.ExecutionMode, f.PerformanceType = q.Get("level"), q.Get("purpose"), q.Get("tag"), q.Get("executionMode"), q.Get("performanceType")
 	if q.Get("critical") == "true" || q.Get("critical") == "false" {
 		v := q.Get("critical") == "true"
 		f.Critical = &v
@@ -480,6 +483,7 @@ func (d *dashboard) tmBulkCases(w http.ResponseWriter, r *http.Request) {
 			ExpectedUpdatedAt time.Time `json:"expectedUpdatedAt"`
 		} `json:"items"`
 		Patch struct {
+			Taxonomy         *testmgmt.Taxonomy         `json:"taxonomy"`
 			Priority         *testmgmt.Priority         `json:"priority"`
 			IsCritical       *bool                      `json:"isCritical"`
 			SuiteID          *string                    `json:"suiteId"`
@@ -493,7 +497,7 @@ func (d *dashboard) tmBulkCases(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, testmgmt.ErrInvalid)
 		return
 	}
-	if req.Patch.Priority == nil && req.Patch.IsCritical == nil && req.Patch.SuiteID == nil && req.Patch.AutomationStatus == nil {
+	if req.Patch.Taxonomy == nil && req.Patch.Priority == nil && req.Patch.IsCritical == nil && req.Patch.SuiteID == nil && req.Patch.AutomationStatus == nil {
 		d.tmErr(w, r, testmgmt.ErrInvalid)
 		return
 	}
@@ -516,7 +520,7 @@ func (d *dashboard) tmBulkCases(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
-		_, err := d.tm.UpdateTestCase(r.Context(), project, item.ID, testmgmt.TestCasePatch{Actor: actor, ExpectedUpdatedAt: item.ExpectedUpdatedAt, Priority: req.Patch.Priority, IsCritical: req.Patch.IsCritical, SuiteID: req.Patch.SuiteID, AutomationStatus: req.Patch.AutomationStatus})
+		_, err := d.tm.UpdateTestCase(r.Context(), project, item.ID, testmgmt.TestCasePatch{Taxonomy: req.Patch.Taxonomy, Actor: actor, ExpectedUpdatedAt: item.ExpectedUpdatedAt, Priority: req.Patch.Priority, IsCritical: req.Patch.IsCritical, SuiteID: req.Patch.SuiteID, AutomationStatus: req.Patch.AutomationStatus})
 		result := bulkCaseResult{ID: item.ID, Updated: err == nil, Code: ""}
 		switch {
 		case err == nil:
@@ -536,18 +540,19 @@ func (d *dashboard) tmBulkCases(w http.ResponseWriter, r *http.Request) {
 }
 
 type caseBody struct {
-	Preconditions     *string          `json:"preconditions"`
-	TestData          *string          `json:"testData"`
-	ExpectedUpdatedAt *time.Time       `json:"expectedUpdatedAt"`
-	SuiteID           *string          `json:"suiteId"`
-	ExternalKey       string           `json:"externalKey"`
-	Title             *string          `json:"title"`
-	Steps             *[]testmgmt.Step `json:"steps"`
-	Expected          *string          `json:"expected"`
-	Priority          *string          `json:"priority"`
-	IsCritical        *bool            `json:"isCritical"`
-	AutomationStatus  *string          `json:"automationStatus"`
-	OwnerID           *string          `json:"ownerId"`
+	Taxonomy          *testmgmt.Taxonomy `json:"taxonomy"`
+	Preconditions     *string            `json:"preconditions"`
+	TestData          *string            `json:"testData"`
+	ExpectedUpdatedAt *time.Time         `json:"expectedUpdatedAt"`
+	SuiteID           *string            `json:"suiteId"`
+	ExternalKey       string             `json:"externalKey"`
+	Title             *string            `json:"title"`
+	Steps             *[]testmgmt.Step   `json:"steps"`
+	Expected          *string            `json:"expected"`
+	Priority          *string            `json:"priority"`
+	IsCritical        *bool              `json:"isCritical"`
+	AutomationStatus  *string            `json:"automationStatus"`
+	OwnerID           *string            `json:"ownerId"`
 }
 
 func decodeCase(w http.ResponseWriter, r *http.Request) (caseBody, bool) {
@@ -570,6 +575,9 @@ func (d *dashboard) tmCreateCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := testmgmt.NewTestCase{ExternalKey: req.ExternalKey, Actor: actor}
+	if req.Taxonomy != nil {
+		in.Taxonomy = *req.Taxonomy
+	}
 	if req.Preconditions != nil {
 		in.Preconditions = *req.Preconditions
 	}
@@ -628,6 +636,7 @@ func (d *dashboard) tmPatchCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := testmgmt.TestCasePatch{
+		Taxonomy:      req.Taxonomy,
 		Preconditions: req.Preconditions, TestData: req.TestData, Actor: actor,
 		SuiteID: req.SuiteID, Title: req.Title, Steps: req.Steps, Expected: req.Expected, Priority: (*testmgmt.Priority)(req.Priority),
 		IsCritical: req.IsCritical, AutomationStatus: (*testmgmt.AutomationStatus)(req.AutomationStatus), OwnerID: req.OwnerID}

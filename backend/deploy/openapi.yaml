@@ -1989,6 +1989,11 @@ paths:
         - { name: critical, in: query, schema: { type: string, enum: ["true", "false"] } }
         - { name: q, in: query, schema: { type: string }, description: "Substring of title or external key." }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: level, in: query, schema: { type: string, enum: [unit, integration, system, acceptance] } }
+        - { name: purpose, in: query, schema: { type: string, enum: [functional, performance, security, usability, accessibility, compatibility, recovery] } }
+        - { name: tag, in: query, schema: { type: string, enum: [smoke, regression, e2e] } }
+        - { name: executionMode, in: query, schema: { type: string, enum: [manual, automated] } }
+        - { name: performanceType, in: query, schema: { type: string, enum: [load, stress, spike, soak, volume, scalability] } }
       responses:
         "200":
           description: Cases, priority then age. Lists carry no links or requirements; fetch one for those.
@@ -2032,6 +2037,11 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
         - { name: ids, in: query, schema: { type: string }, description: "Optional comma-separated IDs, at most 200; all must belong to this project and match the filter." }
+        - { name: level, in: query, schema: { type: string, enum: [unit, integration, system, acceptance] } }
+        - { name: purpose, in: query, schema: { type: string, enum: [functional, performance, security, usability, accessibility, compatibility, recovery] } }
+        - { name: tag, in: query, schema: { type: string, enum: [smoke, regression, e2e] } }
+        - { name: executionMode, in: query, schema: { type: string, enum: [manual, automated] } }
+        - { name: performanceType, in: query, schema: { type: string, enum: [load, stress, spike, soak, volume, scalability] } }
         - { name: q, in: query, schema: { type: string } }
         - { name: suite, in: query, schema: { type: string } }
         - { name: automation, in: query, schema: { type: string } }
@@ -2082,6 +2092,7 @@ paths:
                   type: object
                   minProperties: 1
                   properties:
+                    taxonomy: { $ref: "#/components/schemas/CaseTaxonomy" }
                     priority: { $ref: "#/components/schemas/Priority" }
                     isCritical: { type: boolean }
                     suiteId: { type: string, description: "Empty clears; non-empty must be a suite of the project." }
@@ -3341,10 +3352,21 @@ components:
       properties:
         action: { type: string, maxLength: 2000 }
         expected: { type: string, maxLength: 2000 }
+    CaseTaxonomy:
+      type: object
+      additionalProperties: false
+      description: "Atomic case classification. Missing dimensions default to unclassified/empty on writes. performanceTypes requires performance purpose. Does not change automationStatus or gate rules."
+      properties:
+        level: { type: string, enum: ["", unit, integration, system, acceptance] }
+        purposes: { type: array, uniqueItems: true, maxItems: 7, items: { type: string, enum: [functional, performance, security, usability, accessibility, compatibility, recovery] } }
+        tags: { type: array, uniqueItems: true, maxItems: 3, items: { type: string, enum: [smoke, regression, e2e] } }
+        executionModes: { type: array, uniqueItems: true, maxItems: 2, items: { type: string, enum: [manual, automated] } }
+        performanceTypes: { type: array, uniqueItems: true, maxItems: 6, items: { type: string, enum: [load, stress, spike, soak, volume, scalability] } }
     TestCaseInput:
       type: object
       description: Create requires `title`; on PATCH every field is optional and absent means unchanged.
       properties:
+        taxonomy: { $ref: "#/components/schemas/CaseTaxonomy" }
         preconditions: { type: string, maxLength: 16000, description: "Trimmed text, at most 16000 UTF-8 bytes. Empty clears; omitted PATCH keeps." }
         testData: { type: string, maxLength: 16000, description: "Trimmed text, at most 16000 UTF-8 bytes. Empty clears; omitted PATCH keeps." }
         expectedUpdatedAt: { type: string, format: date-time, description: "Optional PATCH version check; stale edits return 409." }
@@ -3371,6 +3393,7 @@ components:
       type: object
       required: [id, suiteId, suiteName, externalKey, title, steps, expected, priority, isCritical, automationStatus, ownerId, createdAt, updatedAt]
       properties:
+        taxonomy: { $ref: "#/components/schemas/CaseTaxonomy" }
         preconditions: { type: string }
         testData: { type: string }
         audit: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/CaseChange" }, description: "Latest 50 real changes, newest first; present on individual reads. No legacy backfill." }
@@ -3422,6 +3445,11 @@ components:
           description: "Immutable case at recording time; null for legacy rows (history cannot be reconstructed)."
           required: [title, steps, expected, updatedAt]
           properties:
+            taxonomy:
+              oneOf:
+                - { $ref: "#/components/schemas/CaseTaxonomy" }
+                - { type: "null" }
+              description: "Immutable classification; null or absent for snapshots recorded before taxonomy support."
             preconditions: { type: [string, "null"], description: "Recorded context; null for legacy snapshots." }
             testData: { type: [string, "null"], description: "Recorded context; null for legacy snapshots." }
             title: { type: string }

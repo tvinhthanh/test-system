@@ -419,6 +419,38 @@ Team → an owner's organization row has a "Usage" link to
 
 ## Handoff And Verification
 
+### Multi-Dimensional Case Taxonomy (2026-10-15)
+
+Migration 0033 adds `taxonomy` to case list/detail/create/patch and plan member
+case DTOs. Object fields: `level` (empty/unit/integration/system/acceptance),
+`purposes` (functional/performance/security/usability/accessibility/compatibility/
+recovery), `tags` (smoke/regression/e2e), `executionModes` (manual/automated),
+`performanceTypes` (load/stress/spike/soak/volume/scalability). Array values must
+be unique; invalid values return 400. Subtypes require performance purpose.
+Writes normalize arrays to sorted, non-null arrays. The API's JSON decoder
+rejects unknown fields. Database constraints validate the persisted shape.
+
+PATCH replaces the complete object atomically; omitted/null keeps it, `{}`
+clears all dimensions. No classification is inferred from framework, identity
+or automationStatus. Modes are planning metadata; choosing automated does not
+create an identity link or change automationStatus. Existing cases default to
+explicitly unclassified and no old audit/snapshot is reconstructed.
+
+Case list/export share singular AND filters `level`, `purpose`, `tag`,
+`executionMode`, `performanceType`; unknown filter values return 400. Plan
+search uses the same repository call and retains already selected membership.
+Bulk PATCH body accepts a `taxonomy` object, preserving version checks and
+per-item results/audit. UI requires explicit replacement confirmation.
+
+CSV `taxonomy_json` is standard JSON with the object above; omission preserves
+existing classification, blank clears, malformed/unknown/invalid values produce
+row errors before writing that row. Export includes this column and uses the
+same tenant/filter boundaries. Recorded executions capture the classification
+at recording time. Legacy snapshot classification remains null/unavailable.
+
+This does not add performance execution/metrics, specialized report adapters
+or release-gate rules. Those remain separate GĐ4 contracts.
+
 ### Bulk Case Updates And CSV Export (2026-10-13)
 
 `POST /v1/projects/{projectId}/test-cases/bulk` requires `testmgmt.write`.

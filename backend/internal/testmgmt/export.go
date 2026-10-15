@@ -23,6 +23,10 @@ func csvSafeText(value string) string {
 }
 
 func (s *service) ExportCases(ctx context.Context, projectID string, f CaseFilter, ids []string) (CaseExport, error) {
+	taxonomyArgs, err := f.taxonomyArgs()
+	if err != nil {
+		return CaseExport{}, err
+	}
 	if !isUUID(projectID) || (f.SuiteID != "" && !isUUID(f.SuiteID)) {
 		return CaseExport{}, ErrNotFound
 	}
@@ -41,16 +45,16 @@ func (s *service) ExportCases(ctx context.Context, projectID string, f CaseFilte
 	}
 	rows, err := s.db.Q(ctx).Query(ctx, `SELECT `+caseColumns+`
         FROM test_cases c LEFT JOIN test_suites s ON s.id = c.suite_id
-        WHERE `+caseFilterWhere+` AND ($6::uuid[] IS NULL OR c.id = ANY($6))
+        WHERE `+caseFilterWhere+` AND ($11::uuid[] IS NULL OR c.id = ANY($11))
         ORDER BY c.priority, c.created_at, c.id LIMIT 5001`,
-		projectID, f.SuiteID, string(f.AutomationStatus), f.Critical, strings.TrimSpace(f.Query), ids)
+		append(append([]any{projectID, f.SuiteID, string(f.AutomationStatus), f.Critical, strings.TrimSpace(f.Query)}, taxonomyArgs...), ids)...)
 	if err != nil {
 		return CaseExport{}, err
 	}
 	defer rows.Close()
 	var buffer bytes.Buffer
 	writer := csv.NewWriter(&buffer)
-	if err := writer.Write([]string{"_atp_csv_version", "id", "key", "title", "suite", "steps_json", "expected", "priority", "critical", "automation_status", "preconditions", "test_data", "owner_id", "created_at", "updated_at"}); err != nil {
+	if err := writer.Write([]string{"_atp_csv_version", "id", "key", "title", "suite", "steps_json", "expected", "priority", "critical", "automation_status", "preconditions", "test_data", "owner_id", "created_at", "updated_at", "taxonomy_json"}); err != nil {
 		return CaseExport{}, err
 	}
 	count := 0
@@ -66,7 +70,11 @@ func (s *service) ExportCases(ctx context.Context, projectID string, f CaseFilte
 		if err != nil {
 			return CaseExport{}, err
 		}
-		record := []string{"1", c.ID, c.ExternalKey, c.Title, c.SuiteName, string(steps), c.Expected, string(c.Priority), strconv.FormatBool(c.IsCritical), string(c.AutomationStatus), c.Preconditions, c.TestData, c.OwnerID, c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+		taxonomy, err := json.Marshal(c.Taxonomy)
+		if err != nil {
+			return CaseExport{}, err
+		}
+		record := []string{"1", c.ID, c.ExternalKey, c.Title, c.SuiteName, string(steps), c.Expected, string(c.Priority), strconv.FormatBool(c.IsCritical), string(c.AutomationStatus), c.Preconditions, c.TestData, c.OwnerID, c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano), string(taxonomy)}
 		for index := range record {
 			record[index] = csvSafeText(record[index])
 		}

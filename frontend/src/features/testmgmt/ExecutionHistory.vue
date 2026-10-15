@@ -2,6 +2,7 @@
 import type { Execution } from "./testmgmtRepository";
 import { time } from "../../shared/format";
 import StatusBadge from "../../shared/StatusBadge.vue";
+import { taxonomySummary } from "./taxonomy";
 defineProps<{ executions: Execution[]; contentUrl: (id: string) => string }>();
 </script>
 
@@ -44,6 +45,9 @@ defineProps<{ executions: Execution[]; contentUrl: (id: string) => string }>();
         >
         <details v-if="execution.caseSnapshot" class="mt-2">
           <summary class="cursor-pointer">Case at execution</summary>
+          <p class="text-muted-foreground mt-2 break-words text-xs">
+            {{ taxonomySummary(execution.caseSnapshot.taxonomy) }}
+          </p>
           <p
             v-if="
               execution.caseSnapshot.preconditions == null ||

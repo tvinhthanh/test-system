@@ -72,6 +72,7 @@ type Step struct {
 }
 
 type TestCase struct {
+	Taxonomy         Taxonomy
 	Preconditions    string
 	TestData         string
 	Audit            []CaseChange
@@ -200,6 +201,7 @@ type Execution struct {
 }
 
 type CaseSnapshot struct {
+	Taxonomy      *Taxonomy `json:"taxonomy"`
 	Preconditions *string   `json:"preconditions"`
 	TestData      *string   `json:"testData"`
 	Title         string    `json:"title"`
@@ -412,6 +414,7 @@ type RequirementPatch struct {
 }
 
 type NewTestCase struct {
+	Taxonomy      Taxonomy
 	Preconditions string
 	TestData      string
 	Actor         string
@@ -426,6 +429,7 @@ type NewTestCase struct {
 }
 
 type TestCasePatch struct {
+	Taxonomy          *Taxonomy
 	Preconditions     *string
 	TestData          *string
 	ExpectedUpdatedAt time.Time
@@ -441,6 +445,11 @@ type TestCasePatch struct {
 }
 
 type CaseFilter struct {
+	Level            string
+	Purpose          string
+	Tag              string
+	ExecutionMode    string
+	PerformanceType  string
 	SuiteID          string
 	AutomationStatus AutomationStatus
 	Critical         *bool

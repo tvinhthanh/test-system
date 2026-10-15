@@ -49,12 +49,21 @@ try {
     cases.push(
       await mutate(`${scope}/test-cases`, {
         title: `${prefix} ${i}`,
+        taxonomy: {
+          level: "system",
+          purposes: ["performance"],
+          tags: ["regression"],
+          executionModes: ["automated"],
+          performanceTypes: ["stress"],
+        },
         externalKey: `${prefix}-${i}`,
         expected: "=SUM(1,2)",
         steps: [{ action: "Pay | check", expected: "Receipt\nPaid" }],
       }),
     );
-  await page.goto(`${base}/p/${project}/cases?q=${encodeURIComponent(prefix)}`);
+  await page.goto(
+    `${base}/p/${project}/cases?q=${encodeURIComponent(prefix)}&purpose=performance&performanceType=stress`,
+  );
   await page.getByLabel(`Select ${cases[0].title}`, { exact: true }).waitFor();
   await page.getByLabel(`Select ${cases[0].title}`, { exact: true }).check();
   await page.getByLabel(`Select ${cases[1].title}`, { exact: true }).check();
@@ -128,6 +137,34 @@ try {
       `${name}: horizontal overflow`,
     );
   }
+  await page.getByLabel("Bulk field", { exact: true }).selectOption("taxonomy");
+  await page.getByLabel("Level", { exact: true }).selectOption("integration");
+  await page.getByLabel("Purposes: Functional", { exact: true }).check();
+  assert.equal(
+    await page.getByRole("button", { name: "Apply", exact: true }).isDisabled(),
+    true,
+  );
+  await page
+    .getByLabel("Confirm replacing classification on 1 cases", { exact: true })
+    .check();
+  const [classificationResponse] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/test-cases/bulk") && response.ok(),
+    ),
+    page.getByRole("button", { name: "Apply", exact: true }).click(),
+  ]);
+  assert.equal((await classificationResponse.json()).items[0].updated, true);
+  const reclassified = await (
+    await page.request.get(`${scope}/test-cases/${cases[0].id}`)
+  ).json();
+  assert.equal(reclassified.taxonomy.level, "integration");
+  assert.deepEqual(reclassified.taxonomy.purposes, ["functional"]);
+  assert.deepEqual(reclassified.taxonomy.performanceTypes, []);
+  assert.equal(reclassified.automationStatus, "manual_only");
+  await page
+    .getByLabel(`Select ${cases[0].title}`, { exact: true })
+    .waitFor({ state: "detached" });
   assert.deepEqual(errors, []);
   console.log(
     "PASS real API: bulk conflict/success, actor audit, selected/full-filter downloads, 1440/768/360",

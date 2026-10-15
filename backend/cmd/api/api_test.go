@@ -586,11 +586,25 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Fatalf("create requirement: %d %s", reqR.code, reqR.raw)
 	}
 	reqID := reqR.body["id"].(string)
-	caseR := web.post(base+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true, "steps": []map[string]string{{"action": "open cart", "expected": "cart shown"}}})
+	caseR := web.post(base+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true, "steps": []map[string]string{{"action": "open cart", "expected": "cart shown"}}, "taxonomy": map[string]any{"level": "system", "purposes": []string{"performance", "functional"}, "tags": []string{"regression", "e2e"}, "executionModes": []string{"manual", "automated"}, "performanceTypes": []string{"load", "stress"}}})
 	if caseR.code != 201 || caseR.body["automationStatus"] != "manual_only" {
 		t.Fatalf("create case: %d %s", caseR.code, caseR.raw)
 	}
 	caseID := caseR.body["id"].(string)
+	classification := caseR.body["taxonomy"].(map[string]any)
+	if classification["level"] != "system" {
+		t.Fatalf("missing taxonomy: %s", caseR.raw)
+	}
+	filteredCases := web.get(base + "/test-cases?level=system&purpose=performance&tag=e2e&executionMode=automated&performanceType=stress")
+	if filteredCases.code != 200 || len(filteredCases.body["items"].([]any)) != 1 {
+		t.Fatalf("taxonomy filter: %s", filteredCases.raw)
+	}
+	if bad := web.get(base + "/test-cases?purpose=unknown"); bad.code != 400 {
+		t.Fatalf("invalid taxonomy filter: %d %s", bad.code, bad.raw)
+	}
+	if bad := web.do("PATCH", base+"/test-cases/"+caseID, map[string]any{"taxonomy": map[string]any{"performanceTypes": []string{"stress"}}}, nil); bad.code != 400 {
+		t.Fatalf("orphan subtype: %d %s", bad.code, bad.raw)
+	}
 	contextUpdate := web.do("PATCH", base+"/test-cases/"+caseID, map[string]any{"preconditions": "Signed in", "testData": "account=42", "expectedUpdatedAt": caseR.body["updatedAt"]}, nil)
 	if contextUpdate.code != 200 || contextUpdate.body["preconditions"] != "Signed in" || contextUpdate.body["testData"] != "account=42" {
 		t.Fatalf("case context update: %d %s", contextUpdate.code, contextUpdate.raw)

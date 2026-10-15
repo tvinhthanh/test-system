@@ -74,6 +74,18 @@ try {
     .first()
     .click();
   await page.locator("#new-title").fill(`History check ${stamp}`);
+  await page.getByLabel("Level", { exact: true }).selectOption("system");
+  for (const name of [
+    "Purposes: Functional",
+    "Purposes: Performance",
+    "Usage tags: E2E",
+    "Usage tags: Regression",
+    "Execution modes: Manual",
+    "Execution modes: Automated",
+    "Performance types: Stress",
+  ]) {
+    await page.getByLabel(name, { exact: true }).check();
+  }
   await page
     .getByLabel("Preconditions", { exact: true })
     .fill("Original signed-in setup");
@@ -81,6 +93,8 @@ try {
     .getByLabel("Test data", { exact: true })
     .fill("Original account=42");
   let testCase = await createViaUi("/test-cases");
+  assert.equal(testCase.taxonomy.level, "system");
+  assert.deepEqual(testCase.taxonomy.performanceTypes, ["stress"]);
   await page.getByRole("button", { name: "Add step", exact: true }).click();
   await page
     .getByPlaceholder("Action", { exact: true })
@@ -137,6 +151,9 @@ try {
   await page.getByText("No cases in this plan", { exact: true }).waitFor();
   assert.equal(await page.locator(".execution-list > li").count(), 0);
   await page.getByText("Plan scope (0)", { exact: true }).click();
+  await page
+    .getByLabel("Plan filter Level", { exact: true })
+    .selectOption("system");
   await page
     .getByLabel("Search cases to add", { exact: true })
     .fill(testCase.title);
@@ -203,6 +220,8 @@ try {
   assert.equal(first.stepResults[0].actual, "Receipt missing");
   assert.equal(first.caseSnapshot.preconditions, "Original signed-in setup");
   assert.equal(first.caseSnapshot.testData, "Original account=42");
+  assert.equal(first.caseSnapshot.taxonomy.level, "system");
+  assert.deepEqual(first.caseSnapshot.taxonomy.performanceTypes, ["stress"]);
   await row.locator(".evidence-attach:not([disabled])").waitFor();
   await Promise.all([
     page.waitForResponse(
@@ -221,6 +240,8 @@ try {
     .fill("New signed-in setup");
   await page.getByLabel("Test data", { exact: true }).fill("New account=99");
   await page.locator("#case-title").fill(`Renamed history ${stamp}`);
+  await page.getByLabel("Level", { exact: true }).selectOption("acceptance");
+  await page.getByLabel("Purposes: Performance", { exact: true }).uncheck();
   await page.getByPlaceholder("Action", { exact: true }).fill("Changed action");
   await page
     .getByPlaceholder("Expected", { exact: true })
@@ -277,6 +298,8 @@ try {
     renamed.getByRole("button", { name: "passed", exact: true }).click(),
   ]);
   const second = await secondResponse.json();
+  assert.equal(second.caseSnapshot.taxonomy.level, "acceptance");
+  assert.deepEqual(second.caseSnapshot.taxonomy.performanceTypes, []);
   assert.equal(second.retestOf, first.id);
   assert.match(second.caseSnapshot.title, /^Renamed history/);
   await renamed.getByText("Execution history (2)", { exact: true }).click();
@@ -291,6 +314,14 @@ try {
     "Original action",
   );
   assert.equal(history.executionHistory[1].evidence.length, 1);
+  assert.equal(
+    history.executionHistory[1].caseSnapshot.taxonomy.level,
+    "system",
+  );
+  assert.deepEqual(
+    history.executionHistory[1].caseSnapshot.taxonomy.performanceTypes,
+    ["stress"],
+  );
   assert.equal(
     history.executionHistory[1].caseSnapshot.preconditions,
     "Original signed-in setup",

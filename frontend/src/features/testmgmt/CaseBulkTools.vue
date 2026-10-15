@@ -12,6 +12,8 @@ import type {
   TestCase,
 } from "./testmgmtRepository";
 import { priorities } from "./enums";
+import CaseTaxonomyEditor from "./CaseTaxonomyEditor.vue";
+import { copyTaxonomy } from "./taxonomy";
 
 const props = defineProps<{
   project: string;
@@ -27,17 +29,25 @@ const emit = defineEmits<{
   busy: [value: boolean];
 }>();
 const bulk = useCaseBulkActions();
-const action = ref<"priority" | "suiteId" | "isCritical" | "automationStatus">(
-  "priority",
-);
+const action = ref<
+  "priority" | "suiteId" | "isCritical" | "automationStatus" | "taxonomy"
+>("priority");
 const value = ref("p2");
 const confirmed = ref(false);
+const taxonomy = ref(copyTaxonomy());
+watch(
+  () => JSON.stringify(taxonomy.value),
+  () => {
+    confirmed.value = false;
+  },
+);
 watch(action, (name) => {
   value.value = {
     priority: "p2",
     suiteId: "",
     isCritical: "true",
     automationStatus: "automation_candidate",
+    taxonomy: "",
   }[name];
 });
 watch(
@@ -51,18 +61,26 @@ watch(bulk.busy, (busy) => emit("busy", busy));
 const archives = computed(
   () => action.value === "automationStatus" && value.value === "obsolete",
 );
+const confirmationRequired = computed(
+  () => archives.value || action.value === "taxonomy",
+);
 async function apply() {
   if (
     props.disabled ||
     !props.canWrite ||
     !props.selected.length ||
-    (archives.value && !confirmed.value)
+    (confirmationRequired.value && !confirmed.value)
   )
     return;
-  const patch = {
-    [action.value]:
-      action.value === "isCritical" ? value.value === "true" : value.value,
-  } as BulkCasePatch;
+  const patch =
+    action.value === "taxonomy"
+      ? { taxonomy: copyTaxonomy(taxonomy.value) }
+      : ({
+          [action.value]:
+            action.value === "isCritical"
+              ? value.value === "true"
+              : value.value,
+        } as BulkCasePatch);
   const ids = await bulk.apply(props.project, props.selected, patch);
   emit("updated", ids);
 }
@@ -94,8 +112,10 @@ const resultLabel = (code: string) =>
           <option value="suiteId">Suite</option>
           <option value="isCritical">Critical</option>
           <option value="automationStatus">Automation</option>
+          <option value="taxonomy">Classification</option>
         </NativeSelect>
         <NativeSelect
+          v-if="action !== 'taxonomy'"
           v-model="value"
           aria-label="Bulk value"
           :disabled="bulk.busy.value"
@@ -127,7 +147,9 @@ const resultLabel = (code: string) =>
         </NativeSelect>
         <Button
           size="sm"
-          :disabled="disabled || bulk.busy.value || (archives && !confirmed)"
+          :disabled="
+            disabled || bulk.busy.value || (confirmationRequired && !confirmed)
+          "
           @click="apply"
           ><Check />Apply</Button
         >
@@ -163,14 +185,24 @@ const resultLabel = (code: string) =>
         ><X
       /></Button>
     </div>
+    <CaseTaxonomyEditor
+      v-if="action === 'taxonomy' && selected.length && canWrite"
+      v-model="taxonomy"
+      :disabled="disabled || bulk.busy.value"
+    />
     <label
-      v-if="archives && selected.length && canWrite"
+      v-if="confirmationRequired && selected.length && canWrite"
       class="flex items-center gap-2 text-sm"
       ><input
         v-model="confirmed"
         type="checkbox"
         :disabled="bulk.busy.value"
-      />Confirm marking {{ selected.length }} cases obsolete</label
+      /><template v-if="archives"
+        >Confirm marking {{ selected.length }} cases obsolete</template
+      ><template v-else
+        >Confirm replacing classification on
+        {{ selected.length }} cases</template
+      ></label
     >
     <p
       v-if="bulk.total.value"

@@ -7,11 +7,18 @@ import type { Plan, TestCase } from "./testmgmtRepository";
 import AsyncState from "../../shared/AsyncState.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import TaxonomyFilters from "./TaxonomyFilters.vue";
+import { type TaxonomyFilter } from "./taxonomy";
 
 const props = defineProps<{ project: string; plan: Plan; disabled: boolean }>();
 const emit = defineEmits<{ save: [caseIds: string[]] }>();
 const { testmgmt } = useServices();
 const query = ref("");
+const filters = ref<TaxonomyFilter>({});
+function filter(patch: Record<string, string>) {
+  filters.value = { ...filters.value, ...patch };
+  search();
+}
 const selected = ref<string[]>([]);
 const matches = useResource<TestCase[]>();
 watch(
@@ -27,7 +34,11 @@ const recorded = computed(
 );
 function search() {
   void matches.load((signal) =>
-    testmgmt.testCases(props.project, { q: query.value }, signal),
+    testmgmt.testCases(
+      props.project,
+      { q: query.value, ...filters.value },
+      signal,
+    ),
   );
 }
 watch(() => props.project, search, { immediate: true });
@@ -60,6 +71,12 @@ const changed = computed(
           ><Search
         /></Button>
       </form>
+      <TaxonomyFilters
+        :model-value="filters"
+        prefix="Plan filter"
+        :disabled="disabled"
+        @change="filter"
+      />
       <AsyncState
         :loading="matches.loading.value"
         :error="matches.error.value"

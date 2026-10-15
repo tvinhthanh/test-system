@@ -246,13 +246,18 @@ func (s *service) GetRequirement(ctx context.Context, projectID, id string) (Req
 // ------------------------------------------------------------ test cases
 
 const caseColumns = `c.id, c.project_id, c.suite_id, coalesce(s.name, ''), c.external_key, c.title, c.steps, c.expected, c.priority,
-	c.is_critical, c.automation_status, c.owner_id, c.created_at, c.updated_at, c.preconditions, c.test_data`
+	c.is_critical, c.automation_status, c.owner_id, c.created_at, c.updated_at, c.preconditions, c.test_data, c.taxonomy`
 
 const caseFilterWhere = `c.project_id = $1
 	AND ($2 = '' OR c.suite_id = $2::uuid)
 	AND ($3 = '' OR c.automation_status = $3)
 	AND ($4::boolean IS NULL OR c.is_critical = $4)
-	AND ($5 = '' OR c.title ILIKE '%' || $5 || '%' OR c.external_key ILIKE '%' || $5 || '%')`
+	AND ($5 = '' OR c.title ILIKE '%' || $5 || '%' OR c.external_key ILIKE '%' || $5 || '%')
+    AND ($6 = '' OR c.taxonomy->>'level' = $6)
+    AND ($7 = '' OR c.taxonomy->'purposes' ? $7)
+    AND ($8 = '' OR c.taxonomy->'tags' ? $8)
+    AND ($9 = '' OR c.taxonomy->'executionModes' ? $9)
+    AND ($10 = '' OR c.taxonomy->'performanceTypes' ? $10)`
 
 func scanCase(row interface{ Scan(dest ...any) error }) (TestCase, error) {
 	return scanCaseExtra(row)
@@ -261,15 +266,18 @@ func scanCase(row interface{ Scan(dest ...any) error }) (TestCase, error) {
 func scanCaseExtra(row interface{ Scan(dest ...any) error }, extra ...any) (TestCase, error) {
 	var c TestCase
 	var suite, key, owner *string
-	var steps []byte
+	var steps, taxonomy []byte
 	dest := []any{&c.ID, &c.ProjectID, &suite, &c.SuiteName, &key, &c.Title, &steps, &c.Expected, &c.Priority,
-		&c.IsCritical, &c.AutomationStatus, &owner, &c.CreatedAt, &c.UpdatedAt, &c.Preconditions, &c.TestData}
+		&c.IsCritical, &c.AutomationStatus, &owner, &c.CreatedAt, &c.UpdatedAt, &c.Preconditions, &c.TestData, &taxonomy}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return TestCase{}, err
 	}
 	c.SuiteID, c.ExternalKey, c.OwnerID = deref(suite), deref(key), deref(owner)
 	c.Steps = []Step{}
 	_ = json.Unmarshal(steps, &c.Steps)
+	if err := json.Unmarshal(taxonomy, &c.Taxonomy); err != nil {
+		return TestCase{}, err
+	}
 	return c, nil
 }
 
@@ -308,6 +316,10 @@ func (s *service) suiteInProject(ctx context.Context, projectID, suiteID string)
 }
 
 func (s *service) CreateTestCase(ctx context.Context, projectID string, in NewTestCase) (TestCase, error) {
+	taxonomy, err := taxonomyJSON(in.Taxonomy)
+	if err != nil {
+		return TestCase{}, err
+	}
 	if !isUUID(projectID) {
 		return TestCase{}, ErrNotFound
 	}
@@ -343,9 +355,9 @@ func (s *service) CreateTestCase(ctx context.Context, projectID string, in NewTe
 			return err
 		}
 		return s.db.Q(ctx).QueryRow(ctx, `
-		INSERT INTO test_cases (project_id, suite_id, external_key, title, steps, expected, priority, is_critical, owner_id, preconditions, test_data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-			projectID, nullable(in.SuiteID), nullable(in.ExternalKey), in.Title, steps, strings.TrimSpace(in.Expected), string(in.Priority), in.IsCritical, nullable(in.OwnerID), in.Preconditions, in.TestData).Scan(&id)
+		INSERT INTO test_cases (project_id, suite_id, external_key, title, steps, expected, priority, is_critical, owner_id, preconditions, test_data, taxonomy)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+			projectID, nullable(in.SuiteID), nullable(in.ExternalKey), in.Title, steps, strings.TrimSpace(in.Expected), string(in.Priority), in.IsCritical, nullable(in.OwnerID), in.Preconditions, in.TestData, taxonomy).Scan(&id)
 	})
 	if err != nil {
 		return TestCase{}, mapErr(err)
@@ -354,6 +366,14 @@ func (s *service) CreateTestCase(ctx context.Context, projectID string, in NewTe
 }
 
 func (s *service) UpdateTestCase(ctx context.Context, projectID, id string, p TestCasePatch) (TestCase, error) {
+	var taxonomy []byte
+	if p.Taxonomy != nil {
+		var err error
+		taxonomy, err = taxonomyJSON(*p.Taxonomy)
+		if err != nil {
+			return TestCase{}, err
+		}
+	}
 	if !isUUID(projectID) || !isUUID(id) {
 		return TestCase{}, ErrNotFound
 	}
@@ -430,9 +450,9 @@ func (s *service) UpdateTestCase(ctx context.Context, projectID, id string, p Te
 		       automation_status = coalesce($8, automation_status),
 		       suite_id = CASE WHEN $9 THEN $10 ELSE suite_id END,
 		       owner_id = CASE WHEN $11 THEN $12 ELSE owner_id END,
-		       preconditions = coalesce($13, preconditions), test_data = coalesce($14, test_data), updated_at = clock_timestamp()
+		       preconditions = coalesce($13, preconditions), test_data = coalesce($14, test_data), taxonomy = coalesce($15, taxonomy), updated_at = clock_timestamp()
 		 WHERE id = $1 AND project_id = $2`,
-			id, projectID, p.Title, steps, expected, (*string)(p.Priority), p.IsCritical, (*string)(p.AutomationStatus), setSuite, suite, setOwner, owner, p.Preconditions, p.TestData)
+			id, projectID, p.Title, steps, expected, (*string)(p.Priority), p.IsCritical, (*string)(p.AutomationStatus), setSuite, suite, setOwner, owner, p.Preconditions, p.TestData, taxonomy)
 		if err != nil {
 			return mapErr(err)
 		}
@@ -456,6 +476,10 @@ func (s *service) caseAuditActor(ctx context.Context, actor, action string) erro
 }
 
 func (s *service) ListTestCases(ctx context.Context, projectID string, f CaseFilter) ([]TestCase, error) {
+	taxonomyArgs, err := f.taxonomyArgs()
+	if err != nil {
+		return nil, err
+	}
 	if !isUUID(projectID) {
 		return nil, ErrNotFound
 	}
@@ -469,8 +493,8 @@ func (s *service) ListTestCases(ctx context.Context, projectID string, f CaseFil
 		SELECT `+caseColumns+`
 		  FROM test_cases c LEFT JOIN test_suites s ON s.id = c.suite_id
 		 WHERE `+caseFilterWhere+`
-		 ORDER BY c.priority, c.created_at LIMIT $6`,
-		projectID, f.SuiteID, string(f.AutomationStatus), f.Critical, strings.TrimSpace(f.Query), f.Limit)
+		 ORDER BY c.priority, c.created_at LIMIT $11`,
+		append(append([]any{projectID, f.SuiteID, string(f.AutomationStatus), f.Critical, strings.TrimSpace(f.Query)}, taxonomyArgs...), f.Limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -1067,13 +1091,16 @@ func (s *service) RecordExecution(ctx context.Context, projectID, planID string,
 			return ErrNotFound
 		}
 		var snapshot CaseSnapshot
-		var rawSteps []byte
+		var rawSteps, rawTaxonomy []byte
 		var preconditions, testData string
-		if err := q.QueryRow(ctx, `SELECT title, steps, expected, updated_at, preconditions, test_data FROM test_cases WHERE id = $1 AND project_id = $2 AND automation_status <> 'obsolete' FOR SHARE`, in.TestCaseID, projectID).Scan(&snapshot.Title, &rawSteps, &snapshot.Expected, &snapshot.UpdatedAt, &preconditions, &testData); err != nil {
+		if err := q.QueryRow(ctx, `SELECT title, steps, expected, updated_at, preconditions, test_data, taxonomy FROM test_cases WHERE id = $1 AND project_id = $2 AND automation_status <> 'obsolete' FOR SHARE`, in.TestCaseID, projectID).Scan(&snapshot.Title, &rawSteps, &snapshot.Expected, &snapshot.UpdatedAt, &preconditions, &testData, &rawTaxonomy); err != nil {
 			return mapErr(err)
 		}
 		snapshot.Preconditions = &preconditions
 		snapshot.TestData = &testData
+		if err := json.Unmarshal(rawTaxonomy, &snapshot.Taxonomy); err != nil {
+			return err
+		}
 		if err := json.Unmarshal(rawSteps, &snapshot.Steps); err != nil {
 			return err
 		}

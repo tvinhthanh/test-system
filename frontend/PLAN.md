@@ -25,6 +25,12 @@ draft was removed on 2026-09-18.
 
 ### Active Slice (2026-10-15)
 
+- Owner requested implementation of the remaining product scope before a later
+  bug-fix pass. Start GĐ3 now: atomic multi-dimensional case taxonomy, server
+  filters, create/edit UI, plan search, CSV round-trip and execution snapshots.
+  No inferred framework classification and no new release-gate behavior.
+  GĐ1 deployment and team/pilot acceptance remain independent pending gates.
+
 Implementation is pushed through `76f6df0`. The GĐ2 code slices below are
 implemented and locally verified; the current work is closing CI and deployment
 gates, not rebuilding those features. Team acceptance remains separate.
@@ -39,7 +45,8 @@ gates, not rebuilding those features. Team acceptance remains separate.
 | New complete-stack E2E | verified in CI | Run #42 / 38384680965 on 76f6df0 passed live-check, complete manual workflow and bulk/export through Caddy and the real API; memory-store CI is not durable deployment acceptance |
 | GĐ1 Windows deployment | in_progress | Docker stack too heavy for this laptop (Docker Desktop stopped 14-10); deployment test moves to another machine via `server/atp.sh`. Vercel projects cannot host the backend (needs Postgres, worker, object storage) |
 | GĐ2 team acceptance | planned | Tester team must complete requirement -> case -> plan -> execution -> bug -> retest -> release and record feedback |
-| GĐ3 taxonomy / GĐ4 specialized results | planned | Not implemented by the current slices; follow SPEC 6.8.7 after GĐ1/GĐ2 acceptance |
+| GĐ3 taxonomy | implemented; locally verified | Migration 0033, case create/edit/bulk, list/export filters, plan search, CSV and immutable execution snapshots; new commit CI pending |
+| GĐ4 specialized results | planned | Next contract: Performance scenarios/thresholds/results and original reports; taxonomy labels alone do not provide metrics or a load engine |
 | GĐ5 pilot / GĐ6 VPS | planned | Real pilot cycles, server load/24-72h soak, then staging/migration/rollback on VPS |
 
 Latest verified CI: [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
@@ -61,12 +68,27 @@ memory artifacts and APP_ENV=dev. No deployment acceptance is claimed.
    backup outside the laptop and stack restore. Do not expose the native
    trust-auth/memory-store demo as the pilot deployment. Use server/README.md
    to record host-specific evidence; doctor is not deployment certification.
-3. Run team acceptance for GĐ2, record issues and close critical gaps. Then
-   start GĐ3 taxonomy, followed by the Performance result contract in GĐ4.
+3. Run team acceptance for GĐ2 and record gaps. Per the owner's latest request,
+   product source work proceeds in parallel: GĐ3 implemented; next is the
+   Performance result contract in GĐ4. This does not waive deployment, security
+   or human acceptance requirements.
 
 No percentage or completion date is assigned to external acceptance gates.
 
 #### Completed And Verified
+
+- Taxonomy slice (15-10): backend testmgmt/API/architecture tests passed on real
+  Postgres, including cross-project filters, immutable snapshots, independent
+  automationStatus, invalid/duplicate values, DB constraint and CSV round-trip/
+  omitted-column preservation. OpenAPI lint passes with the 7 existing warnings.
+  Frontend 92 committed tests passed (93 with the unrelated local fixture test),
+  typecheck/build/bundle gate passed (53.3 KiB gzip). govulncheck reports 0 called
+  vulnerabilities; 18 uncalled dependency advisories remain reported.
+- Real Chrome manual-history and bulk scripts passed on the migrated demo at
+  1440/768/360px: classification creation, plan taxonomy filter, old/new retest
+  snapshots, Performance/Stress filtered export, explicit bulk replacement and
+  removal from the now-unmatched filtered list. Screenshots inspected; no page
+  errors or horizontal overflow. Native demo still uses memory artifacts.
 
 - Migration 0030 captures a case snapshot, step results, bug URL and same-case /
   same-plan retest link; legacy rows retain a null snapshot. Case version checked

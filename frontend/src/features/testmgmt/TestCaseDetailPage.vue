@@ -26,6 +26,8 @@ import PageHeader from "../../shared/PageHeader.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import ErrorNote from "./ErrorNote.vue";
 import CaseContextEditor from "./CaseContextEditor.vue";
+import CaseTaxonomyEditor from "./CaseTaxonomyEditor.vue";
+import { copyTaxonomy, type Taxonomy } from "./taxonomy";
 import CaseChangeHistory from "./CaseChangeHistory.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +57,7 @@ watch(() => [project.value, caseId.value], refresh, { immediate: true });
 
 // Editable copy of the case; Save sends only what changed.
 const form = ref<{
+  taxonomy: Taxonomy;
   title: string;
   suiteId: string;
   priority: TestCase["priority"];
@@ -70,6 +73,7 @@ watch(
   (c) => {
     form.value = c
       ? {
+          taxonomy: copyTaxonomy(c.taxonomy),
           title: c.title,
           suiteId: c.suiteId,
           priority: c.priority,
@@ -97,7 +101,8 @@ const dirty = computed(() => {
     f.expected !== c.expected ||
     f.preconditions !== c.preconditions ||
     f.testData !== c.testData ||
-    JSON.stringify(f.steps) !== JSON.stringify(c.steps)
+    JSON.stringify(f.steps) !== JSON.stringify(c.steps) ||
+    JSON.stringify(f.taxonomy) !== JSON.stringify(copyTaxonomy(c.taxonomy))
   );
 });
 const mutation = useMutation();
@@ -270,6 +275,7 @@ const label = (s: string) => s.replaceAll("_", " ");
         class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
       >
         <div class="space-y-6">
+          <CaseTaxonomyEditor v-model="form.taxonomy" :disabled="!canWrite" />
           <div class="bg-card space-y-4 rounded-lg border p-4">
             <div class="space-y-2">
               <Label for="case-title">Title</Label>
