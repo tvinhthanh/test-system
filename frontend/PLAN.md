@@ -25,6 +25,19 @@ draft was removed on 2026-09-18.
 
 ### Active Slice (2026-10-15)
 
+- Closing issue #3 / CI run 38749084024: backend/frontend/reporter/server
+  passed, but live-check stopped before the manual/bulk/specialized scripts.
+  The case form now has 13 checkboxes; the old all-checkbox selector is
+  ambiguous. Reproduced on real local Chrome (one form, 13 checkboxes, one
+  named Critical flow). Narrow the locator by accessible name and assert the
+  created critical flag without changing taxonomy. Also reproduced the local
+  evidence wait hang: lazy thumbnail at y=4667 stays incomplete outside the
+  viewport; scrolling loads it (naturalWidth=1). Scroll before checking and
+  bound image completion to 10 seconds. Full live-check passed locally:
+  20 steps, 145 /v1 calls, no browser errors; non-2xx only the deliberate
+  wrong-password 401/400. Password changed back and logout passed. Script
+  syntax, Prettier and git diff checks passed. New CI must pass before #3 closes.
+
 - Continuing code-resolvable GĐ4: provider-neutral structured results for
   Performance, Security, Accessibility, Compatibility, Recovery and Usability.
   Append-only records, bounded original text report, source/tool/adapter
@@ -60,10 +73,13 @@ on `76f6df0`: frontend, backend, reporter and E2E all passed. Backend includes
 govulncheck, real Postgres/S3 tests, Docker build, compose, promtool and OpenAPI.
 E2E logs confirm both manual workflow and selected/full-filter export.
 
-Current source work: close GĐ4 CI and the expired ingest fixture regression.
-Source commit [e53ad66](https://github.com/tvinhthanh/test-system/commit/e53ad66)
-is pushed; [CI 38748991063](https://github.com/tvinhthanh/test-system/actions/runs/38748991063)
-is running, not yet a verified green gate.
+Current source work: close GĐ4 full-stack E2E in issue #3. Source e53ad66
+and its docs update 84d6337 are pushed. CI 38748991063 was superseded/cancelled;
+[CI 38749084024](https://github.com/tvinhthanh/test-system/actions/runs/38749084024)
+on 84d6337 passed backend/frontend/reporter/server, then failed live-check at
+the ambiguous Critical flow checkbox. Later manual/bulk/specialized scripts
+were not reached by that CI run. This turn fixes the selector and the local
+lazy-evidence wait; new CI verification is still required.
 CI 38707032612 on 86cb699: server/frontend/reporter passed; backend failed
 TestIngestEndToEnd because its September 14 finish left the 30-day window on
 October 15, so E2E was skipped. Reproduced locally before the fix; process-fixed
@@ -88,8 +104,8 @@ memory artifacts and APP_ENV=dev. No deployment acceptance is claimed.
 
 #### Next Actions
 
-1. Commit/push the locally verified GĐ4 slice and ingest fixture fix; verify a
-   new full CI run. E2E now includes live-specialized-results.mjs. Keep group
+1. Commit/push the live-check selector/lazy-image wait fix; verify a new full
+   CI run. E2E includes live-specialized-results.mjs. Keep group
    outcomes separate from automation Run/Attempt and release gates.
 2. Add operational code/tests that can be run independently of the chosen host;
    record real deployment/pilot acceptance only when actually performed.

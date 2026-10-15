@@ -568,11 +568,24 @@ await step(
     await page.goto(base + "/p/" + project + "/cases");
     await page.getByRole("button", { name: "New case" }).first().click();
     await page.fill("#new-title", "Live check case " + stamp);
-    await page.locator("form:has(#new-title) input[type=checkbox]").check();
-    await Promise.all([
+    await page
+      .locator("form:has(#new-title)")
+      .getByRole("checkbox", { name: "Critical flow", exact: true })
+      .check();
+    const [created] = await Promise.all([
       page.waitForResponse(v1(/\/test-cases$/, 201), { timeout: 10000 }),
       page.getByRole("button", { name: "Create", exact: true }).click(),
     ]);
+    const testCase = await created.json();
+    if (
+      testCase.isCritical !== true ||
+      ["purposes", "tags", "executionModes", "performanceTypes"].some(
+        (key) => (testCase.taxonomy?.[key]?.length ?? 0) !== 0,
+      )
+    )
+      throw new Error(
+        "critical checkbox did not preserve independent taxonomy",
+      );
     // The detail page opens; link the first active identity of the project.
     await page.locator("#case-title").waitFor({ timeout: 10000 });
     await page.getByRole("button", { name: "Link a test" }).click();
@@ -616,7 +629,9 @@ await step(
     await page.goto(base + "/p/" + project + "/plans");
     await page.getByRole("button", { name: "New plan" }).first().click();
     await page.fill("#plan-name", "Live check plan " + stamp);
-    await page.getByLabel("Include current active cases", { exact: true }).check();
+    await page
+      .getByLabel("Include current active cases", { exact: true })
+      .check();
     await Promise.all([
       page.waitForResponse(v1(/\/test-plans$/, 201), { timeout: 10000 }),
       page.getByRole("button", { name: "Create", exact: true }).click(),
@@ -649,16 +664,13 @@ await step(
       throw new Error("evidence was not sent as multipart: " + ct);
     const thumb = row.locator(".evidence-thumb").first();
     await thumb.waitFor({ timeout: 10000 });
-    const width = await thumb.evaluate(
-      (img) =>
-        new Promise((ok) => {
-          if (img.complete) ok(img.naturalWidth);
-          else {
-            img.onload = () => ok(img.naturalWidth);
-            img.onerror = () => ok(-1);
-          }
-        }),
+    await thumb.scrollIntoViewIfNeeded();
+    await page.waitForFunction(
+      (img) => img.complete,
+      await thumb.elementHandle(),
+      { timeout: 10000 },
     );
+    const width = await thumb.evaluate((img) => img.naturalWidth);
     if (width !== 1)
       throw new Error(
         "evidence thumbnail did not decode (naturalWidth " + width + ")",
