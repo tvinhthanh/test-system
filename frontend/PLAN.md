@@ -37,7 +37,7 @@ draft was removed on 2026-09-18.
   independent pending gates. Track work in PLAN/SPEC plus GitHub Issues as
   requested by the owner, with links to avoid divergent scope/status.
 
-Implementation is pushed through `86cb699`. The GĐ2/GĐ3 code slices below are
+Implementation is pushed through `e53ad66`. The GĐ2/GĐ3/GĐ4 code slices below are
 implemented and locally verified; the current work is closing CI and deployment
 gates, not rebuilding those features. Team acceptance remains separate.
 
@@ -61,6 +61,9 @@ govulncheck, real Postgres/S3 tests, Docker build, compose, promtool and OpenAPI
 E2E logs confirm both manual workflow and selected/full-filter export.
 
 Current source work: close GĐ4 CI and the expired ingest fixture regression.
+Source commit [e53ad66](https://github.com/tvinhthanh/test-system/commit/e53ad66)
+is pushed; [CI 38748991063](https://github.com/tvinhthanh/test-system/actions/runs/38748991063)
+is running, not yet a verified green gate.
 CI 38707032612 on 86cb699: server/frontend/reporter passed; backend failed
 TestIngestEndToEnd because its September 14 finish left the 30-day window on
 October 15, so E2E was skipped. Reproduced locally before the fix; process-fixed
