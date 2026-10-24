@@ -15,7 +15,10 @@ package tenancy
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -75,12 +78,15 @@ type DeletedOrganization struct {
 }
 
 // Environment separates histories of the same test (§8.2). Key is what the
-// reporter sends as environmentKey (§7.3).
+// reporter sends as environmentKey (§7.3). BaseURL is the address of the
+// system under test there (QĐ-14), "" when nobody recorded one.
 type Environment struct {
 	ID        EnvironmentID
 	ProjectID ProjectID
 	Key       string
+	BaseURL   string
 	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Scope is a project's ancestry — the chain authorize() walks up (§8.8).
@@ -158,6 +164,36 @@ type Service interface {
 	// it on first sight. Ingest calls this for every POST /v1/runs (§7.3), so
 	// it must be idempotent under concurrent first sightings.
 	EnsureEnvironment(ctx context.Context, project ProjectID, key string) (Environment, error)
+	// CreateEnvironment adds a named environment from the dashboard, with
+	// the address testers open there (QĐ-14). A key already in the project
+	// is ErrConflict; a bad key or URL is ErrInvalid.
+	CreateEnvironment(ctx context.Context, project ProjectID, key, baseURL string) (Environment, error)
+	// SetEnvironmentURL replaces an environment's address; "" clears it.
+	SetEnvironmentURL(ctx context.Context, project ProjectID, id EnvironmentID, baseURL string) (Environment, error)
+}
+
+// NormalizeBaseURL checks an address of a system under test and returns it
+// trimmed, without a trailing slash: http or https, a host, no credentials
+// (they would be shown to every reader of the project), at most 2048 bytes.
+// "" stays "" — no address.
+func NormalizeBaseURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", nil
+	}
+	u, err := url.Parse(s)
+	switch {
+	case err != nil, len(s) > 2048, u.Host == "", u.Hostname() == "",
+		u.Scheme != "http" && u.Scheme != "https":
+		return "", fmt.Errorf("%w: baseUrl must be an http(s) address with a host", ErrInvalid)
+	case u.User != nil:
+		return "", fmt.Errorf("%w: baseUrl must not carry a user or password", ErrInvalid)
+	case strings.ContainsAny(s, " \t\r\n"):
+		return "", fmt.Errorf("%w: baseUrl must not contain spaces", ErrInvalid)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	return strings.TrimSuffix(u.String(), "/"), nil
 }
 
 // slugRe is the shape shared by Organization.Slug and Environment.Key: lower

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Activity,
+  BookOpen,
   ChevronsUpDown,
   ClipboardList,
   FolderGit2,
@@ -8,6 +9,7 @@ import {
   GitBranch,
   KeyRound,
   LogOut,
+  Play,
   Scale,
   ShieldCheck,
   UserCog,
@@ -45,6 +47,17 @@ const items = computed(() =>
           icon: Gauge,
           active: route.path.endsWith("/overview"),
         },
+        // QĐ-15: the start of a round of testing, for those who can test.
+        ...(projectAccess.can(props.project, "testmgmt.write")
+          ? [
+              {
+                to: `/p/${p.value}/start`,
+                label: "Start testing",
+                icon: Play,
+                active: route.path.endsWith("/start"),
+              },
+            ]
+          : []),
         {
           to: `/p/${p.value}/roi`,
           label: "ROI",
@@ -75,7 +88,14 @@ const items = computed(() =>
             route.path.includes("/requirements") ||
             route.path.includes("/specialized-results") ||
             route.path.includes("/plans") ||
-            route.path.includes("/releases"),
+            route.path.includes("/releases") ||
+            route.path.includes("/url-checks"),
+        },
+        {
+          to: `/p/${p.value}/guide`,
+          label: "How to test",
+          icon: BookOpen,
+          active: route.path.endsWith("/guide"),
         },
         // CI tokens: maintainers and up (§11.3.2 token.manage).
         ...(projectAccess.can(props.project, "token.manage")

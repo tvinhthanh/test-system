@@ -56,6 +56,20 @@ trong compose) và `OBJSTORE_ENDPOINT=https://$DOMAIN/_objstore` — Caddy chuy�
 Object mất khi api restart; chỉ để demo và cho job `e2e` của CI. Đổi Caddyfile
 phải `docker compose restart caddy` — bind mount không tự reload.
 
+**Tải reporter và URL check (QĐ-14):** `server/atp.sh up` đóng gói reporter
+Playwright vào `deploy/downloads/` (bị `.gitignore`), Caddy mount thư mục đó
+read-only và phục vụ `/downloads/` công khai (tarball `immutable`, `index.json`
+`no-cache`). URL check tắt mặc định: `URLCHECK=on` làm `atp.sh` thêm
+`--profile urlcheck`, compose build `../../checker` thành service `checker`
+(Chromium headless, không publish cổng, `cap_drop ALL`, `no-new-privileges`)
+trên network `checknet` chỉ có worker — Postgres/api/Prometheus không cùng
+network. Proxy trong checker chặn loopback/link-local luôn, dải private trừ khi
+`URLCHECK_ALLOW_PRIVATE=on`. Worker gọi `URLCHECK_URL` (mặc định
+`http://checker:8090`) qua `platform/outbound`. Chạy compose tay thì nhớ
+`--profile urlcheck` khi đã bật.
+
+**AI soạn case (QĐ-15):** api và worker đọc `LLM_API_KEY` (key của người vận hành; trống = chỉ organization có key riêng mới dùng được) qua `env_file`; model và nguồn key chọn trên dashboard. Worker gọi `api.anthropic.com` (hoặc `LLM_BASE_URL`) từ network `default` — cần egress HTTPS. Key riêng của organization nằm trong bảng `ai_settings`, niêm phong bằng khóa dẫn từ `TOKEN_PEPPER` (đổi pepper = phải lưu lại key).
+
 **Prod khác staging ở đâu:** `APP_ENV=prod` đòi `DATABASE_URL` có
 `sslmode=verify-full` (hoặc `verify-ca`) — compose này đã nối như vậy, nên prod
 chạy nguyên trạng khi có `OBJSTORE=s3` thật và `COOKIE_SECURE=true`. CA của

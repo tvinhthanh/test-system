@@ -49,9 +49,10 @@ type client struct {
 }
 
 type resp struct {
-	code int
-	body map[string]any
-	raw  string
+	code   int
+	body   map[string]any
+	raw    string
+	header http.Header
 }
 
 func (c *client) do(method, path string, body any, headers map[string]string) resp {
@@ -84,7 +85,7 @@ func (c *client) do(method, path string, body any, headers map[string]string) re
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)
-	out := resp{code: res.StatusCode, raw: string(raw)}
+	out := resp{code: res.StatusCode, raw: string(raw), header: res.Header}
 	_ = json.Unmarshal(raw, &out.body)
 	return out
 }

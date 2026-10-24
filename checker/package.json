@@ -1,0 +1,17 @@
+{
+  "name": "@atp/url-checker",
+  "version": "0.1.0",
+  "description": "Opens a URL in headless Chromium and reports what a tester would look for first (QĐ-14): load, HTTPS, JS errors, broken resources and links, accessibility, speed, phone fit.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "axe-core": "4.14.0",
+    "playwright": "1.63.0"
+  }
+}

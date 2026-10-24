@@ -15,9 +15,23 @@ const route = useRoute(),
 const project = computed(() =>
   typeof route.params.project === "string" ? route.params.project : "",
 );
+// Workspace › its name › the project's name › the screen. Names come from
+// the project list (ProjectAccess); until it answers, the id stands in.
+const projectName = computed(
+  () => projectAccess.name(project.value) || project.value,
+);
+const workspaceName = computed(() =>
+  projectAccess.workspaceName(project.value),
+);
 const section = computed(() => {
   const path = route.path;
   if (path.endsWith("/overview")) return "Overview";
+  if (path.endsWith("/roi")) return "ROI";
+  if (path.endsWith("/tokens")) return "CI tokens";
+  if (path.includes("/url-checks")) return "URL checks";
+  if (path.endsWith("/guide")) return "How to test";
+  if (path.endsWith("/start")) return "Start testing";
+  if (path.endsWith("/run")) return "Running";
   if (path.includes("/runs")) return "Test runs";
   if (path.endsWith("/review")) return "Review queue";
   if (path.includes("/cases")) return "Test cases";
@@ -91,15 +105,24 @@ async function logout() {
             >Workspace</RouterLink
           >
           <template v-if="project">
-            <ChevronRight :size="14" aria-hidden="true" />
+            <template v-if="workspaceName">
+              <ChevronRight
+                :size="14"
+                aria-hidden="true"
+                class="hidden shrink-0 sm:block"
+              />
+              <span class="hidden truncate sm:inline">{{ workspaceName }}</span>
+            </template>
+            <ChevronRight :size="14" aria-hidden="true" class="shrink-0" />
             <RouterLink
-              :to="`/p/${encodeURIComponent(project)}/runs`"
+              :to="`/p/${encodeURIComponent(project)}/overview`"
               class="text-foreground truncate font-medium"
-              >{{ project }}</RouterLink
+              :title="projectName"
+              >{{ projectName }}</RouterLink
             >
           </template>
           <template v-if="section">
-            <ChevronRight :size="14" aria-hidden="true" />
+            <ChevronRight :size="14" aria-hidden="true" class="shrink-0" />
             <span class="truncate" aria-current="page">{{ section }}</span>
           </template>
         </nav>

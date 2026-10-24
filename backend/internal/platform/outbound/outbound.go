@@ -1,5 +1,6 @@
-// Package outbound is the api's one HTTP client for fixed third-party
-// endpoints — today the OAuth providers of §11.2. §11.6 API7 (SSRF) and
+// Package outbound is the one HTTP client for fixed endpoints — the OAuth
+// providers of §11.2 and the URL checker service (QĐ-14, which is handed
+// the user's address as data and opens it itself). §11.6 API7 (SSRF) and
 // API10 (unsafe consumption) are its shape:
 //
 //   - the hosts it may reach are fixed when it is built, from configuration,
@@ -14,6 +15,7 @@
 package outbound
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,11 +41,12 @@ var (
 type Client struct {
 	hosts map[string]bool
 	http  *http.Client
+	max   int64
 }
 
 // New allows the hosts (host or host:port) of the given base URLs.
 func New(timeout time.Duration, baseURLs ...string) (*Client, error) {
-	c := &Client{hosts: map[string]bool{}, http: &http.Client{
+	c := &Client{hosts: map[string]bool{}, max: maxBody, http: &http.Client{
 		Timeout:       timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}
@@ -67,9 +70,9 @@ func (c *Client) do(req *http.Request, v any) error {
 		return fmt.Errorf("%w: %s: %v", ErrAnswer, req.URL.Host, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
-	if err != nil || len(body) > maxBody {
-		return fmt.Errorf("%w: %s: body unreadable or over %d bytes", ErrAnswer, req.URL.Host, maxBody)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, c.max+1))
+	if err != nil || int64(len(body)) > c.max {
+		return fmt.Errorf("%w: %s: body unreadable or over %d bytes", ErrAnswer, req.URL.Host, c.max)
 	}
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("%w: %s answered %d", ErrAnswer, req.URL.Host, resp.StatusCode)
@@ -78,6 +81,27 @@ func (c *Client) do(req *http.Request, v any) error {
 		return fmt.Errorf("%w: %s: %v", ErrAnswer, req.URL.Host, err)
 	}
 	return nil
+}
+
+// WithMaxBody raises (or lowers) the answer cap from 1 MiB — for an
+// internal service whose answers carry images (the URL checker, QĐ-14).
+func (c *Client) WithMaxBody(n int64) *Client {
+	c.max = n
+	return c
+}
+
+// PostJSON posts v as JSON and decodes the JSON answer into out.
+func (c *Client) PostJSON(ctx context.Context, rawURL string, v, out any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, out)
 }
 
 // PostForm posts a form and decodes the JSON answer into v.

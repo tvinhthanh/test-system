@@ -124,6 +124,8 @@ services:
     <<: *app
     entrypoint: ["/app/worker"]
     expose: ["9090"]
+    # checknet: the one network it shares with the URL checker (QĐ-14).
+    networks: [default, checknet]
     healthcheck:
       test: ["CMD", "/app/healthcheck", "http://127.0.0.1:9090/healthz"]
       interval: 15s
@@ -133,6 +135,30 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # URL checks (QĐ-14): headless Chromium opening the URLs testers type. Only
+  # with URLCHECK=on — server/atp.sh then adds `--profile urlcheck`. It sits
+  # on `checknet` with the worker alone, so Postgres, the api and Prometheus
+  # are not on any network it can reach, even with URLCHECK_ALLOW_PRIVATE=on;
+  # its guarded proxy refuses loopback and link-local (cloud metadata)
+  # always, private ranges unless that switch is on. Nothing is published.
+  checker:
+    image: ${ATP_CHECKER_IMAGE:-atp/checker:local}
+    build:
+      context: ../../checker
+    profiles: ["urlcheck"]
+    environment:
+      URLCHECK_ALLOW_PRIVATE: ${URLCHECK_ALLOW_PRIVATE:-off}
+      CHECKER_CONCURRENCY: ${CHECKER_CONCURRENCY:-2}
+    networks: [checknet]
+    expose: ["8090"]
+    shm_size: 512m # Chromium's shared memory
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
 
   # Operator CLI (org/ws/project/user/token/identity/audit). Not a long-running
   # service: `docker compose run --rm admin <cmd>`.
@@ -172,6 +198,7 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../../frontend/dist:/srv/frontend:ro
+      - ./downloads:/srv/downloads:ro # the reporter tarball server/atp.sh packs
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -196,6 +223,9 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+networks:
+  checknet: {} # worker ↔ URL checker only (QĐ-14)
 
 volumes:
   pgdata:

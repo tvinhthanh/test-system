@@ -144,6 +144,7 @@ type Plan struct {
 	ProjectID        string
 	Name             string
 	EnvironmentID    string
+	TestType         string // smoke, regression, … (QĐ-15); "" when not chosen
 	Status           PlanStatus
 	Executions       []Execution // latest per case, present on Get
 	ExecutionHistory []Execution // newest 200, present on Get
@@ -172,6 +173,7 @@ type PlanPatch struct {
 	Status            *PlanStatus
 	CaseIDs           *[]string
 	CaseUpdate        *PlanCaseUpdate
+	EnvironmentID     *string // "" clears; the caller checks it is the project's
 	ExpectedUpdatedAt time.Time
 }
 
@@ -468,7 +470,12 @@ type NewPlan struct {
 	Actor         string
 	Name          string
 	EnvironmentID string
+	TestType      string // one of PlanTestTypes or ""
 }
+
+// PlanTestTypes are what a plan may be for (QĐ-15): the case taxonomy's
+// usage tags and purposes (migration 0033), checked again by 0038.
+var PlanTestTypes = []string{"smoke", "regression", "e2e", "functional", "performance", "security", "usability", "accessibility", "compatibility", "recovery"}
 
 type NewExecution struct {
 	CaseUpdatedAt time.Time // optional optimistic check against the case displayed by the client

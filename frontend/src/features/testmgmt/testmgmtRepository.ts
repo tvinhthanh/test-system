@@ -137,11 +137,249 @@ export interface StepResult {
   status: ExecutionStatus;
   actual: string;
 }
+// URL checks (QĐ-14): a page opened by the server's checker. Report text
+// (titles, summaries, details) comes from the checked page and is untrusted;
+// components interpolate it, never render it as HTML.
+export type CheckStatus = "passed" | "warning" | "failed" | "not_run";
+export interface UrlCheckItem {
+  key: string;
+  title: string;
+  status: CheckStatus;
+  summary: string;
+  details: string[];
+}
+export interface UrlCheckReport {
+  url: string;
+  finalUrl: string;
+  status: number;
+  title: string;
+  durationMs: number;
+  blocked: string[];
+  metrics: {
+    ttfbMs: number | null;
+    lcpMs: number | null;
+    loadMs: number | null;
+    cls: number | null;
+    requests: number | null;
+    transferBytes: number | null;
+  };
+  checks: UrlCheckItem[];
+}
+export interface UrlCheck {
+  id: string;
+  environmentId: string;
+  url: string;
+  status: "queued" | "done" | "error";
+  verdict: "" | "passed" | "warning" | "failed";
+  title: string;
+  finalUrl: string;
+  requestedBy: string;
+  checkStatuses: CheckStatus[];
+  report: UrlCheckReport | null;
+  error: string;
+  screenshots: ("desktop" | "mobile")[];
+  createdAt: string;
+  finishedAt: string | null;
+}
+const checkStatuses = ["passed", "warning", "failed", "not_run"] as const;
+const optionalNumber = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+function urlCheckItem(value: unknown): UrlCheckItem {
+  const x = d.record(value);
+  return {
+    key: d.string(x.key),
+    title: d.string(x.title),
+    status: oneOf(x.status, checkStatuses),
+    summary: d.string(x.summary),
+    details: d.array(x.details ?? [], d.string, 20),
+  };
+}
+function urlCheckReport(value: unknown): UrlCheckReport {
+  const x = d.record(value);
+  const m = x.metrics ? d.record(x.metrics) : {};
+  return {
+    url: d.string(x.url ?? ""),
+    finalUrl: d.string(x.finalUrl ?? ""),
+    status: optionalNumber(x.status) ?? 0,
+    title: d.string(x.title ?? ""),
+    durationMs: optionalNumber(x.durationMs) ?? 0,
+    blocked: d.array(x.blocked ?? [], d.string, 50),
+    metrics: {
+      ttfbMs: optionalNumber(m.ttfbMs),
+      lcpMs: optionalNumber(m.lcpMs),
+      loadMs: optionalNumber(m.loadMs),
+      cls: optionalNumber(m.cls),
+      requests: optionalNumber(m.requests),
+      transferBytes: optionalNumber(m.transferBytes),
+    },
+    checks: d.array(x.checks ?? [], urlCheckItem, 20),
+  };
+}
+function urlCheck(value: unknown): UrlCheck {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    environmentId: d.string(x.environmentId),
+    url: d.string(x.url),
+    status: oneOf(x.status, ["queued", "done", "error"]),
+    verdict: oneOf(x.verdict, ["", "passed", "warning", "failed"]),
+    title: d.string(x.title),
+    finalUrl: d.string(x.finalUrl),
+    requestedBy: d.string(x.requestedBy),
+    checkStatuses: d.array(
+      x.checkStatuses ?? [],
+      (v) => oneOf(v, checkStatuses),
+      20,
+    ),
+    report: x.report ? urlCheckReport(x.report) : null,
+    error: d.string(x.error ?? ""),
+    screenshots: d.array(
+      x.screenshots ?? [],
+      (v) => oneOf(v, ["desktop", "mobile"]),
+      2,
+    ),
+    createdAt: d.date(x.createdAt),
+    finishedAt: x.finishedAt == null ? null : d.date(x.finishedAt),
+  };
+}
+
+// AI-drafted test cases (QĐ-15). Drafts come from a model that read an
+// untrusted page: shown as text, and nothing is a test case until the
+// tester keeps it (createTestCase).
+export interface AiStatus {
+  available: boolean;
+  source: "" | "organization" | "server";
+  model: string;
+  readsPages: boolean;
+}
+export interface CaseDraft {
+  title: string;
+  priority: Priority;
+  preconditions: string;
+  steps: Step[];
+  why: string;
+}
+export interface CaseSuggestion {
+  id: string;
+  environmentId: string;
+  testType: string;
+  url: string;
+  context: string;
+  count: number;
+  status: "queued" | "done" | "error";
+  drafts: CaseDraft[];
+  pageRead: boolean;
+  model: string;
+  keySource: "" | "organization" | "server";
+  error: string;
+  createdAt: string;
+  finishedAt: string | null;
+}
+export interface AiSettings {
+  models: { id: string; label: string; note: string }[];
+  server: { available: boolean };
+  defaultModel: string;
+  organization: {
+    model: string;
+    keySource: "organization" | "server";
+    keyHint: string;
+    updatedBy: string;
+    updatedAt: string;
+  } | null;
+  effective: AiStatus;
+}
+const keySources = ["", "organization", "server"] as const;
+function draft(value: unknown): CaseDraft {
+  const x = d.record(value);
+  return {
+    title: d.string(x.title),
+    priority: oneOf(x.priority, priorities),
+    preconditions: d.string(x.preconditions ?? ""),
+    steps: d.array(
+      x.steps ?? [],
+      (v) => {
+        const s = d.record(v);
+        return { action: d.string(s.action), expected: d.string(s.expected) };
+      },
+      20,
+    ),
+    why: d.string(x.why ?? ""),
+  };
+}
+function suggestion(value: unknown): CaseSuggestion {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    environmentId: d.string(x.environmentId ?? ""),
+    testType: d.string(x.testType),
+    url: d.string(x.url ?? ""),
+    context: d.string(x.context ?? ""),
+    count: d.integer(x.count),
+    status: oneOf(x.status, ["queued", "done", "error"]),
+    drafts: d.array(x.drafts ?? [], draft, 20),
+    pageRead: bool(x.pageRead ?? false),
+    model: d.string(x.model ?? ""),
+    keySource: oneOf(x.keySource ?? "", keySources),
+    error: d.string(x.error ?? ""),
+    createdAt: d.date(x.createdAt),
+    finishedAt: x.finishedAt == null ? null : d.date(x.finishedAt),
+  };
+}
+function aiStatus(value: unknown): AiStatus {
+  const x = d.record(value);
+  return {
+    available: bool(x.available),
+    source: oneOf(x.source ?? "", keySources),
+    model: d.string(x.model ?? ""),
+    readsPages: bool(x.readsPages ?? false),
+  };
+}
+function aiSettings(value: unknown): AiSettings {
+  const x = d.record(value);
+  const server = d.record(x.server);
+  const org = x.organization == null ? null : d.record(x.organization);
+  return {
+    models: d.array(
+      x.models,
+      (v) => {
+        const m = d.record(v);
+        return {
+          id: d.string(m.id),
+          label: d.string(m.label),
+          note: d.string(m.note),
+        };
+      },
+      20,
+    ),
+    server: { available: bool(server.available) },
+    defaultModel: d.string(x.defaultModel),
+    organization: org && {
+      model: d.string(org.model),
+      keySource: oneOf(org.keySource, ["organization", "server"]),
+      keyHint: d.string(org.keyHint),
+      updatedBy: d.string(org.updatedBy),
+      updatedAt: d.date(org.updatedAt),
+    },
+    effective: aiStatus(x.effective),
+  };
+}
+
+// An environment with the address of the system under test there (QĐ-14).
+// baseUrl is "" until someone records it; the api only stores http(s).
+export interface Environment {
+  id: string;
+  key: string;
+  baseUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
 export interface Plan {
   cases: PlanCase[];
   id: string;
   name: string;
   environmentId: string;
+  environment: Environment | null;
+  testType: string; // smoke, regression, … (QĐ-15); "" when not chosen
   status: PlanStatus;
   executions: Execution[]; // latest per case; [] on lists
   executionHistory: Execution[];
@@ -377,12 +615,30 @@ function plan(value: unknown): Plan {
     id: d.string(x.id),
     name: d.string(x.name),
     environmentId: d.string(x.environmentId),
+    environment:
+      x.environment === null || x.environment === undefined
+        ? null
+        : environment(x.environment),
+    testType: d.string(x.testType ?? ""),
     status: oneOf(x.status, ["draft", "active", "closed"]),
     executions:
       x.executions === undefined ? [] : d.array(x.executions, execution, 5000),
     executionHistory: d.array(x.executionHistory ?? [], execution, 200),
     historyTruncated:
       x.historyTruncated === undefined ? false : bool(x.historyTruncated),
+    createdAt: d.date(x.createdAt),
+    updatedAt: d.date(x.updatedAt ?? x.createdAt),
+  };
+}
+function environment(value: unknown): Environment {
+  const x = d.record(value);
+  const baseUrl = d.string(x.baseUrl);
+  // Rendered as a link: anything but http(s) would be a script vector.
+  if (baseUrl !== "" && !/^https?:\/\//i.test(baseUrl)) return d.invalid();
+  return {
+    id: d.string(x.id),
+    key: d.string(x.key),
+    baseUrl,
     createdAt: d.date(x.createdAt),
     updatedAt: d.date(x.updatedAt ?? x.createdAt),
   };
@@ -896,10 +1152,183 @@ export class TestmgmtRepository {
     name: string,
     signal: AbortSignal,
     caseIds?: string[],
+    environmentId = "",
+    testType = "",
   ) {
     return plan(
       await this.api.request(`${scope(projectId)}/test-plans`, {
-        body: { name, ...(caseIds === undefined ? {} : { caseIds }) },
+        body: {
+          name,
+          ...(caseIds === undefined ? {} : { caseIds }),
+          ...(environmentId ? { environmentId } : {}),
+          ...(testType ? { testType } : {}),
+        },
+        signal,
+      }),
+    );
+  }
+  async setPlanEnvironment(
+    projectId: string,
+    id: string,
+    environmentId: string,
+    signal: AbortSignal,
+  ) {
+    return plan(
+      await this.api.request(`${scope(projectId)}/test-plans/${enc(id)}`, {
+        method: "PATCH",
+        body: { environmentId },
+        signal,
+      }),
+    );
+  }
+  async environments(projectId: string, signal: AbortSignal) {
+    return items(
+      await this.api.request(`${scope(projectId)}/environments`, { signal }),
+      environment,
+      500,
+    );
+  }
+  async createEnvironment(
+    projectId: string,
+    input: { key: string; baseUrl: string },
+    signal: AbortSignal,
+  ) {
+    return environment(
+      await this.api.request(`${scope(projectId)}/environments`, {
+        body: input,
+        signal,
+      }),
+    );
+  }
+  async aiStatus(projectId: string, signal: AbortSignal) {
+    return aiStatus(
+      await this.api.request(`${scope(projectId)}/ai-status`, { signal }),
+    );
+  }
+  async createSuggestion(
+    projectId: string,
+    input: {
+      testType: string;
+      environmentId: string;
+      url: string;
+      context: string;
+      count: number;
+    },
+    signal: AbortSignal,
+  ) {
+    return suggestion(
+      await this.api.request(`${scope(projectId)}/case-suggestions`, {
+        body: {
+          testType: input.testType,
+          count: input.count,
+          ...(input.environmentId
+            ? { environmentId: input.environmentId }
+            : {}),
+          ...(input.url ? { url: input.url } : {}),
+          ...(input.context ? { context: input.context } : {}),
+        },
+        signal,
+      }),
+    );
+  }
+  async suggestion(projectId: string, id: string, signal: AbortSignal) {
+    return suggestion(
+      await this.api.request(
+        `${scope(projectId)}/case-suggestions/${enc(id)}`,
+        { signal },
+      ),
+    );
+  }
+  async aiSettings(orgId: string, signal: AbortSignal) {
+    return aiSettings(
+      await this.api.request(`/v1/organizations/${enc(orgId)}/ai-settings`, {
+        signal,
+      }),
+    );
+  }
+  async saveAiSettings(
+    orgId: string,
+    input: {
+      model: string;
+      keySource: "organization" | "server";
+      apiKey: string;
+    },
+    signal: AbortSignal,
+  ) {
+    return aiSettings(
+      await this.api.request(`/v1/organizations/${enc(orgId)}/ai-settings`, {
+        method: "POST",
+        body: {
+          model: input.model,
+          keySource: input.keySource,
+          ...(input.keySource === "organization" && input.apiKey
+            ? { apiKey: input.apiKey }
+            : {}),
+        },
+        signal,
+      }),
+    );
+  }
+  async deleteAiSettings(orgId: string, signal: AbortSignal) {
+    return aiSettings(
+      await this.api.request(`/v1/organizations/${enc(orgId)}/ai-settings`, {
+        method: "DELETE",
+        signal,
+      }),
+    );
+  }
+  async urlChecks(projectId: string, signal: AbortSignal) {
+    const x = d.record(
+      await this.api.request(`${scope(projectId)}/url-checks`, { signal }),
+    );
+    return {
+      enabled: x.enabled === true,
+      items: d.array(x.items, urlCheck, 100),
+    };
+  }
+  async urlCheck(projectId: string, id: string, signal: AbortSignal) {
+    return urlCheck(
+      await this.api.request(`${scope(projectId)}/url-checks/${enc(id)}`, {
+        signal,
+      }),
+    );
+  }
+  async createUrlCheck(
+    projectId: string,
+    input: { url: string; environmentId: string },
+    signal: AbortSignal,
+  ) {
+    return urlCheck(
+      await this.api.request(`${scope(projectId)}/url-checks`, {
+        body: {
+          ...(input.url ? { url: input.url } : {}),
+          ...(input.environmentId
+            ? { environmentId: input.environmentId }
+            : {}),
+        },
+        signal,
+      }),
+    );
+  }
+  // An <img> source, not a request: same-origin, the session cookie rides
+  // along, and the api serves only JPEG bytes there.
+  urlCheckScreenshot(
+    projectId: string,
+    id: string,
+    which: "desktop" | "mobile",
+  ) {
+    return `${scope(projectId)}/url-checks/${enc(id)}/screenshots/${which}`;
+  }
+  async setEnvironmentUrl(
+    projectId: string,
+    id: string,
+    baseUrl: string,
+    signal: AbortSignal,
+  ) {
+    return environment(
+      await this.api.request(`${scope(projectId)}/environments/${enc(id)}`, {
+        method: "PATCH",
+        body: { baseUrl },
         signal,
       }),
     );

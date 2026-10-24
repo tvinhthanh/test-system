@@ -67,6 +67,26 @@ export class TokensRepository {
     if (!secret.startsWith("atp_")) return d.invalid();
     return { token: token(x.token), secret };
   }
+  // The reporter tarball this server hands out (server/atp.sh packs it,
+  // Caddy serves /downloads/, QĐ-14): a static file, not the /v1 API, so it
+  // is read with plain fetch. null when it is not served here — `vite dev`
+  // answers with index.html, a stack started without atp.sh has no index.
+  async reporterPackage(signal: AbortSignal): Promise<string | null> {
+    try {
+      const r = await fetch("/downloads/index.json", {
+        cache: "no-cache",
+        signal,
+      });
+      if (!r.ok) return null;
+      const file = d.record(await r.json()).file;
+      return typeof file === "string" &&
+        /^atp-playwright-reporter-[\w.-]+\.tgz$/.test(file)
+        ? file
+        : null;
+    } catch {
+      return null;
+    }
+  }
   async revoke(projectId: string, tokenId: string, signal: AbortSignal) {
     await this.api.request(
       `${base(projectId)}/${encodeURIComponent(tokenId)}`,

@@ -18,3 +18,6 @@ backend/deploy/.env
 
 # The root certificate server/atp.sh ca exports.
 server/atp-root-ca.crt
+
+# The reporter tarballs server/atp.sh packs for Caddy's /downloads/.
+backend/deploy/downloads/

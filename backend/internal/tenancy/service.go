@@ -115,26 +115,71 @@ func (s *service) EnsureEnvironment(ctx context.Context, project ProjectID, key 
 		return Environment{}, ErrNotFound
 	}
 	q := s.db.Q(ctx)
-	var e Environment
 	// DO NOTHING + RETURNING yields no row when the key already exists;
 	// the second statement then reads it. Two reporters seeing a new key at
 	// once both succeed: one inserts, the other reads what it inserted.
-	err := q.QueryRow(ctx,
+	e, err := scanEnvironment(q.QueryRow(ctx,
 		`INSERT INTO environments (project_id, key) VALUES ($1, $2)
 		 ON CONFLICT (project_id, key) DO NOTHING
-		 RETURNING id, project_id, key, created_at`, string(project), key,
-	).Scan(&e.ID, &e.ProjectID, &e.Key, &e.CreatedAt)
+		 RETURNING `+environmentColumns, string(project), key))
 	if err == nil {
 		return e, nil
 	}
 	if !errors.Is(err, pg.ErrNoRows) {
 		return Environment{}, mapErr(err)
 	}
-	err = q.QueryRow(ctx,
-		`SELECT id, project_id, key, created_at FROM environments WHERE project_id = $1 AND key = $2`,
-		string(project), key,
-	).Scan(&e.ID, &e.ProjectID, &e.Key, &e.CreatedAt)
+	e, err = scanEnvironment(q.QueryRow(ctx,
+		`SELECT `+environmentColumns+` FROM environments WHERE project_id = $1 AND key = $2`,
+		string(project), key))
 	return e, mapErr(err)
+}
+
+func (s *service) CreateEnvironment(ctx context.Context, project ProjectID, key, baseURL string) (Environment, error) {
+	if !ValidSlug(key) {
+		return Environment{}, fmt.Errorf("%w: environment key %q", ErrInvalid, key)
+	}
+	u, err := NormalizeBaseURL(baseURL)
+	if err != nil {
+		return Environment{}, err
+	}
+	if !uuidRe.MatchString(string(project)) {
+		return Environment{}, ErrNotFound
+	}
+	e, err := scanEnvironment(s.db.Q(ctx).QueryRow(ctx,
+		`INSERT INTO environments (project_id, key, base_url) VALUES ($1, $2, $3) RETURNING `+environmentColumns,
+		string(project), key, nullable(u)))
+	return e, mapErr(err)
+}
+
+func (s *service) SetEnvironmentURL(ctx context.Context, project ProjectID, id EnvironmentID, baseURL string) (Environment, error) {
+	u, err := NormalizeBaseURL(baseURL)
+	if err != nil {
+		return Environment{}, err
+	}
+	if !uuidRe.MatchString(string(project)) || !uuidRe.MatchString(string(id)) {
+		return Environment{}, ErrNotFound
+	}
+	e, err := scanEnvironment(s.db.Q(ctx).QueryRow(ctx,
+		`UPDATE environments SET base_url = $3, updated_at = now() WHERE id = $2 AND project_id = $1 RETURNING `+environmentColumns,
+		string(project), string(id), nullable(u)))
+	return e, mapErr(err)
+}
+
+// nullable stores "" as NULL — no address recorded.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+const environmentColumns = `id, project_id, key, coalesce(base_url, ''), created_at, updated_at`
+
+func scanEnvironment(row interface{ Scan(dest ...any) error }) (Environment, error) {
+	var e Environment
+	err := row.Scan(&e.ID, &e.ProjectID, &e.Key, &e.BaseURL, &e.CreatedAt, &e.UpdatedAt)
+	e.CreatedAt, e.UpdatedAt = e.CreatedAt.UTC(), e.UpdatedAt.UTC()
+	return e, err
 }
 
 // mapErr turns driver errors into the module's sentinels. A foreign-key
@@ -238,15 +283,15 @@ func (s *service) ListEnvironments(ctx context.Context, project ProjectID) ([]En
 	if !uuidRe.MatchString(string(project)) {
 		return nil, ErrNotFound
 	}
-	rows, err := s.db.Q(ctx).Query(ctx, `SELECT id, project_id, key, created_at FROM environments WHERE project_id = $1 ORDER BY key`, string(project))
+	rows, err := s.db.Q(ctx).Query(ctx, `SELECT `+environmentColumns+` FROM environments WHERE project_id = $1 ORDER BY key`, string(project))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Environment
 	for rows.Next() {
-		var e Environment
-		if err := rows.Scan(&e.ID, &e.ProjectID, &e.Key, &e.CreatedAt); err != nil {
+		e, err := scanEnvironment(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)

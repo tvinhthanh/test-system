@@ -8,7 +8,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.43** — 13 ADR đã chốt (QĐ-13 28-09: JUnit backfill, ROI, shadow meter; QĐ-9 sửa lần hai 14-09: client Vue 3; giao diện Tailwind + shadcn-vue 21-09; **QĐ-12 21-09: P2 Test Management khởi công**), ba plane đã đặc tả, 64 phát hiện N đã xử lý; tiến độ build ở §0.5 |
+| Spec | **v3.46** — 15 ADR đã chốt (**QĐ-15 24-10: Start testing — loại test → site → case (thư viện, bộ mẫu, AI) → chạy từng case**; **QĐ-14 23-10: tester dùng không cần source — domain trên plan, URL check, reporter tải từ server, hướng dẫn trong app**; QĐ-13 28-09: JUnit backfill, ROI, shadow meter; QĐ-9 sửa lần hai 14-09: client Vue 3; giao diện Tailwind + shadcn-vue 21-09; **QĐ-12 21-09: P2 Test Management khởi công**), ba plane đã đặc tả, 64 phát hiện N đã xử lý; tiến độ build ở §0.5 |
 | Phase 0 | Khởi động lại **15-09-2026** → Gate-0 **26-10-2026**. Lần chốt 26-08 không diễn ra (0 outreach sau 17 ngày); chốt lại ngày 11-09 theo đường C |
 | Code sản phẩm | **P1-min đã đủ** theo QĐ-11 (11-09 → 18-09): `backend/` (Go, mọi module §6.9.11 trừ billing), `reporter/playwright/`, `frontend/` (Vue), `backend/deploy/` (image + compose staging + CI). Gate kỹ thuật: T0 T1 T3 T4 ✅, T2 dashboard ✅, T5 harness 2 h sạch — xem [`backend/GATES.md`](backend/GATES.md); còn cần hạ tầng cho soak 24 h, ingest trên server, pentest. **P2 Test Management** (QĐ-12, từ 21-09): backend `internal/testmgmt` xong — case/suite/requirement/plan/execution, link tới `TestIdentity`, importer CSV, release gate 5 rule + API cho CI; UI đủ 4 màn hình (cases, requirements, plans, releases); **22-09: bằng chứng thủ công** — file đính kèm execution đi qua `Artifact` (`manual_evidence`, migration 0014), upload multipart qua api, thumbnail trên trang plan; **RBAC 6 role §11.3** (migration 0015, ma trận là dữ liệu + test, `actions[]` trên project cho UI); **27-09: quản lý member** — màn hình Members (thêm/đổi/gỡ role cấp project theo email, thấy role kế thừa), 3 route sau `member.manage`, audit mọi thay đổi (migration 0016); **27-09: MFA TOTP** — bắt buộc cho org owner (§11.2), đăng nhập hai bước, trang Security (bật/tắt, recovery code), migration 0017; **27-09: màn hình Team** — quản lý member ở tầng workspace/org, chỉ owner đụng được role owner, tổ chức luôn giữ một owner; **27-09: đăng nhập Google/GitHub** — bật/tắt từng provider ở backend (`OAUTH_GOOGLE`/`OAUTH_GITHUB`, mặc định off), PKCE, chỉ tài khoản đã có và đã verify, MFA vẫn áp dụng; **28-09: mời qua email** — `MAIL=smtp` (mặc định off), thêm email chưa có tài khoản sẽ gửi link mời một lần, hạn 7 ngày, người nhận đặt mật khẩu và vào thẳng; trang Security có "Connected accounts"; **quên mật khẩu** qua email (cùng `MAIL=smtp`) |
 | Prototype identity | Đạt — precision **1,0000** · recall **0,9920** trên corpus tổng hợp |
@@ -62,6 +62,10 @@ npm install && npm run build
 
 Máy khác trong mạng mở `https://<IP>`: mở cổng 443 (và 80) trên firewall, cài chứng chỉ từ `ca`. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
 
+**Cho tester, không cần source (QĐ-14):** trang **How to test** trong dashboard hướng dẫn quy trình; environment ghi địa chỉ site và gắn vào plan; `up` đóng gói reporter Playwright và phục vụ ở `https://<server>/downloads/` (trang CI tokens in sẵn lệnh `npm install`); **URL check** — nhập địa chỉ, Chromium trên server mở trang và báo cáo tải trang, HTTPS, lỗi JS, link/ảnh hỏng, accessibility, tốc độ, điện thoại — bật bằng `URLCHECK=on` trong `backend/deploy/.env` rồi `up` (thêm service `checker`, image ~1 GB; địa chỉ nội bộ bị chặn trừ khi `URLCHECK_ALLOW_PRIVATE=on`).
+
+**Start testing (QĐ-15):** chọn loại test → site → case (thư viện, bộ mẫu có sẵn, hoặc **AI soạn từ site** bằng Claude) → chạy từng case với site mở sẵn. AI: admin organization vào Team → organization → **AI settings** chọn model và dùng key riêng hoặc key của server; key của server (người vận hành) đặt ở `LLM_API_KEY` trong `backend/deploy/.env`. Không đặt key nào thì phần AI tắt, các phần khác vẫn dùng được.
+
 ## Bốn luật của repo này
 
 1. **`SPEC.md` là nguồn sự thật duy nhất.** Mọi thứ trong `docs/` là lịch sử. Tài liệu nào nói khác SPEC → tài liệu đó sai.
@@ -77,7 +81,8 @@ phase0/              bộ công cụ thi hành: outreach, phỏng vấn, baselin
 backend/             Go monolith P1-min theo §6.9 — QĐ-11; test kiến trúc cưỡng chế §6.9.3; GATES.md = bằng chứng T0–T5
 server/atp.sh        một script cho máy cá nhân làm server: init / up / seed / status / backup / ca / update / reset
 backend/deploy/      image distroless, compose staging (Caddy TLS, Prometheus, backup), openapi.yaml, alert rules
-reporter/playwright/ npm reporter §7.5 — batch, retry, spool, artifact, fingerprint §9.2 khớp Go
+reporter/playwright/ npm reporter §7.5 — batch, retry, spool, artifact, fingerprint §9.2 khớp Go; server phát tarball ở /downloads/
+checker/            URL check (QĐ-14) — Chromium headless sau proxy chặn SSRF, service compose profile urlcheck
 frontend/            dashboard Vue 3 (P1-min UI đủ; QĐ-9 chọn Flutter, chủ dự án chọn Vue 14-09 — PLAN.md)
 .github/workflows/   CI: go test trên Postgres 17 + restore drill, govulncheck, image, lint OpenAPI/alert, npm test/audit, e2e compose
 prototype/identity/  Go — thuật toán test identity §9, có loader Playwright thật

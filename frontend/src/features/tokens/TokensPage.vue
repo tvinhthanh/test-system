@@ -20,6 +20,7 @@ import EmptyState from "../../shared/EmptyState.vue";
 import NativeSelect from "../../shared/NativeSelect.vue";
 import PageHeader from "../../shared/PageHeader.vue";
 import SectionHeading from "../../shared/SectionHeading.vue";
+import TechnicalBlock from "../../shared/TechnicalBlock.vue";
 import { day, time } from "../../shared/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +100,37 @@ const state = (t: ProjectToken) =>
     : Date.parse(t.expiresAt) < Date.now()
       ? "expired"
       : "active";
+
+// "Connect a pipeline": the dashboard and the api share an origin (Caddy in
+// a deployment, Vite's /v1 proxy in dev), so the snippets carry the real
+// ATP_URL. The token itself never goes into them.
+const origin = window.location.origin;
+// The reporter tarball this server hands out (QĐ-14); without one, step 2
+// tells the reader to ask their ATP admin instead.
+const reporterFile = useResource<string | null>();
+onMounted(() => reporterFile.load((signal) => repo.reporterPackage(signal)));
+const installSnippet = computed(() =>
+  reporterFile.data.value
+    ? `npm install --save-dev ${origin}/downloads/${reporterFile.data.value}`
+    : "",
+);
+const configSnippet = `// playwright.config.ts
+export default defineConfig({
+  reporter: [
+    ["list"],
+    ["@atp/playwright-reporter", { environment: "ci" }],
+  ],
+});`;
+const ciSnippet = `# The token is the repository secret ATP_TOKEN
+- run: npx playwright test
+  env:
+    ATP_URL: ${origin}
+    ATP_TOKEN: \${{ secrets.ATP_TOKEN }}`;
+const localSnippet = `ATP_URL=${origin} ATP_TOKEN=atp_ing_… npx playwright test`;
+const junitSnippet = `curl -X POST "${origin}/v1/imports/junit?environment=ci&framework=junit" \\
+  -H "Authorization: Bearer $ATP_TOKEN" \\
+  -H "Content-Type: application/xml" \\
+  --data-binary @junit.xml`;
 </script>
 
 <template>
@@ -245,4 +277,83 @@ const state = (t: ProjectToken) =>
       </Table>
     </div>
   </AsyncState>
+
+  <SectionHeading id="token-guide-title" title="Connect a pipeline" />
+  <section
+    class="token-guide bg-card space-y-5 rounded-lg border p-5 text-sm"
+    aria-labelledby="token-guide-title"
+  >
+    <ol class="space-y-5">
+      <li class="space-y-1">
+        <p class="font-medium">1. Issue a token above</p>
+        <p class="text-muted-foreground">
+          Name it after the pipeline that will use it, for example
+          <code>github-actions main</code>, and copy it straight away: it is
+          shown only once.
+        </p>
+      </li>
+      <li class="space-y-2">
+        <p class="font-medium">2. Add the reporter to the Playwright project</p>
+        <template v-if="installSnippet">
+          <p class="text-muted-foreground">
+            This server hands out <code>@atp/playwright-reporter</code>; install
+            it from here, no copy of the ATP code needed:
+          </p>
+          <TechnicalBlock title="Install" :text="installSnippet" />
+        </template>
+        <p v-else class="text-muted-foreground">
+          Install <code>@atp/playwright-reporter</code>. Ask your ATP admin for
+          the package — it is packed by <code>server/atp.sh up</code> and served
+          at <code>/downloads/</code>.
+        </p>
+        <p class="text-muted-foreground">Then list it in the config:</p>
+        <TechnicalBlock title="playwright.config.ts" :text="configSnippet" />
+      </li>
+      <li class="space-y-2">
+        <p class="font-medium">3. Give the pipeline ATP_URL and ATP_TOKEN</p>
+        <p class="text-muted-foreground">
+          Keep the token in the CI's secret store, never in the repository.
+          ATP_URL is the address of this server.
+        </p>
+        <TechnicalBlock title="GitHub Actions step" :text="ciSnippet" />
+        <TechnicalBlock title="On your own machine" :text="localSnippet" />
+      </li>
+      <li class="space-y-1">
+        <p class="font-medium">4. Run the tests</p>
+        <p class="text-muted-foreground">
+          The run shows up under
+          <RouterLink
+            class="text-primary underline"
+            :to="`/p/${encodeURIComponent(project)}/runs`"
+            >Runs</RouterLink
+          >
+          as soon as it starts, and the token's “Last used” changes above. Tests
+          pass or fail exactly as without the reporter: if ATP_URL or ATP_TOKEN
+          is missing, or the server cannot be reached, it only prints a warning.
+        </p>
+      </li>
+    </ol>
+    <details class="border-t pt-4">
+      <summary class="cursor-pointer font-medium">
+        Not Playwright, own certificates, release gates
+      </summary>
+      <div class="text-muted-foreground mt-3 space-y-3">
+        <p>
+          Any framework that writes JUnit XML (pytest, Jest, JUnit, …) can send
+          its report with the same kind of token:
+        </p>
+        <TechnicalBlock title="JUnit upload" :text="junitSnippet" />
+        <p>
+          A server on a local or LAN address uses its own certificate authority.
+          Node must trust it: point
+          <code>NODE_EXTRA_CA_CERTS</code> at the CA file your ATP admin exports
+          with <code>server/atp.sh ca</code>.
+        </p>
+        <p>
+          Tick “Also read release gates” only for a deploy job that asks
+          <code>GET /v1/releases/{id}/gate</code> whether a release may ship.
+        </p>
+      </div>
+    </details>
+  </section>
 </template>

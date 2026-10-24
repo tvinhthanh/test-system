@@ -57,7 +57,9 @@ export function tone(value: string, flaky = 0) {
     )
   )
     return "success";
-  if (["warn", "automation_candidate", "inconclusive"].includes(value))
+  if (
+    ["warn", "warning", "automation_candidate", "inconclusive"].includes(value)
+  )
     return "warning";
   if (["running", "queued", "active", "open"].includes(value)) return "info";
   return "neutral";

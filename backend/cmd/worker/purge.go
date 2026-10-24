@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
@@ -13,6 +14,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 // purger ends deleted projects whose restore window has passed (§11.3.2
@@ -31,6 +33,8 @@ type purger struct {
 	identity identity.Service
 	testmgmt testmgmt.Service
 	results  results.Service
+	urlcheck urlcheck.Service
+	ai       aisuggest.Service
 }
 
 // run purges up to limit due projects; it returns how many it finished and
@@ -69,7 +73,7 @@ func (p purger) one(ctx context.Context, d tenancy.DeletedProject) error {
 		return err
 	}
 	for _, step := range []func(context.Context, string) error{
-		p.triage.PurgeProject, p.flaky.PurgeProject, p.identity.PurgeProject, p.testmgmt.PurgeProject, p.results.PurgeProject,
+		p.triage.PurgeProject, p.flaky.PurgeProject, p.identity.PurgeProject, p.testmgmt.PurgeProject, p.urlcheck.PurgeProject, p.ai.PurgeProject, p.results.PurgeProject,
 	} {
 		if err := step(ctx, id); err != nil {
 			return err
@@ -173,6 +177,9 @@ func (p purger) org1(ctx context.Context, d tenancy.DeletedOrganization) error {
 	ws := make([]string, 0, len(d.WorkspaceIDs))
 	for _, w := range d.WorkspaceIDs {
 		ws = append(ws, string(w))
+	}
+	if err := p.ai.PurgeOrganization(ctx, string(d.ID)); err != nil {
+		return err
 	}
 	if err := p.authz.PurgeOrganization(ctx, string(d.ID), ws); err != nil {
 		return err

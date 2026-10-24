@@ -20,6 +20,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 	"github.com/vinh/automation-testing-platform/backend/migrations"
 )
 
@@ -135,6 +136,25 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	planA := a.user.post(baseA+"/test-plans", map[string]any{"name": "Sprint 12"}).body["id"].(string)
 	execA := a.user.post(baseA+"/test-plans/"+planA+"/executions", map[string]any{"testCaseId": caseA, "status": "passed"}).body["id"].(string)
 	releaseA := a.user.post(baseA+"/releases", map[string]any{"version": "2026.09.21"}).body["id"].(string)
+	envA, _ := a.user.post(baseA+"/environments", map[string]any{"key": "walk-env", "baseUrl": "https://alpha.example"}).body["id"].(string)
+	if envA == "" {
+		t.Fatal("seeding A's environment failed")
+	}
+	// A finished URL check of A's with a screenshot (QĐ-14): URLCHECK is
+	// off in this server, so it is written the way the worker would.
+	checkA, err := urlcheck.New(db, nil).Create(ctx, string(a.project), envA, "https://alpha.example", "a@alpha.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE url_checks SET status = 'done', verdict = 'passed', report = '{"checks":[]}', desktop_shot = '\xffd8ffe0'::bytea, finished_at = now() WHERE id = $1`, checkA.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A finished AI suggestion of A's (QĐ-15), written directly: no model here.
+	var suggestionA string
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO case_suggestions (project_id, org_id, test_type, count, status, drafts, requested_by, finished_at)
+		VALUES ($1, $2, 'smoke', 1, 'done', '[]', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID).Scan(&suggestionA); err != nil {
+		t.Fatal(err)
+	}
 	if reqA == "" || caseA == "" || linkA == "" || planA == "" || execA == "" || releaseA == "" {
 		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q %q", reqA, caseA, linkA, planA, execA, releaseA)
 	}
@@ -159,8 +179,11 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
 		"userId":      a.userID,
 		"workspaceId": a.wsID, "organizationId": a.orgID,
-		"invitationId": inviteA.ID,
-		"tokenId":      a.tokenID,
+		"invitationId":  inviteA.ID,
+		"tokenId":       a.tokenID,
+		"environmentId": envA,
+		"checkId":       checkA.ID, "which": "desktop",
+		"suggestionId": suggestionA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -198,6 +221,11 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/runs/{runId}/restore":             map[string]any{},
 		"DELETE /v1/projects/{projectId}":                                map[string]any{"confirmName": "alpha-app"},
 		"PATCH /v1/projects/{projectId}/settings":                        map[string]any{"retention": map[string]int{"video": 1}},
+		"POST /v1/projects/{projectId}/environments":                     map[string]any{"key": "walk-b", "baseUrl": "https://beta.example"},
+		"POST /v1/projects/{projectId}/url-checks":                       map[string]any{"url": "https://beta.example"},
+		"POST /v1/projects/{projectId}/case-suggestions":                 map[string]any{"testType": "smoke"},
+		"POST /v1/organizations/{organizationId}/ai-settings":            map[string]any{"apiKey": "sk-walk", "model": "claude-opus-5-5"},
+		"PATCH /v1/projects/{projectId}/environments/{environmentId}":    map[string]any{"baseUrl": "https://beta.example"},
 		"POST /v1/workspaces/{workspaceId}/projects/{projectId}/restore": map[string]any{},
 		"POST /v1/workspaces/{workspaceId}/projects":                     map[string]any{"name": "walk project"},
 		"POST /v1/workspaces/{workspaceId}/members":                      map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},

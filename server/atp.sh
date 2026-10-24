@@ -18,6 +18,7 @@
 #   admin <args…>                   the operator CLI (org/ws/project/user/role/token/audit…)
 #   backup | backups | backup-copy <dir>
 #   ca [file]                       export Caddy's root certificate for other devices
+#   reporter                        re-pack the Playwright reporter served at /downloads/ (up does it too)
 #   reset                           stop and DELETE ALL DATA (asks first)
 #
 # Requirements: docker (with compose v2; the dashboard is built in a Node
@@ -33,7 +34,15 @@ export MSYS_NO_PATHCONV=1
 # Paths handed to docker are native ones (C:/… on Windows): with path
 # conversion off, docker would read a Git Bash /c/… or /tmp/… literally.
 host_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi; }
-dc() { docker compose -f "$(host_path "$DEPLOY/compose.yml")" --env-file "$(host_path "$ENV_FILE")" "$@"; }
+# URLCHECK=on in the config also runs the URL checker (compose profile).
+dc() {
+	local profile=()
+	if [ -f "$ENV_FILE" ] && [ "$(grep -E '^URLCHECK=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '\r')" = on ]; then
+		profile=(--profile urlcheck)
+	fi
+	# ${a[@]+…}: an empty array under `set -u` is an error in macOS's bash 3.2.
+	docker compose -f "$(host_path "$DEPLOY/compose.yml")" --env-file "$(host_path "$ENV_FILE")" ${profile[@]+"${profile[@]}"} "$@"
+}
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
@@ -147,9 +156,30 @@ build_ui() {
 			rm -rf /out/* && cp -r dist/. /out/'
 }
 
+# The Playwright reporter as an npm tarball that Caddy serves at /downloads/
+# (QĐ-14): a test project installs it from this server, without a copy of
+# the ATP repository. Packed like the dashboard is built, in a throwaway
+# Node container from a copy of reporter/playwright; only the tarball and
+# index.json come back (reporter/playwright/scripts/pack-for-server.mjs
+# explains the file names and why old tarballs stay).
+build_reporter() {
+	say "packing the Playwright reporter (backend/deploy/downloads)"
+	mkdir -p "$DEPLOY/downloads"
+	docker run --rm \
+		-v "$(host_path "$ROOT/reporter/playwright"):/src:ro" \
+		-v "$(host_path "$DEPLOY/downloads"):/out" \
+		-v atp-npm-cache:/root/.npm \
+		node:22-alpine sh -ec '
+			mkdir /build
+			cd /src && tar --exclude=./node_modules --exclude=./dist --exclude=./test-results -cf - . | tar -xf - -C /build
+			cd /build && npm ci --no-audit --no-fund --loglevel=error && npm run build
+			node scripts/pack-for-server.mjs /out'
+}
+
 cmd_up() {
 	need_env; need docker "https://docs.docker.com/get-docker/"
 	build_ui
+	build_reporter
 	say "building images and starting the stack"
 	dc up -d --build
 	wait_healthy
@@ -340,7 +370,8 @@ case "${1:-help}" in
 	backup-copy) shift; cmd_backup_copy "$@" ;;
 	ca) shift; cmd_ca "$@" ;;
 	update) cmd_update ;;
+	reporter) need docker "https://docs.docker.com/get-docker/"; build_reporter ;;
 	reset) cmd_reset ;;
-	help | -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
+	help | -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
 	*) die "unknown command '$1' — see: $0 help" ;;
 esac

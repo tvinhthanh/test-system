@@ -350,3 +350,47 @@ func TestNoOutboundHTTPFromDomainModules(t *testing.T) {
 		t.Fatal("scanned no files under internal/")
 	}
 }
+
+// TestLLMOnlyThroughPlatform: the model provider's SDK does its own HTTP, so
+// the needle scan above cannot see it. It is allowed in exactly one place —
+// platform/llm, whose host is fixed by configuration (QĐ-15) — and a module
+// that wants a model goes through that package's narrow interface.
+func TestLLMOnlyThroughPlatform(t *testing.T) {
+	root := filepath.Join("..", "..")
+	found := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "testdata" || d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".") && path != root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// Split so this file does not match itself.
+		if !strings.Contains(string(src), `"github.com/anthropics/`+`anthropic-sdk-go`) {
+			return nil
+		}
+		rel := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		if strings.HasPrefix(rel, "internal/platform/llm/") {
+			found++
+			return nil
+		}
+		t.Errorf("%s imports the Anthropic SDK — only internal/platform/llm may (QĐ-15)", rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == 0 {
+		t.Fatal("internal/platform/llm does not import the SDK — the walk looked in the wrong place")
+	}
+}

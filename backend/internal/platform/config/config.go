@@ -78,6 +78,20 @@ type Config struct {
 	// SMTP_PASSWORD, SMTP_FROM and SMTP_TLS=starttls|tls (none: dev only,
 	// for a local catcher like Mailpit). Needs PUBLIC_URL for the links.
 	Mail Mail
+	// URL checks (QĐ-14): URLCHECK=on|off (default off) lets testers have a
+	// page opened and checked by the checker service at URLCHECK_URL
+	// (default http://checker:8090, the compose service). The address is
+	// configuration, never a request's — the URL to check travels in the
+	// body to that one fixed host.
+	URLCheck    bool
+	URLCheckURL string
+	// AI-drafted test cases (QĐ-15): the server's own Anthropic API key
+	// (LLM_API_KEY, "" = none — organizations may still bring theirs). The
+	// model is not configuration: each organization picks it in the
+	// dashboard. LLM_BASE_URL points the client elsewhere (tests, an egress
+	// proxy); "" is the Anthropic API.
+	LLMAPIKey  string
+	LLMBaseURL string
 }
 
 // Mail is the outgoing mail switch and SMTP settings.
@@ -148,6 +162,19 @@ func Load() (Config, error) {
 	}
 	c.PublicURL = strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/")
 	c.TrustedProxies = os.Getenv("TRUSTED_PROXIES")
+	switch v := strings.ToLower(getenv("URLCHECK", "off")); v {
+	case "on", "true", "1":
+		c.URLCheck = true
+	case "off", "false", "0":
+	default:
+		return c, fmt.Errorf("URLCHECK=%q: want on|off", v)
+	}
+	c.LLMAPIKey = strings.TrimSpace(os.Getenv("LLM_API_KEY"))
+	c.LLMBaseURL = strings.TrimSuffix(os.Getenv("LLM_BASE_URL"), "/")
+	c.URLCheckURL = strings.TrimSuffix(getenv("URLCHECK_URL", "http://checker:8090"), "/")
+	if u, err := url.Parse(c.URLCheckURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return c, fmt.Errorf("URLCHECK_URL=%q: want http(s)://host[:port]", c.URLCheckURL)
+	}
 	switch v := strings.ToLower(getenv("MAIL", "off")); v {
 	case "smtp":
 		c.Mail.Enabled = true

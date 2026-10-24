@@ -3,6 +3,7 @@ import {
   FileText,
   Lock,
   Paperclip,
+  Play,
   RefreshCw,
   Search,
   Unlock,
@@ -36,6 +37,8 @@ import PageHeader from "../../shared/PageHeader.vue";
 import StatTile from "../../shared/StatTile.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import ErrorNote from "./ErrorNote.vue";
+import EnvironmentPicker from "./EnvironmentPicker.vue";
+import { testTypeById } from "./testTypes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -100,6 +103,7 @@ const counts = computed(() => {
 });
 const mutation = useMutation();
 const closed = computed(() => plan.data.value?.status === "closed");
+const planType = computed(() => testTypeById(plan.data.value?.testType ?? ""));
 async function record(
   c: TestCase,
   input: {
@@ -128,6 +132,18 @@ async function record(
 async function setStatus(status: Plan["status"]) {
   const updated = await mutation.run("status", (signal) =>
     testmgmt.setPlanStatus(project.value, planId.value, status, signal),
+  );
+  if (updated) plan.data.value = updated;
+}
+// The site this plan is tested on (QĐ-14); a closed plan keeps its own.
+async function setEnvironment(environmentId: string) {
+  const updated = await mutation.run("environment", (signal) =>
+    testmgmt.setPlanEnvironment(
+      project.value,
+      planId.value,
+      environmentId,
+      signal,
+    ),
   );
   if (updated) plan.data.value = updated;
 }
@@ -213,11 +229,21 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
         class="inline-flex flex-wrap items-center gap-2"
       >
         <StatusBadge :status="plan.data.value.status" />
+        <Badge v-if="planType" variant="outline">{{ planType.label }}</Badge>
         <span class="text-muted-foreground text-xs"
           >opened {{ time(plan.data.value.createdAt) }}</span
         >
       </span>
     </template>
+    <!-- QĐ-15: case by case, with the site one click away. -->
+    <Button
+      v-if="canWrite && plan.data.value && !closed && planCases.length"
+      as-child
+      size="sm"
+      ><RouterLink :to="`${base()}/plans/${encodeURIComponent(planId)}/run`"
+        ><Play />Run</RouterLink
+      ></Button
+    >
     <Button
       v-if="canWrite && plan.data.value && !closed"
       variant="outline"
@@ -254,6 +280,41 @@ const isVideo = (e: Evidence) => e.contentType.startsWith("video/");
     :error="plan.error.value"
     @retry="refresh"
   >
+    <section
+      v-if="plan.data.value"
+      class="plan-environment bg-card mb-4 rounded-lg border p-4"
+      aria-label="Site under test"
+    >
+      <EnvironmentPicker
+        v-if="canWrite && !closed"
+        id="plan-detail-environment"
+        :model-value="plan.data.value.environmentId"
+        :project="project"
+        :can-write="canWrite"
+        :disabled="mutation.busy.value !== null"
+        @update:model-value="setEnvironment"
+      />
+      <p v-else class="text-sm">
+        <span class="text-muted-foreground">Site under test: </span>
+        <template v-if="plan.data.value.environment">
+          {{ plan.data.value.environment.key }}
+          <a
+            v-if="plan.data.value.environment.baseUrl"
+            :href="plan.data.value.environment.baseUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-primary underline"
+            >{{ plan.data.value.environment.baseUrl }}</a
+          >
+        </template>
+        <span v-else class="text-muted-foreground">not recorded</span>
+      </p>
+      <ErrorNote
+        v-if="mutation.error.value?.key === 'environment'"
+        class="mt-3"
+        :error="mutation.error.value.error"
+      />
+    </section>
     <section
       class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"
       aria-label="Plan progress"

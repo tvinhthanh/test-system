@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
@@ -28,6 +29,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 // The dashboard's HTTP surface is frontend/API_CONTRACT.md, implemented
@@ -73,6 +75,14 @@ type dashboard struct {
 	flaky    flaky.Service
 	// meter reads the §10.6 shadow meter (meter.go).
 	meter billing.Service
+	// urlcheck queues URL checks (urlchecks.go, QĐ-14); urlChecksOn is
+	// URLCHECK — off, old checks stay readable but no new one is queued.
+	urlcheck    urlcheck.Service
+	urlChecksOn bool
+	// ai drafts test cases (ai.go, QĐ-15); the server's own key is never
+	// shown, only whether there is one.
+	ai           aisuggest.Service
+	llmServerKey bool
 }
 
 // routes mounts the dashboard behind a per-user rate limit (§11.6 API4):
@@ -113,6 +123,9 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.projectCreateRoutes(handle)
 	d.projectDeleteRoutes(handle)
 	d.projectSettingsRoutes(handle)
+	d.environmentRoutes(handle)
+	d.urlCheckRoutes(handle)
+	d.aiRoutes(handle)
 	d.orgDeleteRoutes(handle)
 	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).

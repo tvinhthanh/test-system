@@ -13,6 +13,7 @@ import EmptyState from "../../shared/EmptyState.vue";
 import PageHeader from "../../shared/PageHeader.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import ErrorNote from "./ErrorNote.vue";
+import EnvironmentPicker from "./EnvironmentPicker.vue";
 import TmTabs from "./TmTabs.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ function refresh() {
 watch(project, refresh, { immediate: true });
 const panel = ref(false);
 const name = ref("");
+const environmentId = ref("");
 const includeAll = ref(false);
 const mutation = useMutation();
 async function create() {
@@ -40,10 +42,12 @@ async function create() {
       name.value,
       signal,
       includeAll.value ? undefined : [],
+      environmentId.value,
     ),
   );
   if (created) {
     name.value = "";
+    environmentId.value = "";
     await router.push(`${base()}/plans/${encodeURIComponent(created.id)}`);
   }
 }
@@ -83,6 +87,12 @@ async function create() {
         placeholder="Release 2026.10 regression"
       />
     </div>
+    <EnvironmentPicker
+      v-model="environmentId"
+      class="sm:col-span-2"
+      :project="project"
+      :can-write="canWrite"
+    />
     <label class="flex items-center gap-2 text-sm sm:col-span-2"
       ><input v-model="includeAll" type="checkbox" />Include current active
       cases</label
@@ -126,7 +136,13 @@ async function create() {
               p.name
             }}</strong>
             <span class="text-muted-foreground block text-xs"
-              >opened {{ time(p.createdAt) }}</span
+              >opened {{ time(p.createdAt)
+              }}<template v-if="p.environment">
+                · {{ p.environment.key
+                }}<template v-if="p.environment.baseUrl">
+                  · {{ p.environment.baseUrl }}</template
+                ></template
+              ></span
             >
           </span>
           <StatusBadge :status="p.status" />

@@ -152,16 +152,18 @@ func evidenceOut(a artifact.Artifact) evidenceDTO {
 }
 
 type planDTO struct {
-	Cases            []planCaseDTO  `json:"cases"`
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	EnvironmentID    string         `json:"environmentId"`
-	Status           string         `json:"status"`
-	Executions       []executionDTO `json:"executions,omitempty"`
-	ExecutionHistory []executionDTO `json:"executionHistory,omitempty"`
-	HistoryTruncated bool           `json:"historyTruncated"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	UpdatedAt        time.Time      `json:"updatedAt"`
+	Cases            []planCaseDTO   `json:"cases"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	EnvironmentID    string          `json:"environmentId"`
+	Environment      *environmentDTO `json:"environment"` // with the address testers open (QĐ-14); null without one
+	TestType         string          `json:"testType"`    // smoke, regression, … (QĐ-15); "" when not chosen
+	Status           string          `json:"status"`
+	Executions       []executionDTO  `json:"executions,omitempty"`
+	ExecutionHistory []executionDTO  `json:"executionHistory,omitempty"`
+	HistoryTruncated bool            `json:"historyTruncated"`
+	CreatedAt        time.Time       `json:"createdAt"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
 }
 
 type planCaseDTO struct {
@@ -248,7 +250,7 @@ func executionOut(e testmgmt.Execution, evidence []artifact.Artifact) executionD
 // plan's executions (cmd/api joins the two modules, testmgmt never imports
 // artifact — §6.8.6, test/arch).
 func planOut(p testmgmt.Plan, evidence map[string][]artifact.Artifact) planDTO {
-	out := planDTO{ID: p.ID, Name: p.Name, EnvironmentID: p.EnvironmentID, Status: string(p.Status), CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC()}
+	out := planDTO{ID: p.ID, Name: p.Name, EnvironmentID: p.EnvironmentID, TestType: p.TestType, Status: string(p.Status), CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC()}
 	if p.Executions != nil {
 		out.Executions = make([]executionDTO, 0, len(p.Executions))
 		for _, e := range p.Executions {
@@ -556,6 +558,30 @@ type caseBody struct {
 	OwnerID           *string            `json:"ownerId"`
 }
 
+// A plan scope carries up to 5000 case ids (~200 KB) and an execution up to
+// 200 step results of 4000 bytes each plus a note: both are past the 16 KiB
+// of decodeSmall, so each route gets the bound its contract implies.
+const (
+	planBodyMax      = 256 << 10
+	executionBodyMax = 2 << 20
+)
+
+// decodeBounded is decodeSmall with the route's own bound, and a body past
+// it is a 413, not "malformed JSON".
+func decodeBounded(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	if err := decodeJSON(r, v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body too large", map[string]any{"limit": limit})
+			return false
+		}
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "malformed JSON", nil)
+		return false
+	}
+	return true
+}
+
 func decodeCase(w http.ResponseWriter, r *http.Request) (caseBody, bool) {
 	var req caseBody
 	r.Body = http.MaxBytesReader(w, r.Body, 512<<10) // steps can be long; still bounded
@@ -754,7 +780,35 @@ func (d *dashboard) tmPlans(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, listOut(items, func(p testmgmt.Plan) planDTO { return planOut(p, nil) }))
+	envs, err := d.projectEnvironments(r, string(scope.ProjectID))
+	if err != nil {
+		d.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, listOut(items, func(p testmgmt.Plan) planDTO { return withEnvironment(planOut(p, nil), envs) }))
+}
+
+// withEnvironment fills a plan's environment from the project's.
+func withEnvironment(p planDTO, envs map[string]environmentDTO) planDTO {
+	if e, ok := envs[p.EnvironmentID]; ok {
+		p.Environment = &e
+	}
+	return p
+}
+
+// planEnvironment refuses an environment id that is not the project's, so
+// a plan never points at another tenant's environment. "" (none) passes.
+func (d *dashboard) planEnvironment(w http.ResponseWriter, r *http.Request, project, id string) (map[string]environmentDTO, bool) {
+	envs, err := d.projectEnvironments(r, project)
+	if err != nil {
+		d.internal(w, r, err)
+		return nil, false
+	}
+	if _, ok := envs[id]; id != "" && !ok {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "environmentId is not an environment of this project", map[string]any{"field": "environmentId"})
+		return nil, false
+	}
+	return envs, true
 }
 
 func (d *dashboard) tmCreatePlan(w http.ResponseWriter, r *http.Request) {
@@ -762,20 +816,25 @@ func (d *dashboard) tmCreatePlan(w http.ResponseWriter, r *http.Request) {
 		CaseIDs       *[]string `json:"caseIds"`
 		Name          string    `json:"name"`
 		EnvironmentID string    `json:"environmentId"`
+		TestType      string    `json:"testType"`
 	}
-	if !decodeSmall(w, r, &req) {
+	if !decodeBounded(w, r, &req, planBodyMax) {
 		return
 	}
 	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
 	if !ok {
 		return
 	}
-	out, err := d.tm.CreatePlan(r.Context(), project, testmgmt.NewPlan{Name: req.Name, EnvironmentID: req.EnvironmentID, CaseIDs: req.CaseIDs, Actor: actor})
+	envs, ok := d.planEnvironment(w, r, project, req.EnvironmentID)
+	if !ok {
+		return
+	}
+	out, err := d.tm.CreatePlan(r.Context(), project, testmgmt.NewPlan{Name: req.Name, EnvironmentID: req.EnvironmentID, TestType: req.TestType, CaseIDs: req.CaseIDs, Actor: actor})
 	if err != nil {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, planOut(out, nil))
+	writeJSON(w, http.StatusCreated, withEnvironment(planOut(out, nil), envs))
 }
 
 func (d *dashboard) tmPlan(w http.ResponseWriter, r *http.Request) {
@@ -804,13 +863,19 @@ func (d *dashboard) writePlan(w http.ResponseWriter, r *http.Request, out testmg
 		d.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, planOut(out, evidence))
+	envs, err := d.projectEnvironments(r, out.ProjectID)
+	if err != nil {
+		d.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, withEnvironment(planOut(out, evidence), envs))
 }
 
 func (d *dashboard) tmPatchPlan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Status            *string    `json:"status"`
 		CaseIDs           *[]string  `json:"caseIds"`
+		EnvironmentID     *string    `json:"environmentId"`
 		ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 		CaseUpdate        *struct {
 			TestCaseID    string  `json:"testCaseId"`
@@ -818,14 +883,19 @@ func (d *dashboard) tmPatchPlan(w http.ResponseWriter, r *http.Request) {
 			WorkStatus    *string `json:"workStatus"`
 		} `json:"caseUpdate"`
 	}
-	if !decodeSmall(w, r, &req) {
+	if !decodeBounded(w, r, &req, planBodyMax) {
 		return
 	}
 	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)
 	if !ok {
 		return
 	}
-	patch := testmgmt.PlanPatch{Status: (*testmgmt.PlanStatus)(req.Status), CaseIDs: req.CaseIDs}
+	patch := testmgmt.PlanPatch{Status: (*testmgmt.PlanStatus)(req.Status), CaseIDs: req.CaseIDs, EnvironmentID: req.EnvironmentID}
+	if req.EnvironmentID != nil {
+		if _, ok := d.planEnvironment(w, r, project, *req.EnvironmentID); !ok {
+			return
+		}
+	}
 	if req.ExpectedUpdatedAt != nil {
 		patch.ExpectedUpdatedAt = *req.ExpectedUpdatedAt
 	}
@@ -882,7 +952,7 @@ func (d *dashboard) tmExecute(w http.ResponseWriter, r *http.Request) {
 		BugURL        string                `json:"bugUrl"`
 		RetestOf      string                `json:"retestOf"`
 	}
-	if !decodeSmall(w, r, &req) {
+	if !decodeBounded(w, r, &req, executionBodyMax) {
 		return
 	}
 	project, actor, ok := d.writer(w, r, authz.ActionTestmgmtWrite)

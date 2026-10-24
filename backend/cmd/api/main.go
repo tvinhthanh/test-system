@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
@@ -25,6 +26,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/llm"
 	platlog "github.com/vinh/automation-testing-platform/backend/internal/platform/log"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
@@ -39,6 +41,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 func main() {
@@ -167,7 +170,9 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
 	qry := query.New(db)
 	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
-	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res)}).routes(mux)
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck,
+		ai:           aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: llm.New(cfg.LLMBaseURL), ServerKey: cfg.LLMAPIKey}),
+		llmServerKey: cfg.LLMAPIKey != ""}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it

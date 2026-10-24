@@ -361,6 +361,18 @@ govulncheck pin v1.1.4 → v1.9.0. Local với go1.26.9: `govulncheck ./...` →
 được gọi** (18 advisory nằm trong module require nhưng code không gọi), build/vet/
 gofmt/unit sạch.
 
+**Dependency review 21-10:** lần rà soát cuối trước bàn giao, `govulncheck ./...`
+trên go1.26.9 báo **1 lỗ hổng được gọi**: GO-2026-6809 (`crypto/x509` tin nhầm
+chứng chỉ trung gian đã bị thu hồi), đường gọi `mail.SMTP.Send` →
+`tls.DialWithDialer` → `x509.Certificate.Verify`. Vá ở go1.26.10: `toolchain
+go1.26.10` (dòng `go 1.25.5` giữ nguyên), CI `setup-go` + `golang:1.26.10-alpine`
+theo cùng; govulncheck vẫn v1.9.0. Local với go1.26.10: `govulncheck ./...` →
+**0 được gọi** (18 advisory còn lại nằm trong module require nhưng code không
+gọi); gofmt/vet/`go test ./...` trên Postgres thật sạch. `npm audit` reporter: 0. Frontend (phần của agent frontend):
+`vite` 6.4.3 dính GHSA-698v-4r3x-3vcv / GHSA-r825-w8mm-5pxw / GHSA-587h-7wmj-h5pm
+(launch-editor, high) — job frontend của CI sẽ đỏ ở `npm audit` cho tới khi nâng
+lên vite 6.4.5.
+
 **Đối chiếu CI ngày 15-10:** [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
 trên `76f6df0` đã completed/success. Backend pass govulncheck, test Postgres/S3,
 Docker build, Compose config, promtool và OpenAPI; frontend/reporter/E2E đều
@@ -583,3 +595,54 @@ của `METRICS_ADDR` trước khi kết luận.
 | 6 | Chấp nhận (thiết kế §11.2) | Ai biết email cũng khóa được tài khoản đó 15 phút+ (giới hạn "theo account") | giữ; quên mật khẩu mở khóa | `TestPasswordReset` |
 
 Đã kiểm và **không** có lỗ: CSRF trên mọi route ghi (kể cả ẩn danh: double-submit + Origin), login CSRF qua OAuth (state gắn cookie), phát lại mã TOTP, recovery code dùng một lần, token (mời/reset/challenge) chỉ lưu HMAC và không đi qua URL server thấy, access log chỉ ghi path, liên kết OAuth chỉ khi email verify **cả hai phía**, email đã có tài khoản không bị link chiếm, owner không tắt được MFA, owner mới bị giữ ở bước bật MFA, owner cuối không bị hạ (khóa hàng), gọi ra ngoài chỉ tới host lấy từ cấu hình, header mail không nhận CR/LF.
+
+## Rà soát cuối API + frontend — 21-10-2026
+
+Chạy lại mọi gate chạy được trên laptop (Postgres 17.5 thật, cụm initdb trong scratchpad): gofmt/vet sạch, `go test ./...` 29 package pass, 5 skip đều là test S3 cần SeaweedFS (CI chạy); reporter 20 pass + 1 opt-in (outage, CI chạy); `server/tests/doctor.sh` 11/11; frontend typecheck, 103/103 vitest, build + bundle gate 54,9 KiB gzip (build ra scratchpad, không đụng `frontend/dist`). Sau đó đọc phần backend viết 13–15-10 (testmgmt: lịch sử thực thi, phạm vi plan, audit case, taxonomy, CSV/export, specialized results, migration 0030–0034) và đối chiếu từng decoder của frontend với giới hạn thật của API.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 1 | Cao | Tạo/sửa plan và ghi execution đọc body bằng `decodeSmall` (16 KiB), trong khi hợp đồng cho `caseIds` tới 5000 (~200 KB) và 200 `stepResults` × 4000 byte: plan từ ~420 case, hoặc vài bước ghi "actual" dài (UI cho 4000 ký tự mỗi bước), nhận `400 malformed JSON` | `decodeBounded` theo route: 256 KiB cho plan, 2 MiB cho execution; vượt → `413 PAYLOAD_TOO_LARGE`, ghi trong openapi | `TestPlanAndExecutionBodiesUpToTheContract` (đỏ trước khi sửa: plan 500 case → 400) |
+| 2 | Cao (gate CI) | govulncheck: GO-2026-6809 được gọi qua `mail.SMTP.Send` | toolchain go1.26.10 (dependency review 21-10 ở trên) | govulncheck: 0 được gọi |
+| 3 | Trung bình | `executedAt` của execution do client gửi, không chặn tương lai; verdict của case là execution có `executed_at` mới nhất, nên một bản ghi đề năm 2099 (nhầm đồng hồ hay cố ý qua API) ghim verdict mãi mãi | quá hiện tại > 5 phút → `400` (lệch đồng hồ 5 phút như specialized report); ghi lùi ngày vẫn nhận | `TestExecutionSnapshotRetestAndHistory`: +1 h → `ErrInvalid` (đỏ trước khi sửa), −48 h nhận và không thành verdict |
+| 4 | Trung bình, chờ quyết định | `GET /v1/releases/{id}/gate`: openapi bảo CI "dừng khi `gate.verdict == blocked` trừ khi có override", nên CI vẫn qua khi người quyết `blocked` mà gate `approved`, khi chưa evaluate (`gate: null`) và khi `no_evidence`. Đoạn `jq` trên trang release làm đúng như doc | Đề xuất: `status` approved/shipped → qua; `blocked` → dừng; `open` → chỉ qua khi verdict `approved`/`warn` | — |
+| 5 | Thấp | Body case POST/PATCH giữ 512 KiB, dưới mức lý thuyết 200 bước × 4000 byte; openapi ghi `maxLength` (ký tự) nhưng server đếm byte UTF-8, nên chữ tiếng Việt gần ngưỡng bị từ chối dù UI cho nhập | giữ, ghi lại | — |
+
+Giao cho agent frontend (không sửa ở đây): vite 6.4.3 → 6.4.5 (npm audit high, job frontend sẽ đỏ); ô chọn identity để link automation (và merge) chỉ có trang đầu 20 identity, lọc phía client; decoder đặt trần mà API không có (evidence mỗi execution 50, suites 500, link mỗi case 100, requirement mỗi case 500, tokens 500, lỗi import 5000), vượt trần là cả trang báo "unexpected data format"; danh sách test case dừng ở 500 mà không báo.
+
+## QĐ-14 — tester không cần source — 23-10-2026
+
+Environment có địa chỉ site (migration 0035) và plan chọn environment (0036), URL check (`internal/urlcheck`, 0037, service `checker/`), reporter phát từ `/downloads/`, trang hướng dẫn. Đã chạy trên laptop:
+
+| Kiểm | Kết quả |
+|---|---|
+| `go test ./...` trên Postgres 17.5 | 30 package pass; gofmt/vet sạch; test kiến trúc pass (`urlcheck` chỉ import `platform/*`, outbound HTTP chỉ qua `platform/outbound`) |
+| Tenant walk §14.3 | 7 route mới được phân loại và đi: environment, URL check (cả ảnh chụp) của org A không đọc/ghi được từ org B, kể cả khi B dùng project của mình với id của A |
+| `TestEnvironments`, `TestURLChecks` | member thêm/sửa, viewer 403, URL có user:password/`javascript:`/thiếu host → 400, environment của project khác → 400, plan đóng không đổi environment (409), mọi thay đổi có audit; `URLCHECK=off` → 409 mà vẫn đọc check cũ; check thứ 6 đang chờ → 429; ảnh trả `image/jpeg` + CSP `sandbox` |
+| `internal/urlcheck` | job chạy đúng một lần; checker lỗi → queue retry, lần cuối đóng `error` (không kẹt `queued`); chỉ lưu ảnh đúng JPEG; prune 90 ngày, purge theo project (thêm vào `cmd/worker` purge test) |
+| `checker` (`node --test`, Chromium thật) | 8/8: trang sạch pass; trang lỗi bắt lỗi JS, ảnh 404, link 404, axe `image-alt`; fetch tới `10.1.2.3` và link tới `169.254.169.254` **bị chặn và không tính là lỗi trang**; `127.0.0.2` và `localhost` không mở được dù `127.0.0.1` được phép cho fixture |
+| Image `checker` (Docker Desktop) | build 51 s; container `cap_drop ALL` + `no-new-privileges`: example.com → báo cáo 9 mục trong 5,6 s; `http://169.254.169.254/latest/meta-data/` → "Not checked: … link-local" |
+| Stack local không Docker (api + worker + checker + Vite, Playwright lái UI) | tạo environment trong form plan → plan hiện địa chỉ; URL check của environment → báo cáo + 2 ảnh; check `http://10.0.0.1/admin` → mục "Not opened"; 0 lỗi console; rộng 390 px không cuộn ngang |
+| Frontend | typecheck sạch, 107/107 vitest (thêm `environments-url-checks.test.ts`: decoder từ chối địa chỉ không phải http(s)) |
+| `server/tests/doctor.sh`, `caddy validate`, `docker compose config` (có và không `--profile urlcheck`) | 11/11, hợp lệ, hợp lệ |
+
+**Lỗi tìm ra khi chạy thật:** worker chết lúc khởi động khi có hai pool hàng đợi (`metric: "queue_jobs_total" registered twice`) — registry từ chối tên đăng ký hai lần, trước đây worker chỉ có một pool. Sửa: các `queue.Worker` cùng registry dùng chung series (nhãn `kind` đã phân biệt); test `TestWorkersShareMetrics`.
+
+**Chưa kiểm:** `atp.sh up` với `URLCHECK=on` trên Docker (auto mode chặn lệnh deploy; cần chủ dự án chạy), URL check tới site LAN với `URLCHECK_ALLOW_PRIVATE=on`, `npm install` reporter qua `https://<host>/downloads/` với CA nội bộ.
+
+## QĐ-15 — Start testing, case gợi ý (thư viện, bộ mẫu, AI), chạy từng case — 24-10-2026
+
+Plan có loại test (0038), module `aisuggest` (0039), `platform/llm` (anthropic-sdk-go v1.84.0), `platform/secretbox`, checker `/outline`, audit `organization.ai_settings` (0040); frontend Start testing, màn hình chạy, AI settings. Model luôn chọn trên giao diện; key riêng của organization hoặc key server `LLM_API_KEY` (không có `LLM_MODEL`).
+
+| Kiểm | Kết quả |
+|---|---|
+| `go test ./...` (Postgres 17.5) | 33 package pass; gofmt/vet sạch; test kiến trúc mới `TestLLMOnlyThroughPlatform` (SDK chỉ ở `platform/llm`) |
+| `platform/llm` với server Anthropic giả | request đúng: model, `max_tokens` 16000, `output_config.format` json_schema + effort medium, `fallbacks: "default"` + beta `server-side-fallback-2026-07-01` (không gửi cho Haiku), không gửi `thinking`; 401→ErrKey, 404→ErrModel, refusal, max_tokens, answer không phải JSON |
+| `aisuggest` | key riêng niêm phong (không có plaintext trong DB, pepper khác không mở), kiểm key trước khi lưu, chọn key server thì xóa key riêng; job dùng đúng key + model, outline + mô tả vào prompt, bản nháp cắt theo count/độ dài; key sai → error ngay, outage → retry rồi error; 2 chờ/project |
+| API + tenant walk | 6 route mới: admin org lưu/xóa, tester 403 ở settings, viewer 403 khi xin gợi ý, 409 khi không có key, environment của project khác 400; walk phủ cả 6 |
+| checker `/outline` | Chromium thật: tiêu đề/heading/link cùng site/form/nút; 127.0.0.2 bị chặn |
+| govulncheck v1.9.0 (go1.26.10) | 0 được gọi (18 advisory trong module require, không gọi — như trước khi thêm SDK) |
+| Stack local + Playwright | admin lưu key (key sai → thông báo rõ), chọn key server + Haiku; tester: Smoke → environment → bộ mẫu + 3 bản nháp AI (server Anthropic giả nhận outline, schema, fallback) → plan → màn hình chạy mở example.com, ghi passed tự sang case kế, URL check từ màn hình chạy; lần chạy lại: bản nháp trùng thư viện không tích sẵn; 0 lỗi console, 390 px không cuộn ngang |
+| Frontend | typecheck sạch, 111/111 vitest |
+
+**Chưa kiểm:** một lần gọi Claude thật (cần key của chủ dự án), `atp.sh up` trên Docker với stack mới.

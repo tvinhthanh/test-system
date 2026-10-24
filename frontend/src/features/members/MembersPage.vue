@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCw, Trash2, UserPlus, Users } from "@lucide/vue";
+import { RefreshCw, Sparkles, Trash2, UserPlus, Users } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useServices } from "../../app/providers/services";
@@ -209,6 +209,16 @@ const rowRoles = (m: Member) =>
     :title="heading.title"
     :description="heading.description"
   >
+    <!-- QĐ-15: the organization's own AI key and model, for its admins. -->
+    <Button
+      v-if="node.level === 'organization' && canManage"
+      as-child
+      variant="outline"
+      size="sm"
+      ><RouterLink :to="`/team/organizations/${encodeURIComponent(node.id)}/ai`"
+        ><Sparkles />AI settings</RouterLink
+      ></Button
+    >
     <Button
       variant="outline"
       size="icon-sm"

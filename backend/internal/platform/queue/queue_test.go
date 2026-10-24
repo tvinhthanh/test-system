@@ -282,3 +282,17 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// Two pools in one process share a registry (the worker runs run.finished
+// and, with URLCHECK=on, urlcheck.run): the second must not register the
+// queue series again — that panicked at start — and both count under
+// their own kind.
+func TestWorkersShareMetrics(t *testing.T) {
+	reg := metric.New()
+	for _, kind := range []string{"a.kind", "b.kind"} {
+		w := &queue.Worker{Kind: kind, Metrics: reg, Concurrency: 1}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		w.Run(ctx) // sets the defaults, then stops at once
+	}
+}

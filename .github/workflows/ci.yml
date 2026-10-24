@@ -63,9 +63,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # The patched toolchain go.mod names (govulncheck 13-10); explicit so
+          # The patched toolchain go.mod names (govulncheck 21-10); explicit so
           # GOTOOLCHAIN=local below never has to download one.
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: backend/go.sum
 
       # pg_dump/pg_restore of the server's major, for test/restore. Ubuntu's
@@ -152,6 +152,29 @@ jobs:
         run: node --test dist/test/outage.test.js
       - name: npm audit (§11.6 dependency review, dev deps included)
         run: npm audit --audit-level=low
+
+  # URL checker (QĐ-14): the guard and real Chromium against a local fixture
+  # site (the SSRF refusals are part of it), then the image compose builds.
+  checker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: checker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: checker/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps --only-shell chromium
+      - run: npm test
+      - name: npm audit (§11.6 dependency review)
+        run: npm audit --audit-level=low
+      - name: docker build
+        run: docker build -t atp/checker:ci .
 
   frontend:
     runs-on: ubuntu-24.04

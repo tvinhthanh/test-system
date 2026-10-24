@@ -3,6 +3,7 @@ import {
   ClipboardList,
   ListChecks,
   Rocket,
+  ScanSearch,
   Target,
   ChartNoAxesCombined,
 } from "@lucide/vue";
@@ -11,7 +12,13 @@ import ViewTabs from "../../shared/ViewTabs.vue";
 // The Test Management Plane screens (§6.8) share one switcher.
 defineProps<{
   project: string;
-  current: "cases" | "requirements" | "plans" | "releases" | "specialized";
+  current:
+    | "cases"
+    | "requirements"
+    | "plans"
+    | "releases"
+    | "specialized"
+    | "url-checks";
 }>();
 const base = (p: string) => `/p/${encodeURIComponent(p)}`;
 </script>
@@ -37,6 +44,11 @@ const base = (p: string) => `/p/${encodeURIComponent(p)}`;
       :to="`${base(project)}/releases`"
       :selected="current === 'releases'"
       ><Rocket />Releases</ViewTab
+    >
+    <ViewTab
+      :to="`${base(project)}/url-checks`"
+      :selected="current === 'url-checks'"
+      ><ScanSearch />URL checks</ViewTab
     >
   </ViewTabs>
 </template>

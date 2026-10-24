@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
@@ -20,6 +21,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 	"github.com/vinh/automation-testing-platform/backend/migrations"
 )
 
@@ -36,7 +38,7 @@ func TestPurgeDeletedProject(t *testing.T) {
 	idn, flk, tri := identity.New(db), flaky.New(db, res), triage.New(db, res)
 	tm := testmgmt.New(db, idn, nil, testmgmt.Policy{})
 	art := artifact.New(db, store, res)
-	p := purger{tenancy: ten, authz: az, artifact: art, triage: tri, flaky: flk, identity: idn, testmgmt: tm, results: res}
+	p := purger{tenancy: ten, authz: az, artifact: art, triage: tri, flaky: flk, identity: idn, testmgmt: tm, results: res, urlcheck: urlcheck.New(db, nil), ai: aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte("purge-test-pepper-purge-test-pepper")})}
 
 	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
 	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
@@ -103,6 +105,12 @@ func TestPurgeDeletedProject(t *testing.T) {
 		if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO meter_daily (project_id, org_id, day, active_tests, raw_fingerprints) VALUES ($1, $2, current_date - 1, 1, 1)`, pid, string(org.ID)); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := urlcheck.New(db, nil).Create(ctx, pid, "", "https://"+name+".example", "wanda@acme.example"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO case_suggestions (project_id, org_id, test_type, count, requested_by) VALUES ($1, $2, 'smoke', 1, 'wanda')`, pid, string(org.ID)); err != nil {
+			t.Fatal(err)
+		}
 		return pr.ID, key
 	}
 	gone, goneKey := seed("checkout", 1)
@@ -126,6 +134,8 @@ func TestPurgeDeletedProject(t *testing.T) {
 		`SELECT count(*) FROM triage_events WHERE project_id = $1`,
 		`SELECT count(*) FROM test_cases WHERE project_id = $1`,
 		`SELECT count(*) FROM artifacts WHERE project_id = $1`,
+		`SELECT count(*) FROM url_checks WHERE project_id = $1`,
+		`SELECT count(*) FROM case_suggestions WHERE project_id = $1`,
 		`SELECT count(*) FROM api_tokens WHERE scope_id = $1 OR scope_id IN (SELECT id FROM environments WHERE project_id = $1)`,
 		`SELECT count(*) FROM memberships WHERE scope_id = $1`,
 		`SELECT count(*) FROM environments WHERE project_id = $1`,
@@ -193,7 +203,7 @@ func TestPurgeDeletedRun(t *testing.T) {
 	idn, flk, tri := identity.New(db), flaky.New(db, res), triage.New(db, res)
 	tm := testmgmt.New(db, idn, nil, testmgmt.Policy{})
 	art := artifact.New(db, store, res)
-	p := purger{tenancy: ten, authz: az, artifact: art, triage: tri, flaky: flk, identity: idn, testmgmt: tm, results: res}
+	p := purger{tenancy: ten, authz: az, artifact: art, triage: tri, flaky: flk, identity: idn, testmgmt: tm, results: res, urlcheck: urlcheck.New(db, nil), ai: aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte("purge-test-pepper-purge-test-pepper")})}
 
 	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
 	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Payments")
@@ -316,7 +326,7 @@ func TestPurgeDeletedOrganization(t *testing.T) {
 	ten, az, res := tenancy.New(db), authz.New(db, []byte("test-pepper-test-pepper-test-pepper!")), results.New(db)
 	idn := identity.New(db)
 	p := purger{tenancy: ten, authz: az, artifact: artifact.New(db, store, res), triage: triage.New(db, res), flaky: flaky.New(db, res),
-		identity: idn, testmgmt: testmgmt.New(db, idn, nil, testmgmt.Policy{}), results: res}
+		identity: idn, testmgmt: testmgmt.New(db, idn, nil, testmgmt.Policy{}), results: res, urlcheck: urlcheck.New(db, nil), ai: aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte("purge-test-pepper-purge-test-pepper")})}
 
 	type tree struct {
 		org      tenancy.OrganizationID

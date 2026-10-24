@@ -42,6 +42,8 @@ const plan: Plan = {
   id: "plan",
   name: "Release",
   environmentId: "",
+  environment: null,
+  testType: "",
   status: "draft",
   cases: [item],
   executions: [],
