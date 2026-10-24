@@ -18,6 +18,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 | Bạn muốn | Mở |
 |---|---|
 | Hiểu toàn bộ quyết định và thiết kế | [`SPEC.md`](SPEC.md) — **nguồn sự thật duy nhất** |
+| Dùng app (tester, admin, người viết automation) | [`HUONG_DAN_SU_DUNG.md`](HUONG_DAN_SU_DUNG.md) — đăng nhập, Start testing, chạy test, plan, release, CI token, AI |
 | Biết Phase 0 đang ở đâu, phải làm gì | [`phase0/README.md`](phase0/README.md) |
 | Xem thuật toán test identity chạy thật | [`prototype/identity/README.md`](prototype/identity/README.md) |
 | Tài liệu gửi ra ngoài | [`docs/external/`](docs/external/) — chạy `verify.sh` trước khi gửi |
