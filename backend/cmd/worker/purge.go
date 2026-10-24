@@ -8,6 +8,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/autotest"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
@@ -35,6 +36,7 @@ type purger struct {
 	results  results.Service
 	urlcheck urlcheck.Service
 	ai       aisuggest.Service
+	auto     autotest.Service
 }
 
 // run purges up to limit due projects; it returns how many it finished and
@@ -73,7 +75,7 @@ func (p purger) one(ctx context.Context, d tenancy.DeletedProject) error {
 		return err
 	}
 	for _, step := range []func(context.Context, string) error{
-		p.triage.PurgeProject, p.flaky.PurgeProject, p.identity.PurgeProject, p.testmgmt.PurgeProject, p.urlcheck.PurgeProject, p.ai.PurgeProject, p.results.PurgeProject,
+		p.triage.PurgeProject, p.flaky.PurgeProject, p.identity.PurgeProject, p.testmgmt.PurgeProject, p.urlcheck.PurgeProject, p.ai.PurgeProject, p.auto.PurgeProject, p.results.PurgeProject,
 	} {
 		if err := step(ctx, id); err != nil {
 			return err

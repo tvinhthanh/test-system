@@ -1,6 +1,6 @@
 # Hướng dẫn sử dụng ATP
 
-ATP (Report Center) là nơi cả nhóm test làm việc trên cùng một dashboard. Tester viết case, lên plan, chạy test thủ công trên site thật và ghi kết quả kèm bằng chứng. Người viết automation đẩy kết quả Playwright từ CI vào. Maintainer dựa vào đó quyết định có release hay không. Tester không cần source code ATP, không cần biết code.
+ATP (Report Center) là nơi cả nhóm test làm việc trên cùng một dashboard. Tester viết case, lên plan, chạy test thủ công trên site thật và ghi kết quả kèm bằng chứng. Hệ thống cũng có thể **tự chạy** test case trong trình duyệt thật (Auto test). Người viết automation đẩy kết quả Playwright từ CI vào. Maintainer dựa vào đó quyết định có release hay không. Tester không cần source code ATP, không cần biết code.
 
 Tên nút và menu dưới đây giữ nguyên tiếng Anh như trên giao diện và được **in đậm**. Trong app, mục **How to test** ở thanh bên trái là bản tóm tắt ngắn của tài liệu này.
 
@@ -36,7 +36,7 @@ Organization (công ty)
 | Vai trò (trên giao diện) | Làm được |
 |---|---|
 | **viewer** | Chỉ xem: plan, kết quả, báo cáo. |
-| **member** (tester) | Thêm việc test: viết case và plan, ghi kết quả và bằng chứng, triage lỗi, chạy URL check, thêm environment, nhờ AI soạn case. |
+| **member** (tester) | Thêm việc test: viết case và plan, ghi kết quả và bằng chứng, triage lỗi, chạy URL check, thêm environment, nhờ AI soạn case, quản lý tài khoản test, chạy auto test và quét site. |
 | **maintainer** | Thêm quyền của member, cộng thêm: quyết định release, cấp CI token, gộp test identity, cài đặt project. |
 | **workspace admin** | Tạo project và quản lý member trong workspace. |
 | **org admin** | Quản lý workspace, member và token trong cả organization; cài đặt AI. |
@@ -91,7 +91,7 @@ Dữ liệu gửi sang Anthropic: chỉ khi tester bấm **Draft cases**. Gồm 
 
 ### 2.4 CI token (cho automation)
 
-Xem [mục 6](#6-dành-cho-người-viết-automation-playwright).
+Xem [mục 7](#7-dành-cho-người-viết-automation-playwright).
 
 ---
 
@@ -254,9 +254,108 @@ Bạn chạy performance, security, accessibility, compatibility, recovery hay u
 
 ---
 
-## 6. Dành cho người viết automation (Playwright)
+## 6. Auto test: hệ thống tự chạy test
 
-### 6.1 Kết nối pipeline
+Mở mục **Auto test** trên thanh bên trái. Ở đây hệ thống **tự làm các bước** của test case trong một trình duyệt thật trên server, chụp ảnh và ghi pass/fail.
+
+Điều kiện:
+- Người vận hành phải bật `URLCHECK=on`.
+- Phần AI (soạn case, sửa bước, tìm cách đăng nhập) cần cấu hình như [mục 2.3](#23-bật-ai-soạn-test-case-không-bắt-buộc). Không có AI thì case tự viết vẫn chạy.
+
+> **Các bước chạy thật trên site:** tin nhắn được gửi thật, form được lưu thật. Hãy chạy trên environment staging hoặc test, đừng chạy trên production.
+
+### 6.1 Chọn site và tài khoản test
+
+1. Ở đầu trang, chọn **Environment (site under test)**. Environment phải có địa chỉ.
+2. Nếu trang cần đăng nhập (chat, giỏ hàng…), bấm **Test accounts** → **Add account**, điền các ô sau rồi bấm **Save account**:
+   - **Key**, ví dụ `default`;
+   - **User name or email**;
+   - **Password**;
+   - **Sign-in page**, ví dụ `/login`.
+
+   Mật khẩu được mã hóa, không bao giờ hiện lại và không bao giờ gửi cho AI.
+3. Bấm **Find sign-in steps**. AI đọc trang đăng nhập rồi viết các bước, dùng `{{username}}` và `{{password}}` thay cho giá trị thật. Sau đó hệ thống thử đăng nhập bằng các bước này. Trạng thái **ok** nghĩa là dùng được.
+
+   Không có AI thì bấm **Steps** để tự viết: gõ `{{username}}` vào ô email, gõ `{{password}}` vào ô mật khẩu, rồi bấm nút đăng nhập.
+
+### 6.2 Để AI soạn case (ví dụ: test chat)
+
+1. Vào tab **Cases**, bấm **Generate with AI**.
+2. Ô **Where it starts**: trang cần test, ví dụ `/message?to={{nguoi_nhan}}`.
+3. Ô **Signed in as**: chọn tài khoản test nếu trang cần đăng nhập.
+4. Phần **Inputs**: bấm **Add input** cho từng biến, ví dụ `nguoi_nhan` = `bob`, `noi_dung` = `Xin chào`.
+   - Viết `{{random}}` trong giá trị để mỗi lần chạy ra một giá trị khác, ví dụ `test+{{random}}@example.com`.
+5. Ô **What should the cases cover?**: mô tả cần test gì, ví dụ *"gửi tin thường, tin dài, emoji; tin rỗng không được gửi"*.
+6. Bấm **Draft cases**. Hệ thống mở trang thật (đăng nhập trước nếu đã chọn tài khoản), AI đọc trang và soạn case.
+7. Đọc từng case. Bấm **Edit** để sửa bước; bỏ tích những case không muốn giữ.
+8. Bấm **Keep N cases** để lưu, hoặc **Keep and run** để lưu và chạy ngay.
+
+### 6.3 Tự viết hoặc sửa case
+
+Bấm **New case** để viết case mới, hoặc **Edit** trên một case có sẵn.
+
+Các ô cần điền:
+- **Title**, **Priority**, **Kind of testing**: chỉ khi tạo case mới.
+- **Where it starts**, **Signed in as**, **Inputs**: giống [mục 6.2](#62-để-ai-soạn-case-ví-dụ-test-chat).
+- **Steps**: mỗi bước chọn một hành động và một phần tử trên trang.
+
+| Hành động | Dùng khi |
+|---|---|
+| **Click**, **Type into**, **Choose in**, **Tick**, **Untick**, **Press a key**, **Point at** | Thao tác trên trang |
+| **Open a page** | Chuyển sang trang khác trong cùng site |
+| **Wait (ms)** | Chỉ dùng khi không có dấu hiệu nào khác cho biết trang đã sẵn sàng |
+| **Check: is shown / is gone / text is there / address contains / field holds / title contains** | Kiểm tra kết quả |
+
+Cách hệ thống tìm phần tử:
+- **Role and name**: nên dùng nhất. Ví dụ role `button` + name `Gửi`, hoặc role `textbox` + name `Tin nhắn`.
+- **Field label**, **Placeholder**, **Visible text**, **Test id**, **CSS selector**: dùng khi role và name không hợp.
+
+Một số lưu ý khi viết bước:
+- Gõ `{{tên_input}}` ở ô giá trị để dùng input.
+- Mỗi case nên kết thúc bằng ít nhất một bước **Check**.
+- Khi lưu, các bước bằng chữ của test case được viết lại theo các bước này, để người test tay cũng đọc được.
+
+### 6.4 Chạy và đọc kết quả
+
+**Chạy:**
+- Tích các case muốn chạy rồi bấm **Run N selected**. Không tích case nào thì bấm **Run all**.
+- Ô **AI repairs a step whose element moved**: khi một nút hay ô bị đổi tên hoặc đổi chỗ, AI tìm lại phần tử đó cho riêng bước ấy. Bước **Check** không bao giờ được sửa: kiểm tra fail là fail.
+
+**Trang Auto run** hiện từng case và từng bước ✓/✗, kèm:
+- **Lý do fail**: không tìm thấy phần tử, kiểm tra không đúng, hoặc trang không mở / định rời khỏi site;
+- **Ảnh chụp** lúc kết thúc và tại chỗ fail;
+- **Lỗi console** của trang.
+
+Bước AI đã sửa có ghi chú riêng. Bấm **Keep the repair in the case** để cập nhật case theo bản sửa đó.
+
+**Kết quả còn được ghi vào hai nơi** (có nút mở ngay trên trang run):
+- **Test plan** "Auto test · …": mỗi case là một execution, kèm ảnh chụp.
+- **Test runs**: dùng cho release gate và phát hiện test chập chờn (flaky), như một run CI.
+
+### 6.5 Quét site
+
+Vào tab **Site scan**, điền rồi bấm **Scan site**:
+- **Start page**: mặc định là địa chỉ của environment;
+- **Signed in as**: chỉ hiện tài khoản đã đăng nhập được;
+- **Pages**: số trang tối đa, từ 10 đến 50.
+
+Hệ thống kiểm tra trang đầu và mọi trang có link tới trong cùng site, xa nhất 3 lần bấm link. Mỗi trang được kiểm như một URL check. Link đăng xuất hoặc link xóa không bao giờ bị mở. Trang kết quả mặc định chỉ hiện các trang có vấn đề.
+
+### 6.6 Chạy tự động sau mỗi lần deploy
+
+Cách 1, chạy trên ATP:
+1. Vào trang **CI tokens**, tạo token và tích **Also start auto runs**.
+2. Vào tab **Run from CI** của Auto test, chép đoạn lệnh vào bước ngay sau deploy. Đoạn lệnh bắt đầu một run, chờ chạy xong, in kết quả và làm fail pipeline nếu có case fail.
+
+Cách 2, chạy trong repo của bạn:
+- Ở tab **Cases**, chọn case rồi bấm **Playwright file** để tải về một file test Playwright, đưa vào repo và chạy bằng CI của bạn.
+- Tài khoản đăng nhập lấy từ biến môi trường `ATP_USER_<KEY>` / `ATP_PASS_<KEY>`. File tải về không bao giờ chứa mật khẩu.
+
+---
+
+## 7. Dành cho người viết automation (Playwright)
+
+### 7.1 Kết nối pipeline
 
 1. Vào **CI tokens** (maintainer trở lên). Nhập **Name** theo tên pipeline, ví dụ `github-actions main`, chọn **Expires in**, rồi bấm **Issue token**.
    - Tích **Also read release gates** nếu pipeline cần kiểm gate trước khi deploy.
@@ -272,7 +371,7 @@ Mỗi pipeline dùng một token riêng, để thu hồi một token (**Revoke**
 
 Có báo cáo JUnit XML (ví dụ từ Cypress, Jest, pytest)? Dùng **Import JUnit** trên trang Test runs để đưa vào.
 
-### 6.2 Xem kết quả và triage
+### 7.2 Xem kết quả và triage
 
 - **Test runs**: các lần chạy, mới nhất ở trên cùng. Mở một run để xem từng test. Mở một test fail để vào **Failure detail**:
   - Lỗi và stack trace của từng lần thử.
@@ -293,7 +392,7 @@ Có báo cáo JUnit XML (ví dụ từ Cypress, Jest, pytest)? Dùng **Import JU
 
 ---
 
-## 7. Tài khoản của bạn
+## 8. Tài khoản của bạn
 
 Bấm biểu tượng khiên ở góc dưới thanh bên trái để mở **Security**. Ở đó bạn có thể:
 - Bật hoặc tắt xác thực hai bước.
@@ -305,7 +404,7 @@ Nút bên cạnh biểu tượng khiên dùng để đăng xuất (**Sign out**)
 
 ---
 
-## 8. Gặp lỗi thì làm gì
+## 9. Gặp lỗi thì làm gì
 
 | Bạn thấy | Nghĩa là / cách xử lý |
 |---|---|
@@ -320,10 +419,15 @@ Nút bên cạnh biểu tượng khiên dùng để đăng xuất (**Sign out**)
 | Nút **passed** bị mờ | Còn bước nào đang failed hoặc blocked. |
 | *"This plan is closed"* | Plan đã đóng. Member trở lên bấm **Reopen** trên trang plan. |
 | *"Case changed. Reload the case…"* | Có người vừa sửa case. Bấm **Reload case** rồi ghi lại kết quả. |
+| *"Auto test is off on this server"* | Người vận hành cần bật `URLCHECK=on` rồi chạy `bash server/atp.sh up`. |
+| Auto run báo *"could not sign in as …"* | Mở **Test accounts**: kiểm lại mật khẩu, bấm **Find sign-in steps**, hoặc sửa **Steps**. |
+| Bước fail: *"The element was not found or could not be used"* | Giao diện đã đổi. Bật **AI repairs…** rồi chạy lại, hoặc **Edit** case và sửa tên phần tử. |
+| Bước fail: *"tried to leave the site under test"* | Bước đó bấm vào link sang site khác. Hệ thống luôn giữ trình duyệt trong site đang test. |
+| Case lỗi: *"The start page did not open"* | Kiểm tra lại ô **Where it starts**, các input của case và địa chỉ của environment. |
 
 ---
 
-## 9. Phụ lục: lệnh cho người vận hành server
+## 10. Phụ lục: lệnh cho người vận hành server
 
 Chạy từ thư mục gốc repo, trên máy làm server. Máy cần Docker; nếu là Windows thì dùng Docker Desktop + Git Bash. Chi tiết xem [`server/README.md`](server/README.md).
 
@@ -340,7 +444,8 @@ Chạy từ thư mục gốc repo, trên máy làm server. Máy cần Docker; n�
 | `bash server/atp.sh admin …` | Lệnh quản trị: tạo user, workspace, project, trao role, cấp token… |
 
 Các tùy chọn trong `backend/deploy/.env`:
-- `URLCHECK=on`: bật URL check. Thêm một service Chromium, image khoảng 1 GB.
+- `URLCHECK=on`: bật URL check, quét site và Auto test. Thêm một service Chromium, image khoảng 1 GB.
+- `CHECKER_SESSIONS=4`: số trình duyệt Auto test mở cùng lúc, mỗi cái khoảng 150 MB.
 - `URLCHECK_ALLOW_PRIVATE=on`: cho URL check mở địa chỉ trong mạng LAN.
 - `LLM_API_KEY=sk-ant-…`: key Anthropic của server cho phần AI. Model không đặt ở đây mà chọn trong **AI settings** trên giao diện.
 

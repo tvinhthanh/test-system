@@ -150,6 +150,7 @@ services:
     environment:
       URLCHECK_ALLOW_PRIVATE: ${URLCHECK_ALLOW_PRIVATE:-off}
       CHECKER_CONCURRENCY: ${CHECKER_CONCURRENCY:-2}
+      CHECKER_SESSIONS: ${CHECKER_SESSIONS:-4}
     networks: [checknet]
     expose: ["8090"]
     shm_size: 512m # Chromium's shared memory

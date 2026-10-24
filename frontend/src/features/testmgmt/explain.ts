@@ -22,6 +22,14 @@ const messages: Record<string, string> = {
     "URL checks are off on this server. The operator turns them on with URLCHECK=on.",
   TOO_MANY_URL_CHECKS:
     "Five checks are already waiting in this project. Try again when they finish.",
+  AUTO_TEST_OFF:
+    "Auto test runs in the checker service, which is off on this server. The operator turns it on with URLCHECK=on.",
+  TOO_MANY_AUTO_RUNS:
+    "Two runs are already going in this project, or it reached today's limit of 100. Try again when they finish.",
+  TOO_MANY_AUTO_DRAFTS:
+    "This project already has drafts in progress, or reached today's limit of 30. Try again later.",
+  SCAN_RUNNING:
+    "A site scan is already running in this project. Try again when it finishes.",
 };
 
 export function explain(error: unknown): unknown {

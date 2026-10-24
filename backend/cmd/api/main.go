@@ -20,6 +20,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/autotest"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
@@ -170,9 +171,12 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
 	qry := query.New(db)
 	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
+	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: llm.New(cfg.LLMBaseURL), ServerKey: cfg.LLMAPIKey})
 	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck,
-		ai:           aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: llm.New(cfg.LLMBaseURL), ServerKey: cfg.LLMAPIKey}),
-		llmServerKey: cfg.LLMAPIKey != ""}).routes(mux)
+		ai:           ai,
+		llmServerKey: cfg.LLMAPIKey != "",
+		auto:         autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Keys: ai}),
+		db:           db}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it

@@ -3,7 +3,10 @@ import * as d from "../../core/api/decode";
 
 // Project API tokens for CI (SPEC §11.3.2 "Tạo/thu hồi ingest token",
 // §11.4). The secret comes back once, from issue(); lists carry a prefix.
-export type TokenPermission = "project:ingest" | "project:read";
+export type TokenPermission =
+  | "project:ingest"
+  | "project:read"
+  | "project:autorun";
 export interface ProjectToken {
   id: string;
   prefix: string;
@@ -21,7 +24,11 @@ export interface IssuedToken {
 
 function permission(value: unknown): TokenPermission {
   const s = d.string(value);
-  return s === "project:ingest" || s === "project:read" ? s : d.invalid();
+  return s === "project:ingest" ||
+    s === "project:read" ||
+    s === "project:autorun"
+    ? s
+    : d.invalid();
 }
 function nullableDate(value: unknown) {
   return value === null ? null : d.date(value);
@@ -32,7 +39,7 @@ function token(value: unknown): ProjectToken {
     id: d.string(x.id),
     prefix: d.string(x.prefix),
     name: d.string(x.name),
-    permissions: d.array(x.permissions, permission, 2),
+    permissions: d.array(x.permissions, permission, 3),
     createdAt: d.date(x.createdAt),
     lastUsedAt: nullableDate(x.lastUsedAt),
     expiresAt: d.date(x.expiresAt),

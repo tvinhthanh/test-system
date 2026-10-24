@@ -70,6 +70,8 @@ network. Proxy trong checker chặn loopback/link-local luôn, dải private tr�
 
 **AI soạn case (QĐ-15):** api và worker đọc `LLM_API_KEY` (key của người vận hành; trống = chỉ organization có key riêng mới dùng được) qua `env_file`; model và nguồn key chọn trên dashboard. Worker gọi `api.anthropic.com` (hoặc `LLM_BASE_URL`) từ network `default` — cần egress HTTPS. Key riêng của organization nằm trong bảng `ai_settings`, niêm phong bằng khóa dẫn từ `TOKEN_PEPPER` (đổi pepper = phải lưu lại key).
 
+**Auto test (QĐ-16):** chạy trong checker (`URLCHECK=on`): worker mở phiên trình duyệt qua `POST /sessions` của checker (tối đa `CHECKER_SESSIONS`, mặc định 4) và gửi từng bước; bước là dữ liệu, checker diễn giải bằng locator Playwright và giữ trình duyệt trong site của environment. Mật khẩu tài khoản test nằm trong `environment_accounts`, niêm phong bằng khóa dẫn từ `TOKEN_PEPPER`; chỉ worker mở ra để gửi cho checker. Kết quả vào plan (execution + ảnh, object store như bằng chứng thủ công) và test run (JUnit import nội bộ). CI gọi `POST /v1/auto-runs` với token `project:autorun`.
+
 **Prod khác staging ở đâu:** `APP_ENV=prod` đòi `DATABASE_URL` có
 `sslmode=verify-full` (hoặc `verify-ca`) — compose này đã nối như vậy, nên prod
 chạy nguyên trạng khi có `OBJSTORE=s3` thật và `COOKIE_SECURE=true`. CA của

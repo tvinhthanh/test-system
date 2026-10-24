@@ -105,8 +105,8 @@ func (d *dashboard) issueToken(w http.ResponseWriter, r *http.Request) {
 		perms = perms[:0]
 		for _, s := range req.Permissions {
 			perm := authz.Permission(s)
-			if perm != authz.PermProjectIngest && perm != authz.PermProjectRead {
-				httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "permissions: project:ingest and/or project:read", map[string]any{"field": "permissions"})
+			if perm != authz.PermProjectIngest && perm != authz.PermProjectRead && perm != authz.PermProjectAutorun {
+				httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "permissions: project:ingest, project:read and/or project:autorun", map[string]any{"field": "permissions"})
 				return
 			}
 			perms = append(perms, perm)

@@ -45,6 +45,7 @@ onMounted(refresh);
 
 const name = ref("");
 const canReadGate = ref(false);
+const canAutoRun = ref(false);
 const days = ref("365");
 const issued = ref<IssuedToken | null>(null);
 const copied = ref(false);
@@ -53,9 +54,9 @@ const confirming = ref<string | null>(null);
 
 async function issue() {
   copied.value = false;
-  const permissions: TokenPermission[] = canReadGate.value
-    ? ["project:ingest", "project:read"]
-    : ["project:ingest"];
+  const permissions: TokenPermission[] = ["project:ingest"];
+  if (canReadGate.value) permissions.push("project:read");
+  if (canAutoRun.value) permissions.push("project:autorun");
   const out = await mutation.run("issue", (signal) =>
     repo.issue(
       project.value,
@@ -175,6 +176,12 @@ const junitSnippet = `curl -X POST "${origin}/v1/imports/junit?environment=ci&fr
         Also read release gates (for a pipeline that checks
         <code>/v1/releases/…/gate</code> before deploying)
       </label>
+      <label class="flex items-center gap-2 text-sm md:col-span-3">
+        <input v-model="canAutoRun" type="checkbox" class="size-4" />
+        Also start auto runs (for a pipeline that runs the project's
+        <RouterLink :to="`/p/${encodeURIComponent(project)}/auto?tab=ci`" class="underline underline-offset-2">auto tests</RouterLink>
+        after each deploy)
+      </label>
     </form>
     <ErrorNote
       v-if="mutation.error.value?.key === 'issue'"
@@ -247,8 +254,13 @@ const junitSnippet = `curl -X POST "${origin}/v1/imports/junit?environment=ci&fr
             <TableCell class="font-mono text-xs">{{ t.prefix }}…</TableCell>
             <TableCell class="text-xs">{{
               t.permissions
-                .map((p) =>
-                  p === "project:ingest" ? "send runs" : "read gates",
+                .map(
+                  (p) =>
+                    ({
+                      "project:ingest": "send runs",
+                      "project:read": "read gates",
+                      "project:autorun": "start auto runs",
+                    })[p],
                 )
                 .join(", ")
             }}</TableCell>

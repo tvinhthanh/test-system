@@ -4,6 +4,7 @@
 // links to the screen it describes; nothing here needs code or the ATP
 // source.
 import {
+  Bot,
   ClipboardList,
   KeyRound,
   Play,
@@ -96,6 +97,45 @@ const link = "text-primary font-medium underline underline-offset-2";
       </ol>
       <p class="text-muted-foreground">
         The steps below are the same work done screen by screen.
+      </p>
+    </div>
+  </section>
+
+  <SectionHeading id="guide-auto-test" title="Let the server test by itself" />
+  <section
+    class="guide-auto-test bg-card mb-2 flex gap-3 rounded-lg border p-5 text-sm"
+    aria-labelledby="guide-auto-test"
+  >
+    <Bot class="text-muted-foreground mt-0.5 size-4 shrink-0" />
+    <div class="space-y-2">
+      <p>
+        In
+        <RouterLink :to="`${p}/auto`" :class="link">Auto test</RouterLink>
+        the server clicks through cases itself, in a real browser on your site:
+      </p>
+      <ol class="text-muted-foreground list-decimal space-y-1 pl-5">
+        <li>
+          Pick the environment. For pages behind a sign-in, add a
+          <strong class="text-foreground">test account</strong> — AI finds how
+          to sign in; the password never reaches it.
+        </li>
+        <li>
+          Say where a case starts (<code v-pre>/message?to={{recipient}}</code>),
+          its inputs and what to cover — AI reads the page and drafts runnable
+          cases — or write the steps yourself: click, type, check.
+        </li>
+        <li>
+          Run them. Each step passes or fails with screenshots; a step whose
+          button moved can be repaired by AI (a check never is). Results land in
+          a test plan and in Test runs.
+        </li>
+        <li>
+          Scan a whole site for broken pages, or start the cases from your
+          deploy pipeline with a token.
+        </li>
+      </ol>
+      <p class="text-muted-foreground">
+        Steps really happen on the site — use a staging environment.
       </p>
     </div>
   </section>

@@ -51,6 +51,9 @@ type Permission string
 const (
 	PermProjectIngest Permission = "project:ingest" // write-only, the default for ingest tokens
 	PermProjectRead   Permission = "project:read"
+	// PermProjectAutorun starts the project's runnable cases and reads how
+	// they went (QĐ-16): a deploy pipeline's "test it now".
+	PermProjectAutorun Permission = "project:autorun"
 )
 
 // Action is a row of the matrix §11.3.2, P1 columns only.
@@ -66,7 +69,8 @@ const (
 	ActionMemberManage     Action = "member.manage"
 	ActionOrgManage        Action = "org.manage" // billing, delete org
 	ActionDataDelete       Action = "data.delete"
-	ActionIngest           Action = "ingest" // tokens only: POST /v1/runs and friends
+	ActionIngest           Action = "ingest"       // tokens only: POST /v1/runs and friends
+	ActionAutoRun          Action = "autotest.run" // tokens only: POST /v1/auto-runs (people start runs with testmgmt.write)
 	// P2 (§6.8, QĐ-12): manual test management is daily work like triage;
 	// the release decision is a named override and sits with maintainers.
 	ActionTestmgmtWrite Action = "testmgmt.write" // cases, requirements, plans, executions, imports

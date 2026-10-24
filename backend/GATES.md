@@ -646,3 +646,21 @@ Plan có loại test (0038), module `aisuggest` (0039), `platform/llm` (anthropi
 | Frontend | typecheck sạch, 111/111 vitest |
 
 **Chưa kiểm:** một lần gọi Claude thật (cần key của chủ dự án), `atp.sh up` trên Docker với stack mới.
+
+## QĐ-16 — Auto test: case server tự chạy, AI soạn và sửa bước, quét site, chạy từ CI — 25-10-2026
+
+Module `autotest` (0041: tài khoản test theo environment, spec, bản nháp, run, case của run), quét site trong `urlcheck` (0042), checker `/sessions` + `src/steps.mjs` (bước là dữ liệu, diễn giải bằng locator Playwright, trình duyệt giữ trong site), `llm.JSON` chuyển sang streaming (accumulate), quyền token `project:autorun`; frontend trang Auto test, Auto run, Site scan. Kết quả mỗi run vào plan (execution + ảnh) và test run (JUnit import nội bộ, case được link vào test).
+
+| Kiểm | Kết quả |
+|---|---|
+| `go test ./...` (Postgres 17.5) | 34 package pass; gofmt/vet sạch; test kiến trúc giữ nguyên (autotest chỉ dùng platform/* + tenancy) |
+| `autotest` (DB thật, trình duyệt/LLM/bộ ghi giả) | mật khẩu niêm phong và mở đúng, cập nhật không mất mật khẩu; spec từ chối biến không có, `{{username}}` không tài khoản, `javascript:`, bước sai hình; bản nháp: đăng nhập tìm bằng AI trước, đọc trang, bỏ bước/case không chạy được; **mật khẩu không bao giờ có trong prompt nào**; run: case pass, case sửa bước (AI thay "Send" bằng "Gửi"), case fail kiểm tra (ảnh chỗ fail, bước sau skipped), tổng kết, bộ ghi gọi đủ; ApplyHeal một lần; đăng nhập sai → case error, tài khoản failed; giới hạn 2 run; export Playwright không để chữ trong bước thành code |
+| `llm` streaming | server Anthropic giả trả SSE (2 delta): request có `stream: true`; refusal, max_tokens, không phải JSON, 401 vẫn phân loại đúng |
+| `urlcheck` quét site | theo tầng, cùng host, bỏ link đăng xuất/xóa/file, ≤ maxPages, ≤ 3 tầng, đóng khi hết trang chờ, đăng nhập mỗi trang, trang của scan không vào danh sách URL check |
+| Bộ ghi (worker, ingest + testmgmt thật) | execution có bước, trạng thái, người chạy "ATP auto test · …", 2 ảnh bằng chứng; JUnit import → test run `failed` đúng `localRunId`; resolve tầng 2 rồi link case↔test, ghi lại lần hai không trùng link; plan đã đóng → bỏ qua |
+| API + tenant walk | 22 route mới: viewer 403 khi ghi, checker tắt → 409, không key → 409, spec sai không để lại case (cùng transaction), lưu spec viết lại bước chữ của case, run tạo plan, token ingest không khởi động run (403), token autorun 202/200, run thứ ba 429, quét cần tài khoản đã đăng nhập được; walk phủ đủ (router 123 → 145 route) |
+| checker (Chromium thật) | 15/15: site chat cần đăng nhập — đăng nhập, gửi tin, khớp chính xác trước ("Message" thắng "Messages"), lỗi locator/assert/input, rời site → fail và quay về, URL check đăng nhập + link cùng site |
+| Stack local + Playwright | environment trên site chat (IP LAN, `URLCHECK_ALLOW_PRIVATE=on`), tài khoản test → AI tìm bước đăng nhập (model không thấy mật khẩu), AI soạn 3 case chạy được (case có bước `eval` bị bỏ), Keep and run → 3/3 pass, 1 bước AI sửa, giữ bản sửa vào case; plan + test run có đủ 3; export 74 dòng không có mật khẩu; quét site đăng nhập: 7 trang, link hỏng/404/ảnh thiếu đúng chỗ, không mở đăng xuất/xóa tài khoản; CI token autorun → run 3/3 pass, 0 bước phải sửa (bản sửa đã vào case); case viết tay + sửa + chạy; 0 lỗi console, 390 px không cuộn ngang |
+| Frontend | typecheck sạch, 115/115 vitest trên phần commit, bundle gate: JS ban đầu 59,6 KiB gzip |
+
+**Chưa kiểm:** một lần gọi Claude thật (soạn case, tìm đăng nhập, sửa bước), checker trong Docker với phiên trình duyệt, site thật ngoài mạng nội bộ.

@@ -182,6 +182,10 @@ type Service interface {
 	// DeleteSettings forgets the choices and any stored key; false if none.
 	DeleteSettings(ctx context.Context, orgID string) (bool, error)
 	Access(ctx context.Context, orgID string) (Access, error)
+	// Credentials is the key and model a job of the organization uses now,
+	// for other modules' jobs (autotest, QĐ-16): the organization's own key,
+	// else the server's. ok false: there is no key anywhere.
+	Credentials(ctx context.Context, orgID string) (key, model, source string, ok bool, err error)
 	// Request queues a suggestion with its job, after the key and limit checks.
 	Request(ctx context.Context, in NewSuggestion) (Suggestion, error)
 	Get(ctx context.Context, projectID, id string) (Suggestion, error)

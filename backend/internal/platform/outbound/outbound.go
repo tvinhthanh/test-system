@@ -77,6 +77,9 @@ func (c *Client) do(req *http.Request, v any) error {
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("%w: %s answered %d", ErrAnswer, req.URL.Host, resp.StatusCode)
 	}
+	if v == nil {
+		return nil
+	}
 	if err := json.Unmarshal(body, v); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrAnswer, req.URL.Host, err)
 	}
@@ -111,6 +114,16 @@ func (c *Client) PostForm(ctx context.Context, rawURL string, form url.Values, v
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return c.do(req, v)
+}
+
+// Delete sends DELETE to rawURL; the answer is decoded into v unless v is
+// nil.
+func (c *Client) Delete(ctx context.Context, rawURL string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, rawURL, nil)
+	if err != nil {
+		return err
+	}
 	return c.do(req, v)
 }
 

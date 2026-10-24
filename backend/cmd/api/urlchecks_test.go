@@ -20,7 +20,7 @@ import (
 
 type stubChecker struct{ urls []string }
 
-func (s *stubChecker) Check(_ context.Context, url string) (urlcheck.Result, error) {
+func (s *stubChecker) Check(_ context.Context, url string, _ *urlcheck.Login) (urlcheck.Result, error) {
 	s.urls = append(s.urls, url)
 	return urlcheck.Result{
 		Report:  json.RawMessage(`{"url":"` + url + `","finalUrl":"` + url + `","title":"<b>Shop</b>","verdict":"failed","checks":[{"key":"load","title":"Page loads","status":"passed","summary":"200","details":[]},{"key":"links","title":"Links work","status":"failed","summary":"1 broken link","details":["404 https://shop.example/x"]}]}`),

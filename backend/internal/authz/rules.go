@@ -93,8 +93,9 @@ var RoleLevel = map[Role]Level{
 // permissionActions is what a token permission unlocks (§8.8). Tokens never
 // reach the human matrix above.
 var permissionActions = map[Permission]map[Action]bool{
-	PermProjectIngest: {ActionIngest: true},
-	PermProjectRead:   {ActionView: true}, // also reads a release gate for CI (§6.8.4 #2)
+	PermProjectIngest:  {ActionIngest: true},
+	PermProjectRead:    {ActionView: true}, // also reads a release gate for CI (§6.8.4 #2)
+	PermProjectAutorun: {ActionAutoRun: true},
 }
 
 func permissionsAllow(perms []Permission, a Action) bool {
@@ -106,7 +107,7 @@ func permissionsAllow(perms []Permission, a Action) bool {
 	return false
 }
 
-var validPermissions = map[Permission]bool{PermProjectIngest: true, PermProjectRead: true}
+var validPermissions = map[Permission]bool{PermProjectIngest: true, PermProjectRead: true, PermProjectAutorun: true}
 
 // membershipLevels is where a role may be attached; environment is for
 // tokens only.

@@ -28,6 +28,9 @@ const section = computed(() => {
   if (path.endsWith("/overview")) return "Overview";
   if (path.endsWith("/roi")) return "ROI";
   if (path.endsWith("/tokens")) return "CI tokens";
+  if (path.includes("/auto/runs/")) return "Auto run";
+  if (path.includes("/auto/scans/")) return "Site scan";
+  if (path.endsWith("/auto")) return "Auto test";
   if (path.includes("/url-checks")) return "URL checks";
   if (path.endsWith("/guide")) return "How to test";
   if (path.endsWith("/start")) return "Start testing";

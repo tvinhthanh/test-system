@@ -66,7 +66,7 @@ watch(type, async (t) => {
     source.value = "starter";
   } else source.value = "library";
 });
-const titleKey = (t: string) => t.trim().toLowerCase().replace(/s+/g, " ");
+const titleKey = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
 const libraryTitles = computed(
   () => new Set((library.data.value ?? []).map((c) => titleKey(c.title))),
 );

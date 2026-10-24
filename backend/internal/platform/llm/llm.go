@@ -89,9 +89,11 @@ type Client struct {
 	timeout time.Duration
 }
 
-// New returns a client; baseURL "" is the Anthropic API.
+// New returns a client; baseURL "" is the Anthropic API. A call may take
+// up to ten minutes: answers are streamed (runnable test cases, QĐ-16, run
+// to tens of thousands of tokens), and the limit bounds the whole stream.
 func New(baseURL string) *Client {
-	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), timeout: 3 * time.Minute}
+	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), timeout: 10 * time.Minute}
 }
 
 func (c *Client) sdk(apiKey string) anthropic.Client {
@@ -107,10 +109,11 @@ func (c *Client) sdk(apiKey string) anthropic.Client {
 // is re-served by the API inside the same call. Claude Haiku 5.5 has none.
 var fallbackModels = map[string]bool{"claude-opus-5-5": true, "claude-sonnet-5-5": true, "claude-fable-5-1": true}
 
-// JSON makes one non-streaming call and returns the structured answer.
-// Thinking is left at each model's default (adaptive; always on for Opus
-// 5.5 and Fable 5.1); effort is medium, set explicitly because the models'
-// defaults differ.
+// JSON makes one streamed call, accumulates it, and returns the structured
+// answer. Streaming keeps a long answer from idling the connection until a
+// proxy cuts it. Thinking is left at each model's default (adaptive; always
+// on for Opus 5.5 and Fable 5.1); effort is medium, set explicitly because
+// the models' defaults differ.
 func (c *Client) JSON(ctx context.Context, req Request) (Result, error) {
 	if !ValidModel(req.Model) {
 		return Result{}, fmt.Errorf("%w: %q is not offered", ErrModel, req.Model)
@@ -133,8 +136,15 @@ func (c *Client) JSON(ctx context.Context, req Request) (Result, error) {
 		params.Fallbacks = anthropic.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
 	}
 	client := c.sdk(req.APIKey)
-	msg, err := client.Beta.Messages.New(ctx, params)
-	if err != nil {
+	stream := client.Beta.Messages.NewStreaming(ctx, params)
+	msg := anthropic.BetaMessage{}
+	for stream.Next() {
+		if err := msg.Accumulate(stream.Current()); err != nil {
+			_ = stream.Close()
+			return Result{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
+	}
+	if err := stream.Err(); err != nil {
 		return Result{}, classify(err)
 	}
 	switch msg.StopReason {

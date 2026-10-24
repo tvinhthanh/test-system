@@ -131,6 +131,19 @@ export function makeRouter(
               import("../../features/testmgmt/UrlCheckDetailPage.vue"),
           },
           {
+            path: "p/:project/auto",
+            component: () => import("../../features/autotest/AutoTestPage.vue"),
+          },
+          {
+            path: "p/:project/auto/runs/:run",
+            component: () => import("../../features/autotest/AutoRunPage.vue"),
+          },
+          {
+            path: "p/:project/auto/scans/:scan",
+            component: () =>
+              import("../../features/autotest/SiteScanPage.vue"),
+          },
+          {
             path: "p/:project/guide",
             component: () => import("../../features/guide/TesterGuidePage.vue"),
           },

@@ -92,6 +92,19 @@ Run `bash server/atp.sh restart` after changing the key. The worker sends
 the test type, the tester's description and, with URL checks on, the page's
 structure to Anthropic; nothing is sent until a tester asks for drafts.
 
+## Auto Test, Site Scans And Runs From CI (QĐ-16)
+
+Needs `URLCHECK=on`: cases run in browser sessions of the `checker`
+service (`CHECKER_SESSIONS`, default 4, about 150 MB each). Testers keep
+test accounts per environment in the dashboard; their passwords are sealed
+with a key derived from `TOKEN_PEPPER` (changing the pepper means saving
+them again) and never reach a model. AI drafting, step repairs and finding
+sign-in steps use the organization's AI settings (see above); without a
+key, cases written by hand still run. Steps really happen on the site — a
+message is really sent — so point environments at staging. A deploy
+pipeline starts runs with a token issued with **Start auto runs**
+(`project:autorun`); the dashboard's Auto test page has the step.
+
 ## Local Dev Stack Without Owner MFA
 
 On a throwaway local stack (`APP_ENV=dev`), `bash server/dev-owner-mfa.sh off`

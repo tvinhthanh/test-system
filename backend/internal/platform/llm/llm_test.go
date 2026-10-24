@@ -38,8 +38,16 @@ func fakeAPI(t *testing.T, answer func(w http.ResponseWriter, body map[string]an
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)
 			body["_beta"] = r.Header.Get("Anthropic-Beta")
-			w.Header().Set("Content-Type", "application/json")
-			answer(w, body)
+			if body["stream"] != true {
+				w.Header().Set("Content-Type", "application/json")
+				answer(w, body)
+				return
+			}
+			// The answer is written as a message; streamed, it goes out as the
+			// server-sent events the API sends for it.
+			rec := httptest.NewRecorder()
+			answer(rec, body)
+			writeSSE(w, rec.Body.Bytes())
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -47,6 +55,42 @@ func fakeAPI(t *testing.T, answer func(w http.ResponseWriter, body map[string]an
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// writeSSE sends a message as the Messages API streams it.
+func writeSSE(w http.ResponseWriter, raw []byte) {
+	var m struct {
+		ID, Model  string
+		Content    []struct{ Text string }
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		}
+	}
+	_ = json.Unmarshal(raw, &m)
+	w.Header().Set("Content-Type", "text/event-stream")
+	event := func(name string, data map[string]any) {
+		b, _ := json.Marshal(data)
+		_, _ = w.Write([]byte("event: " + name + "\ndata: " + string(b) + "\n\n"))
+	}
+	event("message_start", map[string]any{"type": "message_start", "message": map[string]any{
+		"id": m.ID, "type": "message", "role": "assistant", "model": m.Model, "content": []any{},
+		"stop_reason": nil, "stop_sequence": nil, "usage": map[string]any{"input_tokens": m.Usage.InputTokens, "output_tokens": 1}}})
+	event("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
+	text := ""
+	if len(m.Content) > 0 {
+		text = m.Content[0].Text
+	}
+	// Two deltas, so accumulation is what puts the text together.
+	half := len(text) / 2
+	for _, part := range []string{text[:half], text[half:]} {
+		event("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": part}})
+	}
+	event("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+	event("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": m.StopReason, "stop_sequence": nil},
+		"usage": map[string]any{"output_tokens": m.Usage.OutputTokens}})
+	event("message_stop", map[string]any{"type": "message_stop"})
 }
 
 func message(text, stop string) string {
@@ -75,7 +119,7 @@ func TestJSONRequestShape(t *testing.T) {
 	}
 	oc, _ := seen["output_config"].(map[string]any)
 	format, _ := oc["format"].(map[string]any)
-	if seen["model"] != "claude-opus-5-5" || seen["max_tokens"] != float64(16000) || oc["effort"] != "medium" || format["type"] != "json_schema" || format["schema"] == nil {
+	if seen["model"] != "claude-opus-5-5" || seen["max_tokens"] != float64(16000) || oc["effort"] != "medium" || format["type"] != "json_schema" || format["schema"] == nil || seen["stream"] != true {
 		t.Errorf("request body: %v", seen)
 	}
 	if seen["fallbacks"] != "default" || !strings.Contains(seen["_beta"].(string), "server-side-fallback-2026-07-01") {

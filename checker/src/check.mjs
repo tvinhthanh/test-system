@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import tls from "node:tls";
 import { Blocked, resolveAllowed, startProxy } from "./proxy.mjs";
+import { runStep, StepError } from "./steps.mjs";
 
 const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
@@ -34,12 +35,18 @@ const check = (key, title, status, summary, details = []) => ({
 });
 const ms = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms`);
 
+// Links a signed-in crawl or link check never opens: following them would
+// sign the test account out or change data (QĐ-16 site scan).
+export const RISKY_LINK = /log-?out|sign-?out|log-?off|delete|remove|destroy|unsubscribe|deactivate/i;
+
 /**
  * @param {import("playwright").Browser} browser
  * @param {string} url http(s) only — the caller has checked
  * @param {{allowPrivate?: boolean, allow?: string[]}} policy see guard.mjs
+ * @param {{login?: {url: string, steps: object[], vars: Record<string,string>}}} [opts]
+ *   login: sign in first (QĐ-16) — the page is then checked as that account
  */
-export async function runCheck(browser, url, policy) {
+export async function runCheck(browser, url, policy, opts = {}) {
   const started = Date.now();
   const proxy = await startProxy(policy);
   const contexts = [];
@@ -58,6 +65,15 @@ export async function runCheck(browser, url, policy) {
   };
   try {
     const desktop = await newContext({ viewport: DESKTOP });
+    let session;
+    if (opts.login) {
+      const why = await signIn(desktop, url, opts.login);
+      if (why) {
+        const checks = [check("load", "Page loads", "failed", `Could not sign in: ${why}`)];
+        return finish({ url, finalUrl: url, status: 0, title: "", checks, metrics: {}, blocked: proxy.blocked(), started, shots: {}, links: [] });
+      }
+      session = await desktop.storageState();
+    }
     const page = await desktop.newPage();
     const consoleErrors = [];
     const pageErrors = [];
@@ -106,7 +122,7 @@ export async function runCheck(browser, url, policy) {
           ? `Did not load: ${navError}`
           : `The server answered ${status}`;
       checks.push(check("load", "Page loads", "failed", why, blockedSoFar));
-      return finish({ url, finalUrl, status, title: "", checks, metrics: {}, blocked: proxy.blocked(), started, shots: {} });
+      return finish({ url, finalUrl, status, title: "", checks, metrics: {}, blocked: proxy.blocked(), started, shots: {}, links: [] });
     }
     const redirects = [];
     for (let r = response.request().redirectedFrom(); r; r = r.redirectedFrom()) redirects.unshift(r.url());
@@ -145,13 +161,14 @@ export async function runCheck(browser, url, policy) {
     );
 
     const facts = await page.evaluate(collectFacts).catch(() => null);
-    checks.push(await linkCheck(desktop, facts?.links ?? []));
+    const links = facts?.links ?? [];
+    checks.push(await linkCheck(desktop, opts.login ? links.filter((l) => !RISKY_LINK.test(l)) : links));
     checks.push(await accessibilityCheck(page));
     checks.push(speedCheck(facts));
     checks.push(basicsCheck(facts));
 
     const desktopShot = await page.screenshot({ type: "jpeg", quality: 60 }).catch(() => null);
-    const phone = await phoneCheck(newContext, url);
+    const phone = await phoneCheck(newContext, url, session);
     checks.push(phone.check);
 
     return finish({
@@ -164,6 +181,7 @@ export async function runCheck(browser, url, policy) {
       blocked: proxy.blocked(),
       started,
       shots: { desktop: desktopShot, mobile: phone.shot },
+      links: sameSite(finalUrl, links),
     });
   } finally {
     await Promise.allSettled(contexts.map((c) => c.close()));
@@ -171,8 +189,42 @@ export async function runCheck(browser, url, policy) {
   }
 }
 
+// The pages a crawl may go on to: same origin, no fragment, at most 200.
+function sameSite(from, links) {
+  const origin = new URL(from).origin;
+  return links.filter((l) => {
+    try {
+      return new URL(l).origin === origin;
+    } catch {
+      return false;
+    }
+  }).slice(0, 200);
+}
+
+// Signs in on its own tab of the check's context; the cookies stay with the
+// context. Returns "" when signed in, else why not.
+async function signIn(context, url, login) {
+  const page = await context.newPage();
+  try {
+    const ctx = { vars: login.vars ?? {}, base: new URL(url), allowed: () => true };
+    const go = { do: "goto", by: "", role: "", name: "", value: login.url || url, say: "", expected: "" };
+    for (const [i, step] of [go, ...(login.steps ?? [])].entries()) {
+      try {
+        await runStep(page, step, ctx);
+      } catch (err) {
+        return i === 0 ? `the sign-in page did not open: ${err.message}` : `sign-in step ${i} failed: ${err instanceof StepError ? err.message : String(err)}`;
+      }
+    }
+    await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
+    const passwords = await page.locator('input[type="password"]').filter({ visible: true }).count().catch(() => 0);
+    return passwords > 0 ? "still on the sign-in page after the sign-in steps" : "";
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
 let ua = "";
-async function defaultUA(browser) {
+export async function defaultUA(browser) {
   if (!ua) {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
@@ -183,7 +235,7 @@ async function defaultUA(browser) {
   return ua;
 }
 
-function finish({ url, finalUrl, status, title, checks, metrics, blocked, started, shots }) {
+function finish({ url, finalUrl, status, title, checks, metrics, blocked, started, shots, links }) {
   const verdict = checks.reduce((worst, c) => (rank[c.status] > rank[worst] ? c.status : worst), "passed");
   return {
     report: {
@@ -198,6 +250,7 @@ function finish({ url, finalUrl, status, title, checks, metrics, blocked, starte
       durationMs: Date.now() - started,
     },
     shots,
+    links,
   };
 }
 
@@ -369,10 +422,10 @@ function basicsCheck(facts) {
     : check("basics", title, "passed", `“${cut(facts.title, 80)}”`);
 }
 
-async function phoneCheck(newContext, url) {
+async function phoneCheck(newContext, url, storageState) {
   const title = "Fits a phone screen";
   try {
-    const ctx = await newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const ctx = await newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState });
     const page = await ctx.newPage();
     await page.goto(url, { waitUntil: "load", timeout: NAV_TIMEOUT_MS });
     await page.waitForLoadState("networkidle", { timeout: SETTLE_MS }).catch(() => {});

@@ -155,6 +155,29 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		VALUES ($1, $2, 'smoke', 1, 'done', '[]', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID).Scan(&suggestionA); err != nil {
 		t.Fatal(err)
 	}
+	// Org A's auto test rows (QĐ-16): a test account through the api, a
+	// draft, a finished run with a screenshot and a site scan written the
+	// way the worker would (no checker or model here).
+	if r := a.user.post(baseA+"/environments/"+envA+"/accounts", map[string]any{"key": "walk-account", "username": "a", "password": "p"}); r.code != 200 {
+		t.Fatalf("seed A's test account: %d %s", r.code, r.raw)
+	}
+	var draftA, autoRunA, scanA string
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO auto_drafts (project_id, org_id, environment_id, target, count, status, drafts, requested_by, finished_at)
+		VALUES ($1, $2, $3, '/', 1, 'done', '[]', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID, envA).Scan(&draftA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO auto_runs (project_id, org_id, environment_id, status, trigger, requested_by, total, passed, started_at, finished_at)
+		VALUES ($1, $2, $3, 'done', 'dashboard', 'a@alpha.example', 1, 1, now(), now()) RETURNING id`, string(a.project), a.orgID, envA).Scan(&autoRunA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO auto_run_cases (run_id, case_id, position, title, spec, status, final_shot, finished_at)
+		VALUES ($1, $2, 0, 'Walk', '{}', 'passed', '\xffd8ffe0'::bytea, now())`, autoRunA, caseA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO site_scans (project_id, start_url, max_pages, requested_by) VALUES ($1, 'https://alpha.example/', 5, 'a@alpha.example') RETURNING id`,
+		string(a.project)).Scan(&scanA); err != nil {
+		t.Fatal(err)
+	}
 	if reqA == "" || caseA == "" || linkA == "" || planA == "" || execA == "" || releaseA == "" {
 		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q %q", reqA, caseA, linkA, planA, execA, releaseA)
 	}
@@ -184,6 +207,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"environmentId": envA,
 		"checkId":       checkA.ID, "which": "desktop",
 		"suggestionId": suggestionA,
+		"accountKey":   "walk-account", "draftId": draftA, "autoRunId": autoRunA, "shot": "final", "scanId": scanA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -235,6 +259,15 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		// JUnit upload: the tenant check runs before the body is read.
 		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
 		"POST /v1/projects/{projectId}/tokens":        map[string]any{"name": "walk"},
+		// Auto test (QĐ-16).
+		"POST /v1/projects/{projectId}/environments/{environmentId}/accounts":                         map[string]any{"key": "walk-b", "username": "b", "password": "p"},
+		"POST /v1/projects/{projectId}/environments/{environmentId}/accounts/{accountKey}/find-login": map[string]any{},
+		"POST /v1/projects/{projectId}/auto-specs":                                                    map[string]any{"title": "Walk", "target": "/", "steps": []any{map[string]any{"do": "expect_title", "value": "x"}}},
+		"POST /v1/projects/{projectId}/test-cases/{testCaseId}/auto-spec":                             map[string]any{"target": "/", "steps": []any{map[string]any{"do": "expect_title", "value": "x"}}},
+		"POST /v1/projects/{projectId}/auto-drafts":                                                   map[string]any{"environmentId": envA, "target": "/"},
+		"POST /v1/projects/{projectId}/auto-runs":                                                     map[string]any{"environmentId": envA},
+		"POST /v1/projects/{projectId}/auto-runs/{autoRunId}/cases/{testCaseId}/apply-heal":           map[string]any{"step": 0},
+		"POST /v1/projects/{projectId}/site-scans":                                                    map[string]any{"url": "https://beta.example"},
 		// ROI baseline (§6.8.3, QĐ-13): a valid measurement, so only the tenant check refuses.
 		"POST /v1/projects/{projectId}/roi/baselines": map[string]any{"kind": "retrospective", "failures": 10, "medianMinutes": 180, "periodFrom": "2026-08-01", "periodTo": "2026-08-14"},
 	}
@@ -244,6 +277,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"GET /healthz": true, "GET /v1/session": true, "POST /v1/session": true, "POST /v1/session/logout": true,
 		"GET /v1/projects": true, "POST /v1/runs": true, "POST /v1/artifacts": true,
 		"POST /v1/imports/junit":        true, // the token names the project, like POST /v1/runs; asserted below
+		"POST /v1/auto-runs":            true, // the token names the project (QĐ-16); asserted below
 		"GET /v1/member-scopes":         true, // per user; asserted below
 		"GET /v1/organizations/deleted": true, // the caller's own deleted orgs; asserted below
 		// MFA acts on the signed-in user only; asserted in mfa_test.go.
@@ -307,8 +341,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			if r := rep.do(method, fill(path, foreign), body, bearerA); r.code != 401 {
 				t.Errorf("bearer token on %s: %d %s", pat, r.code, r.raw)
 			}
-		case strings.HasPrefix(path, "/v1/releases/"):
-			// CI gate (§6.8.4 #2): a bearer route whose URL names no project.
+		case strings.HasPrefix(path, "/v1/releases/"), strings.HasPrefix(path, "/v1/auto-runs/"):
+			// CI gate (§6.8.4 #2) and auto runs for CI (QĐ-16): bearer routes
+			// whose URL names no project.
 			walked++
 			refused("B token → "+pat, rep.do(method, fill(path, foreign), nil, map[string]string{"Authorization": "Bearer " + b.token}))
 			// A's own ingest token lacks project:read — the permission
@@ -336,6 +371,14 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	}
 
 	// The exempt routes' tenant properties.
+	// POST /v1/auto-runs (QĐ-16): the token names its own project; an
+	// ingest-only token may not start runs, and a session is not a token.
+	if r := rep.do("POST", "/v1/auto-runs", map[string]any{"environment": "walk-env"}, bearerA); r.code != 403 {
+		t.Errorf("ingest token starts an auto run: %d %s", r.code, r.raw)
+	}
+	if r := a.user.do("POST", "/v1/auto-runs", map[string]any{"environment": "walk-env"}, nil); r.code != 401 {
+		t.Errorf("session cookie on POST /v1/auto-runs: %d %s", r.code, r.raw)
+	}
 	if r := b.user.get("/v1/organizations/deleted"); r.code != 200 || len(r.items()) != 0 {
 		t.Errorf("B lists deleted organizations: %s", r.raw)
 	}

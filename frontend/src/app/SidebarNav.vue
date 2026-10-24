@@ -2,6 +2,7 @@
 import {
   Activity,
   BookOpen,
+  Bot,
   ChevronsUpDown,
   ClipboardList,
   FolderGit2,
@@ -58,6 +59,13 @@ const items = computed(() =>
               },
             ]
           : []),
+        // QĐ-16: cases the server runs by itself, site scans, runs from CI.
+        {
+          to: `/p/${p.value}/auto`,
+          label: "Auto test",
+          icon: Bot,
+          active: route.path.includes("/auto"),
+        },
         {
           to: `/p/${p.value}/roi`,
           label: "ROI",
@@ -68,7 +76,7 @@ const items = computed(() =>
           to: `/p/${p.value}/runs`,
           label: "Test runs",
           icon: GitBranch,
-          active: route.path.includes("/runs"),
+          active: route.path.includes("/runs") && !route.path.includes("/auto/"),
         },
         {
           to: `/p/${p.value}/tests`,

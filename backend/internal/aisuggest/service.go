@@ -164,6 +164,17 @@ func (s *service) credentials(ctx context.Context, orgID string) (key, model, so
 	return "", "", "", ErrNotConfigured
 }
 
+func (s *service) Credentials(ctx context.Context, orgID string) (key, model, source string, ok bool, err error) {
+	if !uuidRe.MatchString(orgID) {
+		return "", "", "", false, ErrNotFound
+	}
+	key, model, source, err = s.credentials(ctx, orgID)
+	if errors.Is(err, ErrNotConfigured) {
+		return "", "", "", false, nil
+	}
+	return key, model, source, err == nil, err
+}
+
 // ---------------------------------------------------------- suggestions
 
 func (s *service) Request(ctx context.Context, in NewSuggestion) (Suggestion, error) {
