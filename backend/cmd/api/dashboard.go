@@ -105,6 +105,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.identityOpsRoutes(handle)
 	d.testmgmtRoutes(handle)
 	d.memberRoutes(handle)
+	d.accessRequestRoutes(handle)
 	d.invitationRoutes(handle)
 	d.importRoutes(handle)
 	d.roiRoutes(handle)

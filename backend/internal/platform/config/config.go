@@ -78,6 +78,9 @@ type Config struct {
 	// SMTP_PASSWORD, SMTP_FROM and SMTP_TLS=starttls|tls (none: dev only,
 	// for a local catcher like Mailpit). Needs PUBLIC_URL for the links.
 	Mail Mail
+	// Signup turns on self-serve sign-up with role approval (SIGNUP=on;
+	// default off keeps §11.2 "no self-signup"). ADR-001, variant A.
+	Signup bool
 }
 
 // Mail is the outgoing mail switch and SMTP settings.
@@ -121,6 +124,7 @@ func Load() (Config, error) {
 		ObjStoreMemoryAddr: os.Getenv("OBJSTORE_MEMORY_ADDR"),
 		DashboardOrigins:   splitList(getenv("DASHBOARD_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080")),
 		CookieSecure:       getenv("COOKIE_SECURE", "true") != "false",
+		Signup:             getenv("SIGNUP", "off") == "on",
 	}
 	if v, err := strconv.Atoi(getenv("DASHBOARD_RATE_PER_MINUTE", "600")); err != nil || v < 0 {
 		return c, fmt.Errorf("DASHBOARD_RATE_PER_MINUTE: want a non-negative integer")

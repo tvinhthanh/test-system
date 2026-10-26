@@ -109,6 +109,12 @@ GET /v1/workspaces/{workspaceId}/invitations
 DELETE /v1/workspaces/{workspaceId}/invitations/{invitationId}
 GET /v1/organizations/{organizationId}/invitations
 DELETE /v1/organizations/{organizationId}/invitations/{invitationId}
+GET /v1/projects/{projectId}/access-requests
+POST /v1/projects/{projectId}/access-requests/{requestId}/decide
+GET /v1/workspaces/{workspaceId}/access-requests
+POST /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide
+GET /v1/organizations/{organizationId}/access-requests
+POST /v1/organizations/{organizationId}/access-requests/{requestId}/decide
 POST /v1/session/password
 POST /v1/session/password/forgot
 POST /v1/session/password/reset

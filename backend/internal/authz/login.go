@@ -59,6 +59,10 @@ type WebOptions struct {
 	// names a node for the accept page — authz does not know tenancy.
 	Invitations   bool
 	DescribeScope func(ctx context.Context, s ScopeRef) string
+	// Signup turns on self-serve sign-up with role approval (ADR-001,
+	// SIGNUP=on). Off (default) keeps the old rule: accounts only by seed,
+	// invitation or OAuth into an existing account.
+	Signup bool
 	// SendReset mails a password-reset link (§11.2); nil = reset by email
 	// is off. It is called after the answer has gone, so it may take its
 	// time. Logger records what fails there (nil: slog.Default).
@@ -200,6 +204,9 @@ func AuthRoutes(mux httpx.Mux, svc Service, opts WebOptions) {
 	oauthRoutes(mux, h)
 	invitationRoutes(mux, h)
 	resetRoutes(mux, h)
+	if opts.Signup {
+		mux.Handle("POST /v1/session/signup", http.HandlerFunc(h.signup))
+	}
 	mux.Handle("POST /v1/session/password", http.HandlerFunc(h.passwordChange))
 }
 
@@ -231,6 +238,8 @@ type sessionResponse struct {
 	Invitations bool `json:"invitations"`
 	// PasswordReset: "forgot password" by email is available.
 	PasswordReset bool `json:"passwordReset"`
+	// Signup: self-serve sign-up with role approval is on (ADR-001).
+	Signup bool `json:"signup"`
 }
 
 // session is the bootstrap: who is logged in (if anyone) plus a CSRF
@@ -245,7 +254,7 @@ func (h *webHandlers) session(w http.ResponseWriter, r *http.Request) {
 		csrf = newCSRFToken()
 		h.setCSRFCookie(w, csrf, time.Time{})
 	}
-	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames(), Invitations: h.opts.Invitations, PasswordReset: h.opts.SendReset != nil}
+	resp := sessionResponse{CSRFToken: csrf, Providers: h.providerNames(), Invitations: h.opts.Invitations, PasswordReset: h.opts.SendReset != nil, Signup: h.opts.Signup}
 	if p, ok := PrincipalFrom(r.Context()); ok && p.Kind == PrincipalUser {
 		if u, err := h.svc.GetUser(r.Context(), p.UserID); err == nil {
 			resp.User = h.userOut(r, u)

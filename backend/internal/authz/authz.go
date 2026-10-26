@@ -415,6 +415,16 @@ type Service interface {
 	// the role and opens a session; ErrAccountExists when the email has an
 	// account by now (role granted, no session).
 	AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
+	// Signup (ADR-001, variant A "join_org") creates an account and a pending
+	// access request for a node, then opens a session. No role is granted
+	// until an admin approves, so the session reaches nothing. ErrAccountExists
+	// when the email is taken. Audited access_request.create.
+	Signup(ctx context.Context, email, password string, scope ScopeRef, role Role, note string, meta SessionMeta) (session Session, secret string, err error)
+	// AccessRequests lists a node's pending join requests, newest first.
+	AccessRequests(ctx context.Context, scope ScopeRef) ([]AccessRequest, error)
+	// DecideAccessRequest approves (granting the requested role, or the
+	// override) or denies a pending request on scope; audited.
+	DecideAccessRequest(ctx context.Context, scope ScopeRef, id, decision string, role Role, actor string) error
 	// CountPasswordResetRequest is what a forgot-password request waits for
 	// (§11.2): 5 per 15 minutes per email and per IP, every request counted,
 	// the same work for any email (ErrRateLimited).
