@@ -49,6 +49,7 @@ type RunFilter struct {
 	Q           string // ≤ 200 chars; matches branch, commit and localRunId
 	Status      string
 	Environment string // environment key
+	Source      string // playwright, junit, auto
 	Limit       int
 	Cursor      string
 }

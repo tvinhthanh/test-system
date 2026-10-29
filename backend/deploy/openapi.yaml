@@ -2310,6 +2310,7 @@ paths:
         - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: "Matches branch, commit and localRunId." }
         - { name: status, in: query, schema: { type: string, enum: [queued, running, passed, failed, error, cancelled] } }
         - { name: environment, in: query, schema: { type: string }, description: Environment key. }
+        - { name: source, in: query, schema: { type: string, enum: [playwright, junit, auto] }, description: Run source filter. }
         - { name: sort, in: query, schema: { type: string, enum: ["-startedAt"] } }
       responses:
         "200":

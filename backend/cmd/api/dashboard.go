@@ -303,7 +303,7 @@ func (d *dashboard) runs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pg, err := d.query.Runs(r.Context(), string(scope.ProjectID), query.RunFilter{
-		Q: qs.Get("q"), Status: qs.Get("status"), Environment: qs.Get("environment"), Limit: limitParam(r, 20), Cursor: qs.Get("cursor"),
+		Q: qs.Get("q"), Status: qs.Get("status"), Environment: qs.Get("environment"), Source: qs.Get("source"), Limit: limitParam(r, 20), Cursor: qs.Get("cursor"),
 	})
 	if err != nil {
 		d.queryErr(w, r, err)
