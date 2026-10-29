@@ -679,4 +679,15 @@ Module `autotest` (0042: tài khoản test theo environment, spec, bản nháp, 
 | 6 | Trung bình | Rà soát 21-10 mục 4: CI qua khi người `blocked`, khi chưa chấm và khi `no_evidence` | Server trả `ci {pass, reason}`; snippet trang release thành `jq -e '.ci.pass'` | `TestCIVerdict` (10 ca), `TestDashboardContractEndToEnd` |
 | 7 | Cao (gate CI frontend) | `npm audit`: vite ≤ 6.4.3 (high: launch-editor, middleware cross-origin), vitest/@vitest/mocker ≤ 4.1.11 (moderate) | vite 6.4.5, vitest 4.1.12 — chỉ `package.json` + lockfile. npm 10.9.2 vấp (`edgesOut` của null, peer set vitest → vite 8 → `@vitejs/devtools-*`) nên cây giải bằng npm 11.6.1 rồi chuẩn hóa bằng 10.9.2; khác lockfile cũ chỉ ở các gói trên và cờ `peer`, `@emnapi` đóng gói giữ nguyên | worktree sạch: `npm ci` bằng npm 10.9.2 (như CI) chạy được; `npm audit` 0 cho frontend, checker, reporter; 115/115 vitest; typecheck + build + bundle gate 59,6 KiB gzip |
 
-**Chưa kiểm:** gửi mail đăng ký qua SMTP thật, stack Docker với `SIGNUP=on`. Frontend chưa có màn hình đăng ký, trang `/signup#token` và màn hình duyệt `…/access-requests`.
+**Binary thật + hội thoại SMTP (30-10):**
+- **Dựng:** `migrate.exe` áp 44 migration lên DB mới, `admin.exe` seed tenant và một workspace_admin, `api.exe` chạy với `SIGNUP=on MAIL=smtp SMTP_TLS=none` tới một SMTP sink cục bộ (Node `net`, chỉ 127.0.0.1). Script trong scratchpad gửi cookie, Origin và CSRF như trình duyệt.
+- **Form:** bootstrap báo `signup: true`. Email mới và email đã có tài khoản nhận cùng một `202`, trả sau 26 ms, không chờ SMTP.
+- **Mail:** đúng **một** mail, tới đúng địa chỉ mới, subject đúng, không nêu tên project. Dòng link bị quoted-printable ngắt mềm và giải mã ra đúng `${PUBLIC_URL}/signup#…`, như mail client đọc.
+- **Link:** mật khẩu yếu không tiêu link. Mở link → đăng nhập, chưa thấy project nào. Thiếu CSRF → `403`; dùng lại link → `404 SIGNUP_NOT_FOUND`.
+- **Duyệt:** admin đăng nhập thật, hàng chờ có email đã được chứng minh; duyệt → `204`, tài khoản thấy project.
+- **DB và log:** 0 hàng `signup_requests`, audit có `access_request.create` + `approve`, api không có dòng ERROR nào.
+- **Cấu hình sai:** `SIGNUP=on` với `MAIL=off` → api thoát (exit 2), báo "SIGNUP=on needs MAIL=smtp".
+
+Test của `internal/platform/mail` chỉ phủ hội thoại SMTP chung; lần này thêm phần nối dây ở binary và mail đăng ký đi qua SMTP thật.
+
+**Chưa kiểm:** nhà cung cấp SMTP thật (TLS/STARTTLS, AUTH, độ trễ), stack Docker với `SIGNUP=on`. Frontend chưa có màn hình đăng ký, trang `/signup#token` và màn hình duyệt `…/access-requests`.

@@ -128,8 +128,9 @@ cmd_init() {
 	set_kv OBJSTORE_SECRET_KEY "$skey"
 	chmod 600 "$ENV_FILE" 2>/dev/null || true
 	say "wrote $ENV_FILE (secrets generated; back this file up — without TOKEN_PEPPER every token and MFA enrolment is lost)"
-	echo "    Sign-in with Google/GitHub and email (invitations, forgot password) are off;"
-	echo "    turn them on in that file (OAUTH_*, MAIL=smtp) and run: $0 restart"
+	echo "    Sign-in with Google/GitHub, email (invitations, forgot password) and self-serve"
+	echo "    sign-up are off; turn them on in that file (OAUTH_*, MAIL=smtp, SIGNUP=on — sign-up"
+	echo "    needs MAIL=smtp) and run: $0 restart"
 	if [ "$host" != localhost ]; then
 		echo "    Other devices reach it at https://$host — allow TCP 443 (and 80) in this machine's firewall;"
 		echo "    they must also trust its certificate: after up, run $0 ca"

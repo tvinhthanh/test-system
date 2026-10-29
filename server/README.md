@@ -81,6 +81,16 @@ pilot data: it deletes the Compose data and backup volumes.
   which lets anyone who may run a check make this host open pages on those
   networks — turn it on only for a staging site on the office LAN.
 
+## Self-Serve Sign-Up (QĐ-17)
+
+Off by default. With `SIGNUP=on` (which needs `MAIL=smtp`; the api refuses
+to start otherwise), anyone can ask to join an organization, workspace or
+project by its id with a role. The form answers the same for every address
+and mails a link (`https://<host>/signup#…`, one use, 24 hours); the account
+exists only once that link is opened, and it sees nothing until an admin of
+that node approves the request. Run `bash server/atp.sh restart` after
+changing it.
+
 ## AI-Drafted Test Cases (QĐ-15)
 
 Optional. `LLM_API_KEY` in `backend/deploy/.env` is the operator's Anthropic
