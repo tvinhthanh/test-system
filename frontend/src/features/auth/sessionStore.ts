@@ -8,6 +8,7 @@ import {
   type OAuthProvider,
   type SessionRepository,
   type Session,
+  type SignupRequest,
   type User,
 } from "./sessionRepository";
 
@@ -27,11 +28,14 @@ export function createSessionStore(
     // Mail is on (bootstrap): teams can invite unknown emails.
     const invitations = ref(false);
     const passwordReset = ref(false);
+    // Self-serve sign-up is open (bootstrap; QĐ-17).
+    const signup = ref(false);
     let bootstrap: Promise<void> | undefined;
     function apply(session: Session) {
       providers.value = session.providers;
       invitations.value = session.invitations;
       passwordReset.value = session.passwordReset;
+      signup.value = session.signup;
       user.value = session.user;
       api.csrfToken = session.csrfToken;
     }
@@ -147,6 +151,19 @@ export function createSessionStore(
       await ensure();
       await repository.resetPassword(token, password);
     }
+    // Self-serve sign-up (QĐ-17): ask, then finish from the mailed link,
+    // which signs in to an account with no role until an admin approves.
+    // Errors stay with the sign-up page, as with invitations.
+    async function requestSignup(form: SignupRequest) {
+      await ensure();
+      await repository.requestSignup(form);
+    }
+    async function completeSignup(token: string, password: string) {
+      await ensure();
+      apply(await repository.completeSignup(token, password));
+      ready.value = true;
+      return !!user.value;
+    }
     function cancelMfa() {
       challenge.value = null;
       error.value = null;
@@ -179,6 +196,9 @@ export function createSessionStore(
       providers,
       invitations,
       passwordReset,
+      signup,
+      requestSignup,
+      completeSignup,
       forgotPassword,
       changePassword: (current: string, password: string) =>
         repository.changePassword(current, password),

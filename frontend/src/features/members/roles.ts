@@ -20,6 +20,17 @@ export const grantable: Record<Level, readonly Role[]> = {
   project: projectRoles,
 };
 
+// What each role may do, in a few words (members screen, sign-up form).
+export const roleHelp: Record<Role, string> = {
+  org_owner:
+    "everything, including billing and other owners; two-factor authentication required",
+  org_admin: "workspaces, members and tokens across the organization",
+  workspace_admin: "projects and members in this workspace",
+  maintainer: "tokens, retention, identity merge, release decisions",
+  member: "triage and test management",
+  viewer: "read only",
+};
+
 // One node whose members a screen manages.
 export interface MemberNode {
   level: Level;

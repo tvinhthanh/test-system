@@ -5,10 +5,11 @@ import { useRoute } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
 import type { Invitation, Member } from "./membersRepository";
-import { grantable, type MemberNode, type Role } from "./roles";
+import { grantable, roleHelp, type MemberNode, type Role } from "./roles";
 import NewProject from "./NewProject.vue";
 import DeleteProject from "./DeleteProject.vue";
 import DeletedProjects from "./DeletedProjects.vue";
+import AccessRequests from "./AccessRequests.vue";
 import { useMutation } from "../testmgmt/useMutation";
 import ErrorNote from "../testmgmt/ErrorNote.vue";
 import { useProjectPermission } from "../reports/useProjectPermission";
@@ -108,15 +109,6 @@ const heading = computed(() => {
       };
   }
 });
-const roleHelp: Record<Role, string> = {
-  org_owner:
-    "everything, including billing and other owners; two-factor authentication required",
-  org_admin: "workspaces, members and tokens across the organization",
-  workspace_admin: "projects and members in this workspace",
-  maintainer: "tokens, retention, identity merge, release decisions",
-  member: "triage and test management",
-  viewer: "read only",
-};
 const label = (s: string) => s.replaceAll("_", " ");
 // A row is changed here only when its role lives on this node, and an
 // owner's row only by an owner.
@@ -373,6 +365,14 @@ const rowRoles = (m: Member) =>
       </Table>
     </div>
   </AsyncState>
+
+  <!-- Self-serve sign-up (QĐ-17): requests wait here for an approval. -->
+  <AccessRequests
+    v-if="session.signup && canManage"
+    :node="node"
+    :can-owners="canOwners"
+    @decided="refresh"
+  />
 
   <section
     v-if="session.invitations && canManage && invites.data.value?.length"

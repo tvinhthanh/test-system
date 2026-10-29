@@ -23,6 +23,23 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Self-serve sign-up screens (2026-10-30)
+
+- `/signup` is one page with two modes, like `/forgot` and `/reset`. The
+  "Ask to join" form takes the node from `?project=|workspace=|organization=<id>`
+  or as typed. `/signup#<token>` from the mail chooses the password. The page
+  has states for sign-up off, server down, link spent, account exists and
+  waiting for approval. Sign-in shows "New here? Ask to join" when the
+  bootstrap says `signup`.
+- Members screen: `AccessRequests.vue` shows the shareable sign-up link (with
+  copy) and the pending requests with their note. Each request has a role
+  select (the owner role is offered to owners only), Approve, and Deny on a
+  second click.
+- Tests in `tests/signup.test.ts`: repository paths, bodies and CSRF;
+  decoding; both page modes; the token leaving the address bar; the admin's
+  decisions. Built by Claude at the owner's request on 2026-10-30, outside the
+  backend-only split.
+
 ### Active Slice (2026-10-15)
 
 - Closing issue #3 / CI run 38749084024: backend/frontend/reporter/server

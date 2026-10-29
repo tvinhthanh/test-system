@@ -25,6 +25,10 @@ export function makeRouter(
         component: () => import("../../features/auth/PasswordPage.vue"),
       },
       {
+        path: "/signup",
+        component: () => import("../../features/auth/SignupPage.vue"),
+      },
+      {
         path: "/",
         component: () => import("../AppShell.vue"),
         meta: { protected: true },

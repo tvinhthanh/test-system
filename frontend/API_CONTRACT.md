@@ -102,6 +102,32 @@ account: use forgot password), `429` after five wrong tries. Security page →
   session is signed out and nobody is signed in: the page sends the person to
   sign in (MFA still asked if on).
 
+### Self-serve sign-up (QĐ-17, implemented 2026-10-29)
+
+- The bootstrap carries `signup: true` when the api runs with `SIGNUP=on`
+  (which needs `MAIL=smtp`); the sign-in page then shows "New here? Ask to
+  join" → `/signup`.
+- `POST /v1/session/signup {email, scopeLevel, scopeId, requestedRole, note?}`
+  → **202** with the same body for any email; `400 INVALID_SIGNUP` (email,
+  note over 1000, or a role that does not live at the level); `429` after 5
+  requests per email or IP in 15 minutes; `404 SIGNUP_OFF` when off. Admins
+  share `/signup?project=<id>` (or `workspace=` / `organization=`) from the
+  members screen and the page fills the node in. The page offers
+  member/viewer/maintainer, workspace_admin or org_admin — never the owner role.
+- The mail links to `/signup#<token>` (24 hours, single use, replaced by a
+  newer request). The page strips the fragment and posts
+  `POST /v1/session/signup/complete {token,password}` → the session shape:
+  signed in, with no role until approved. `404 SIGNUP_NOT_FOUND`,
+  `409 ACCOUNT_EXISTS` (sign in instead), `400 INVALID_PASSWORD` (token not
+  spent), `400 ALREADY_LOGGED_IN` while signed in.
+- Members screen, for `member.manage` on the node:
+  `GET /v1/{projects|workspaces|organizations}/{id}/access-requests` →
+  `{items:[{id,userId,email,requestedRole,level,note,createdAt}]}` (pending,
+  newest first, at most 200); `POST …/{requestId}/decide
+  {decision: approved|denied, role?}` → 204. `role` overrides the requested
+  one; the owner role needs an owner (`403 OWNER_ONLY`), also when it is the
+  one requested; `404 NOT_FOUND` when another admin decided first.
+
 ### Two-factor authentication (§11.2, implemented 2026-09-27)
 
 - The session user carries `mfa:{enabled,required}`. `required` means an org
@@ -327,7 +353,9 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
   `gate.verdict`; an `approved` next to a `blocked` gate is an override to
   show as such. `shipped` is terminal (`409` afterwards).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
-  token holding `project:read`.
+  token holding `project:read`. Since 2026-10-29 the answer also carries
+  `ci {pass, reason}`, decided by the server; the release page's snippet is
+  `jq -e '.ci.pass'`.
 
 ### Delete and restore a run (§11.3.2 data.delete, implemented 2026-09-29)
 

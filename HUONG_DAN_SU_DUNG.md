@@ -15,6 +15,7 @@ Tên nút và menu dưới đây giữ nguyên tiếng Anh như trên giao diệ
 2. Nhập **Email** và **Password**, bấm **Sign in**.
    - Nếu server đã bật đăng nhập bằng Google hoặc GitHub, sẽ có thêm nút **Continue with Google / GitHub**. Chỉ dùng được với tài khoản đã có sẵn trong ATP.
    - Quên mật khẩu: bấm **Forgot password?**. Chức năng này chỉ chạy khi server đã cấu hình gửi email.
+   - Chưa có tài khoản: nếu server mở tự đăng ký, bên dưới nút **Sign in** có dòng **New here? Ask to join**. Cách làm ở mục 1.4.
 3. Nếu bạn đã bật xác thực hai bước, nhập mã 6 số từ ứng dụng authenticator. Nếu mất điện thoại, nhập một recovery code thay cho mã. Mỗi recovery code chỉ dùng được một lần.
 
 > **Organization owner bắt buộc bật xác thực hai bước.** Lần đăng nhập đầu, app tự mở trang **Security**. Bấm **Set up two-factor authentication**, quét mã QR bằng Google Authenticator, 1Password, Authy hoặc Microsoft Authenticator, rồi nhập mã 6 số và bấm **Turn on**. **Lưu 10 recovery code ngay lúc đó**, bằng **Copy** hoặc **Download .txt**, vì chúng chỉ hiện đúng một lần. Chưa bật xong thì không mở được project nào.
@@ -52,6 +53,17 @@ Vai trò được kế thừa xuống dưới: ai là org admin thì cũng là a
 
 ---
 
+### 1.4 Tự đăng ký (khi server mở)
+
+Chỉ có khi người vận hành bật `SIGNUP=on` (xem mục 10).
+
+1. Mở **link đăng ký** mà admin của nhóm gửi, dạng `https://<server>/signup?project=…`. Không có link thì bấm **Ask to join** ở trang đăng nhập, chọn loại (project, workspace hay organization) rồi dán id do admin đưa.
+2. Nhập email, chọn **Role you ask for**, có thể ghi vài dòng cho admin (bạn là ai, cần làm gì), rồi bấm **Send me the link**.
+3. Mở email, bấm link (dùng một lần, hết hạn sau 24 giờ), đặt mật khẩu rồi bấm **Create account**.
+4. Bạn đã đăng nhập, nhưng chưa thấy project nào. Khi admin duyệt yêu cầu, project sẽ hiện trong dashboard.
+
+> Trang luôn báo "Check your email", kể cả khi email đó đã có tài khoản. Không nhận được thư thì có thể bạn đã có tài khoản rồi: dùng **Forgot password?**.
+
 ## 2. Dành cho admin: dựng nhóm
 
 ### 2.1 Thêm người
@@ -62,6 +74,10 @@ Vai trò được kế thừa xuống dưới: ai là org admin thì cũng là a
    - Nếu server chưa cấu hình email: ô nhập có nhãn **Email of an existing account**. Người vận hành tạo tài khoản trước bằng lệnh:
      `bash server/atp.sh admin user create -email ten@congty.vn -password '…' -verified`
 3. Muốn đổi vai trò, chọn lại trong cột **Role**. Muốn xóa người, bấm **Remove** rồi **Confirm**.
+4. Nếu server mở tự đăng ký, cùng màn hình có mục **Requests to join**:
+   - **Link đăng ký** của project, workspace hoặc organization này: bấm **Copy** rồi gửi cho người cần vào.
+   - Mỗi yêu cầu hiện email (đã được xác minh qua thư), vai trò họ xin, ghi chú và thời điểm gửi. Có thể chọn vai trò khác trước khi bấm **Approve**. Bấm **Deny** rồi **Confirm** để từ chối.
+   - Chỉ organization owner mới cấp được vai trò owner. Admin vẫn duyệt được yêu cầu xin owner, nhưng với vai trò org admin.
 
 ### 2.2 Tạo project
 
@@ -448,7 +464,8 @@ Các tùy chọn trong `backend/deploy/.env`:
 - `CHECKER_SESSIONS=4`: số trình duyệt Auto test mở cùng lúc, mỗi cái khoảng 150 MB.
 - `URLCHECK_ALLOW_PRIVATE=on`: cho URL check mở địa chỉ trong mạng LAN.
 - `LLM_API_KEY=sk-ant-…`: key Anthropic của server cho phần AI. Model không đặt ở đây mà chọn trong **AI settings** trên giao diện.
+- `SIGNUP=on`: mở tự đăng ký có duyệt (mục 1.4). Cần `MAIL=smtp`; thiếu thì server không khởi động.
 
-Sau khi sửa `.env`, chạy lại `bash server/atp.sh up` (với `URLCHECK`) hoặc `bash server/atp.sh restart` (với `LLM_API_KEY`).
+Sau khi sửa `.env`, chạy lại `bash server/atp.sh up` (với `URLCHECK`) hoặc `bash server/atp.sh restart` (với `LLM_API_KEY`, `SIGNUP`).
 
 > **Không bao giờ chạy `bash server/atp.sh reset` trên server có dữ liệu thật.** Lệnh này xóa toàn bộ dữ liệu, kể cả bản sao lưu.
