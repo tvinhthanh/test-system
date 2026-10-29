@@ -691,4 +691,12 @@ Module `autotest` (0042: tài khoản test theo environment, spec, bản nháp, 
 
 Test của `internal/platform/mail` chỉ phủ hội thoại SMTP chung; lần này thêm phần nối dây ở binary và mail đăng ký đi qua SMTP thật.
 
-**Chưa kiểm:** nhà cung cấp SMTP thật (TLS/STARTTLS, AUTH, độ trễ), stack Docker với `SIGNUP=on`. Frontend chưa có màn hình đăng ký, trang `/signup#token` và màn hình duyệt `…/access-requests`.
+**Chưa kiểm:** nhà cung cấp SMTP thật (TLS/STARTTLS, AUTH, độ trễ), stack Docker với `SIGNUP=on`. Giao diện đăng ký (30-10) được kiểm bằng vitest và một lượt trình duyệt thật, ghi ở dưới.
+
+**Giao diện đăng ký trên trình duyệt thật (30-10):**
+- **Worktree sạch ở `ca9ae47`:** `npm ci` (npm 10.9.2) chạy được; 123/123 vitest (30 file, gồm 8 ca của `tests/signup.test.ts`); typecheck; build + bundle gate (JS ban đầu 60,0 KiB gzip; trang đăng ký là chunk lazy 4,3 KiB).
+- **Dựng:** `api.exe` (DB mới, `SIGNUP=on`, SMTP sink) + Vite dev từ worktree + Chromium (Playwright 1.63). Kết quả 16/16.
+- **Admin:** trang đăng nhập có "Ask to join"; Members có link `…/signup?project=<id>` và "No requests waiting."
+- **Người xin:** mở link → form đã biết project, không phải gõ id; gửi → "Check your email"; đúng một mail, link trỏ về chính dashboard. Mở link → token rời thanh địa chỉ; đặt mật khẩu → "Your account is ready", chưa thấy project nào.
+- **Duyệt:** admin thấy yêu cầu kèm ghi chú và vai trò đã xin, đổi sang member rồi Approve → yêu cầu biến mất, danh sách thành viên có người mới với vai trò member; người mới thấy project.
+- **Chung:** khổ 390 px không cuộn ngang; 0 lỗi console; api 0 dòng ERROR, 0 phản hồi 5xx. Ảnh sáng và tối đã xem.
