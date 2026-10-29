@@ -43,6 +43,8 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		{"smtp without public url", map[string]string{"MAIL": "smtp", "SMTP_HOST": "mail", "SMTP_FROM": "a@b.c"}, "PUBLIC_URL"},
 		{"smtp bad port", map[string]string{"SMTP_PORT": "smtp"}, "SMTP_PORT"},
 		{"smtp tls unknown", map[string]string{"MAIL": "smtp", "SMTP_HOST": "mail", "SMTP_FROM": "a@b.c", "PUBLIC_URL": "http://localhost:5173", "SMTP_TLS": "ssl3"}, "SMTP_TLS"},
+		{"signup switch not on/off", map[string]string{"SIGNUP": "yes"}, "SIGNUP="},
+		{"signup without mail", map[string]string{"SIGNUP": "on"}, "SIGNUP=on needs MAIL=smtp"},
 		{"oauth switch not on/off", map[string]string{"OAUTH_GOOGLE": "yes"}, "OAUTH_GOOGLE"},
 		{"google on without credentials", map[string]string{"OAUTH_GOOGLE": "on", "PUBLIC_URL": "http://localhost:5173"}, "OAUTH_GOOGLE_CLIENT_ID"},
 		{"github on without a public url", map[string]string{"OAUTH_GITHUB": "on", "OAUTH_GITHUB_CLIENT_ID": "id", "OAUTH_GITHUB_CLIENT_SECRET": "s"}, "PUBLIC_URL"},

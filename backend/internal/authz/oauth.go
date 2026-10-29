@@ -17,7 +17,7 @@ import (
 // (OAUTH_GOOGLE / OAUTH_GITHUB). The provider tells us who signed in; the
 // account is found by that provider's stable subject, or — the first time —
 // by the provider's *verified* email matching an existing verified account
-// here. There is no self-signup (§11.2), so anyone else is refused.
+// here. OAuth never creates an account (§11.2), so anyone else is refused.
 
 // OAuthHTTP is how the flow talks to a provider: platform/outbound, whose
 // host allowlist is built from these providers' endpoints (§11.6 API7) —

@@ -1,9 +1,11 @@
 # ADR-001: Self-serve sign-up với duyệt role (request queue)
 
-**Status:** Proposed
+**Status:** Accepted — phương án A, lát `join_org` (PR #9 merge 26-10-2026); 29-10-2026: xác minh email thành bắt buộc, không còn là việc để sau (SPEC N65)
 **Date:** 2026-10-25
 **Deciders:** Chủ dự án (tvinhthanh) + người chịu trách nhiệm bảo mật
-**Tương ứng SPEC:** sẽ thành QĐ-14, đảo lại ràng buộc "no self-signup" ở §11.2
+**Tương ứng SPEC:** QĐ-17 (§1.17; QĐ-14 đã dùng cho "tester không cần source"), đảo lại ràng buộc "no self-signup" ở §11.2
+
+> **Sửa 29-10-2026.** Bản build đầu để "human approval là cổng" và tạo tài khoản đã verify ngay khi gửi form. Sai: "email đã verify" là thứ Members, lời mời và OAuth tin là chủ địa chỉ, nên ai cũng chiếm trước được email của người khác. Nay form luôn trả `202`, email nhận link `/signup#<token>`, tài khoản chỉ được tạo khi mở link; `SIGNUP=on` cần `MAIL=smtp`. Chi tiết ở SPEC §1.17.
 
 ## Context
 

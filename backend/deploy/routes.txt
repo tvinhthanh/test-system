@@ -153,3 +153,5 @@ POST /v1/organizations/{organizationId}/access-requests/{requestId}/decide
 POST /v1/session/password
 POST /v1/session/password/forgot
 POST /v1/session/password/reset
+POST /v1/session/signup
+POST /v1/session/signup/complete

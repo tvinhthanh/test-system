@@ -118,9 +118,9 @@ type Principal struct {
 	MFAEnrollmentRequired bool
 }
 
-// User is a dashboard account (§11.2). P1-min creates users by script and
-// marks them verified there; self-service signup with a verification mail
-// comes with the client.
+// User is a dashboard account (§11.2). Accounts come verified from the admin
+// script, an accepted invitation or a completed sign-up (SIGNUP=on) — each
+// after the address was proved, never before.
 type User struct {
 	ID              string
 	Email           string
@@ -299,7 +299,7 @@ var (
 	// ErrMFAMandatory: an org owner may not turn MFA off (§11.2).
 	ErrMFAMandatory = errors.New("authz: MFA is mandatory for org owners")
 	// ErrNoAccount: an OAuth identity that is not linked and whose verified
-	// email matches no verified account (no self-signup, §11.2).
+	// email matches no verified account (OAuth never creates one, §11.2).
 	ErrNoAccount = errors.New("authz: no account for that identity")
 	// ErrLastSignIn: removing this would leave the account no way to sign
 	// in (no password, no other linked provider).
@@ -419,11 +419,20 @@ type Service interface {
 	// the role and opens a session; ErrAccountExists when the email has an
 	// account by now (role granted, no session).
 	AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
-	// Signup (ADR-001, variant A "join_org") creates an account and a pending
-	// access request for a node, then opens a session. No role is granted
-	// until an admin approves, so the session reaches nothing. ErrAccountExists
-	// when the email is taken. Audited access_request.create.
-	Signup(ctx context.Context, email, password string, scope ScopeRef, role Role, note string, meta SessionMeta) (session Session, secret string, err error)
+	// Self-serve sign-up (ADR-001, variant A "join_org"), proved by mail like
+	// forgot password. CountSignupRequest is what the form waits for: its
+	// shape (ErrInvalid) and 5 per 15 minutes per IP and per address, every
+	// request counted (ErrRateLimited). IssueSignup files the request and
+	// returns (address, token) to mail, or ("", "") when the address has an
+	// account; run it after the answer has gone.
+	CountSignupRequest(ctx context.Context, req SignupRequest, ip string) error
+	IssueSignup(ctx context.Context, req SignupRequest) (to, token string, err error)
+	// CompleteSignup spends the mailed token: creates the verified account
+	// with password and the pending access request (audited
+	// access_request.create), then opens a session that reaches nothing until
+	// an admin approves. ErrNotFound for a bad link, ErrAccountExists when the
+	// address got an account since.
+	CompleteSignup(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
 	// AccessRequests lists a node's pending join requests, newest first.
 	AccessRequests(ctx context.Context, scope ScopeRef) ([]AccessRequest, error)
 	// DecideAccessRequest approves (granting the requested role, or the

@@ -18,11 +18,45 @@ import (
 // (user, node). Approving grants the role through the normal path; denying
 // closes it. Both are audited.
 //
-// Email verification (needs MAIL=smtp) is a follow-up: here the human
-// approval is the gate and the account is created verified so the flow works
-// without a mailer. Enabling the endpoint is gated by config SIGNUP=on.
+// The address is proved before anything trusts it (0044): a verified
+// address is what Members, invitations and the first OAuth sign-in treat as
+// its owner. The form answers the same for any address, like forgot
+// password; the account and its request exist only once the person opens
+// the single-use link mailed there and chooses a password. SIGNUP=on needs
+// MAIL=smtp for that mail.
 
-const accessRequestNoteMax = 1000
+const (
+	accessRequestNoteMax = 1000
+	signupTTL            = 24 * time.Hour
+	signupPrefix         = "atp_sgn_"
+)
+
+// SignupRequest is the sign-up form: who asks to join which node as what.
+type SignupRequest struct {
+	Email string
+	Scope ScopeRef
+	Role  Role
+	Note  string
+}
+
+// normalized checks the form without a round trip: the address, the note,
+// and a role that lives at the node's level (the placeholder user id is the
+// trick Invite uses).
+func (r SignupRequest) normalized() (SignupRequest, error) {
+	e, ok := normalizeEmail(r.Email)
+	if !ok {
+		return r, fmt.Errorf("%w: email", ErrInvalid)
+	}
+	r.Email = e
+	r.Note = strings.TrimSpace(r.Note)
+	if len(r.Note) > accessRequestNoteMax {
+		return r, fmt.Errorf("%w: note is too long", ErrInvalid)
+	}
+	if err := checkGrant("00000000-0000-4000-8000-000000000000", r.Scope, r.Role); err != nil {
+		return r, err
+	}
+	return r, nil
+}
 
 // AccessRequest is one pending/decided request to join a node with a role.
 type AccessRequest struct {
@@ -38,80 +72,131 @@ type AccessRequest struct {
 	CreatedAt     time.Time
 }
 
-// Signup creates an account and a pending access request for the given node,
-// then opens a session. The account carries no role until an admin approves,
-// so the new session can sign in but reach nothing. ErrAccountExists if the
-// email is taken (sign in and request access from there instead).
-func (s *service) Signup(ctx context.Context, email, password string, scope ScopeRef, role Role, note string, meta SessionMeta) (Session, string, error) {
-	e, ok := normalizeEmail(email)
-	if !ok {
-		return Session{}, "", fmt.Errorf("%w: email", ErrInvalid)
+// CountSignupRequest is the part of a sign-up the request waits for: the
+// form's shape and the limit. Every request counts toward five per 15
+// minutes per IP and per address, whether or not the address has an
+// account — otherwise the limit itself would tell the two apart, and an
+// address could be flooded with mail.
+func (s *service) CountSignupRequest(ctx context.Context, req SignupRequest, ip string) error {
+	r, err := req.normalized()
+	if err != nil {
+		return err
 	}
-	if len(note) > accessRequestNoteMax {
-		return Session{}, "", fmt.Errorf("%w: note is too long", ErrInvalid)
+	keys := []string{"signup-ip:" + ip, "signup-email:" + r.Email}
+	for _, k := range keys {
+		if locked, err := s.checkLoginLimit(ctx, k); err != nil {
+			return err
+		} else if locked {
+			return ErrRateLimited
+		}
 	}
-	// Validate the scope+role combination before touching the database, with
-	// a placeholder user id (the same trick Invite uses).
-	if err := checkGrant("00000000-0000-4000-8000-000000000000", scope, role); err != nil {
-		return Session{}, "", err
+	for _, k := range keys {
+		if err := s.recordLoginFailure(ctx, k); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
+// IssueSignup files the request and returns (address, token) for the
+// caller to mail, or ("", "") when the address has an account — that person
+// signs in instead. It differs in work between the two, so callers run it
+// after the answer has gone (as IssuePasswordReset). Asking again replaces
+// the open request, so only the newest link works.
+func (s *service) IssueSignup(ctx context.Context, req SignupRequest) (string, string, error) {
+	r, err := req.normalized()
+	if err != nil {
+		return "", "", err
+	}
+	var exists bool
+	if err := s.db.Q(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)`, r.Email).Scan(&exists); err != nil {
+		return "", "", err
+	}
+	if exists {
+		return "", "", nil
+	}
+	token := signupPrefix + randomToken()
+	now := s.now().UTC()
+	err = s.db.WithTx(ctx, func(ctx context.Context) error {
+		// Expired requests go on the way past rather than in a job: the
+		// limit above bounds how many there can be.
+		if _, err := s.db.Q(ctx).Exec(ctx, `DELETE FROM signup_requests WHERE expires_at <= $1`, now); err != nil {
+			return err
+		}
+		_, err := s.db.Q(ctx).Exec(ctx, `
+			INSERT INTO signup_requests (email, scope_level, scope_id, requested_role, note, token_hash, created_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (email) DO UPDATE SET scope_level = EXCLUDED.scope_level, scope_id = EXCLUDED.scope_id,
+			    requested_role = EXCLUDED.requested_role, note = EXCLUDED.note, token_hash = EXCLUDED.token_hash,
+			    created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at`,
+			r.Email, string(r.Scope.Level), r.Scope.ID, string(r.Role), r.Note, hashSecret(s.pepper, token), now, now.Add(signupTTL))
+		return mapErr(err)
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return r.Email, token, nil
+}
+
+// CompleteSignup spends a sign-up link: the account is created verified
+// (the mail proved the address) with the password chosen now, the access
+// request goes to the node's admins, and a session opens — one that reaches
+// nothing until the request is approved. ErrNotFound for an unknown, used,
+// replaced or expired link (counted toward the per-IP limit);
+// ErrAccountExists when the address got an account since (sign in with it).
+func (s *service) CompleteSignup(ctx context.Context, token, password string, meta SessionMeta) (Session, string, error) {
 	var userID string
-	err := s.guardSignup(ctx, meta.IP, func() error {
-		// argon2 only after the rate limit let the request in, and before any
-		// row is read, so a weak password or a taken email spends little.
+	err := s.guardInvitation(ctx, meta.IP, func() error {
+		if len(token) > 100 || !strings.HasPrefix(token, signupPrefix) {
+			return ErrNotFound
+		}
+		// argon2 only after the rate limit (see AcceptInvitation).
 		hash, err := hashPassword(password)
 		if err != nil {
 			return err
 		}
 		return s.db.WithTx(ctx, func(ctx context.Context) error {
+			now := s.now().UTC()
+			var r SignupRequest
+			err := s.db.Q(ctx).QueryRow(ctx, `
+				DELETE FROM signup_requests WHERE token_hash = $1 AND expires_at > $2
+				RETURNING email, scope_level, scope_id, requested_role, note`,
+				hashSecret(s.pepper, token), now).Scan(&r.Email, &r.Scope.Level, &r.Scope.ID, &r.Role, &r.Note)
+			if errors.Is(err, pg.ErrNoRows) {
+				return ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			// A link never takes an account over; rolling back keeps it, so
+			// trying again says the same.
 			var exists bool
-			if err := s.db.Q(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)`, e).Scan(&exists); err != nil {
+			if err := s.db.Q(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)`, r.Email).Scan(&exists); err != nil {
 				return err
 			}
 			if exists {
 				return ErrAccountExists
 			}
-			now := s.now().UTC()
 			if err := s.db.Q(ctx).QueryRow(ctx, `
 				INSERT INTO users (email, password_hash, password_updated_at, email_verified_at)
-				VALUES ($1, $2, $3, $3) RETURNING id`, e, hash, now).Scan(&userID); err != nil {
+				VALUES ($1, $2, $3, $3) RETURNING id`, r.Email, hash, now).Scan(&userID); err != nil {
 				return mapErr(err)
 			}
 			var reqID string
-			err := s.db.Q(ctx).QueryRow(ctx, `
+			if err := s.db.Q(ctx).QueryRow(ctx, `
 				INSERT INTO access_requests (user_id, scope_level, scope_id, requested_role, note)
 				VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-				userID, string(scope.Level), scope.ID, string(role), strings.TrimSpace(note)).Scan(&reqID)
-			if err != nil {
+				userID, string(r.Scope.Level), r.Scope.ID, string(r.Role), r.Note).Scan(&reqID); err != nil {
 				return mapErr(err)
 			}
-			return s.audit(ctx, "access_request.create", "access_request", reqID, string(scope.Level), scope.ID, e,
-				map[string]any{"user_id": userID, "requested_role": role})
+			return s.audit(ctx, "access_request.create", "access_request", reqID, string(r.Scope.Level), r.Scope.ID, r.Email,
+				map[string]any{"user_id": userID, "requested_role": r.Role})
 		})
 	})
 	if err != nil {
 		return Session{}, "", err
 	}
 	return s.openSession(ctx, userID, meta)
-}
-
-// guardSignup applies the per-IP login limit to the anonymous signup route
-// and counts any failure as an attempt, so mass account creation throttles.
-func (s *service) guardSignup(ctx context.Context, ip string, fn func() error) error {
-	key := "ip:" + ip
-	if locked, err := s.checkLoginLimit(ctx, key); err != nil {
-		return err
-	} else if locked {
-		return ErrRateLimited
-	}
-	err := fn()
-	if err != nil && !errors.Is(err, ErrRateLimited) {
-		if rerr := s.recordLoginFailure(ctx, key); rerr != nil {
-			return rerr
-		}
-	}
-	return err
 }
 
 const accessRequestColumns = `ar.id, ar.user_id, u.email, ar.scope_level, ar.scope_id, ar.requested_role, ar.note, ar.status, ar.decided_by, ar.decided_at, ar.created_at`

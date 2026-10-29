@@ -426,7 +426,7 @@ paths:
         `email_verified`; GitHub: user id and the primary verified email).
         The account is the one linked to that provider subject, or — the
         first time — the verified account with the same verified email, which
-        links them (audited `identity.link`). There is no self-signup.
+        links them (audited `identity.link`). OAuth never creates an account.
         Answers are redirects: success → `redirect` with the session cookie;
         MFA on → `/sign-in?step=mfa&redirect=…` with the challenge in an
         HttpOnly `atp_mfa` cookie for `POST /v1/session/mfa`; failure →
@@ -644,6 +644,89 @@ paths:
         "403": { $ref: "#/components/responses/CSRF" }
         "404":
           description: "`RESET_NOT_FOUND` — used, replaced, or older than 30 minutes."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/signup:
+    post:
+      operationId: requestSignup
+      tags: [session]
+      summary: Ask to sign up and join a node — a link to finish is mailed
+      description: |
+        Self-serve sign-up with role approval (ADR-001, QĐ-17), only with
+        `SIGNUP=on`, which needs `MAIL=smtp` (bootstrap `signup`); otherwise
+        `404 SIGNUP_OFF`. Always `202` with the same body, whether or not the
+        email has an account — like forgot password, the lookup and the mail
+        happen after the answer. An email with no account gets a link
+        `/signup#<token>` (single use, 24 hours, replaced by a newer request);
+        nothing is created until it is opened. `requestedRole` must live at
+        `scopeLevel` (org_owner/org_admin → organization, workspace_admin →
+        workspace, maintainer/member/viewer → project). Every request counts
+        toward 5 per 15 minutes per email and per IP (`429`). Guarded like the
+        login (Origin + double-submit CSRF).
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, scopeLevel, scopeId, requestedRole]
+              properties:
+                email: { type: string }
+                scopeLevel: { type: string, enum: [organization, workspace, project] }
+                scopeId: { type: string, format: uuid }
+                requestedRole: { type: string, enum: [org_owner, org_admin, workspace_admin, maintainer, member, viewer] }
+                note: { type: string, maxLength: 1000, description: Shown to the admins who decide. }
+      responses:
+        "202":
+          description: Taken — a link is on its way if the email can sign up.
+          content: { application/json: { schema: { type: object, properties: { message: { type: string } } } } }
+        "400":
+          description: "`INVALID_SIGNUP` (email, note, or a role that does not live at the level) or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`SIGNUP_OFF` — sign-up is not open here."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/signup/complete:
+    post:
+      operationId: completeSignup
+      tags: [session]
+      summary: Finish signing up with the mailed token — choose a password and sign in
+      description: |
+        Creates the account verified (the mailed link proved the address)
+        with the chosen password, files the access request for the node's
+        admins (`GET …/access-requests`, audited `access_request.create`) and
+        opens a session, answering like `POST /v1/session`. The account holds
+        no role until an admin approves, so the session reaches nothing yet.
+        If the email has an account by now, `409 ACCOUNT_EXISTS` — a link
+        never takes an account over. Unknown tokens count toward the per-IP
+        limit.
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 12 }
+      responses:
+        "200":
+          description: Signed in.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400":
+          description: "`INVALID_PASSWORD` (at least 12 characters; the token is not spent) or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`SIGNUP_NOT_FOUND` — used, replaced, or older than 24 hours; or `SIGNUP_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: "`ACCOUNT_EXISTS` — sign in with that account."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/session/mfa:
@@ -2194,7 +2277,7 @@ paths:
       operationId: listProjectAccessRequests
       tags: [members]
       summary: Pending sign-up requests to join this project, newest first
-      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on.
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on, once the person opened the mailed link (`POST /v1/session/signup/complete`), so the email shown is proven.
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2254,7 +2337,7 @@ paths:
       operationId: listWorkspaceAccessRequests
       tags: [members]
       summary: Pending sign-up requests to join this workspace, newest first
-      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on.
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on, once the person opened the mailed link (`POST /v1/session/signup/complete`), so the email shown is proven.
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/WorkspaceId" }
@@ -2314,7 +2397,7 @@ paths:
       operationId: listOrganizationAccessRequests
       tags: [members]
       summary: Pending sign-up requests to join this organization, newest first
-      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on.
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on, once the person opened the mailed link (`POST /v1/session/signup/complete`), so the email shown is proven.
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/OrganizationId" }
@@ -4320,6 +4403,7 @@ components:
         csrfToken: { type: string }
         invitations: { type: boolean, description: "Mail is on (MAIL=smtp): adding an email with no account to a team invites it." }
         passwordReset: { type: boolean, description: "Forgot-password by email is available (MAIL=smtp)." }
+        signup: { type: boolean, description: "Self-serve sign-up with role approval is open (SIGNUP=on with MAIL=smtp, QĐ-17)." }
         providers:
           type: array
           description: "OAuth sign-ins switched on in the api's configuration (§11.2); the sign-in page shows a button for each."

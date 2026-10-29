@@ -150,11 +150,17 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	mailer := newMailer(cfg)
 	web.Invitations = mailer != nil
 	web.Logger = logger
-	web.Signup = cfg.Signup
 	web.DescribeScope = func(ctx context.Context, s authz.ScopeRef) string { return scopeName(ctx, ten, s) }
 	if mailer != nil {
 		web.SendReset = func(ctx context.Context, to, token string) error {
 			return sendReset(ctx, mailer, cfg.PublicURL, to, token)
+		}
+		// Self-serve sign-up (QĐ-17) only with mail: config refuses
+		// SIGNUP=on without it, since the mail is what proves the address.
+		if cfg.Signup {
+			web.SendSignup = func(ctx context.Context, to, token string) error {
+				return sendSignup(ctx, mailer, cfg.PublicURL, to, token)
+			}
 		}
 	}
 	if client, err := outbound.New(10*time.Second, endpoints...); err != nil {

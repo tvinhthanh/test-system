@@ -299,6 +299,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		// OAuth sign-in: anonymous browser navigations, asserted in oauth_test.go.
 		"GET /v1/session/oauth/{provider}/start": true, "GET /v1/session/oauth/{provider}/callback": true,
 		"POST /v1/session/password/forgot": true, "POST /v1/session/password/reset": true, // anonymous; invitations_test.go
+		"POST /v1/session/signup": true, "POST /v1/session/signup/complete": true, // anonymous; signup_test.go
 		"POST /v1/session/password":   true,                                      // the caller's own password; password_test.go
 		"POST /v1/invitations/lookup": true, "POST /v1/invitations/accept": true, // anonymous, by token; invitations_test.go
 		"GET /v1/session/identities": true, "DELETE /v1/session/identities/{identityId}": true, // the caller's own; oauth_test.go
