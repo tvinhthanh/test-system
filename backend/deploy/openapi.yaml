@@ -2311,7 +2311,7 @@ paths:
       operationId: decideProjectAccessRequest
       tags: [members]
       summary: Approve (granting a role) or deny a pending sign-up request
-      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`).
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`) — whether it is the override or the role the visitor asked for.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2371,7 +2371,7 @@ paths:
       operationId: decideWorkspaceAccessRequest
       tags: [members]
       summary: Approve (granting a role) or deny a pending sign-up request
-      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`).
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`) — whether it is the override or the role the visitor asked for.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/WorkspaceId" }
@@ -2431,7 +2431,7 @@ paths:
       operationId: decideOrganizationAccessRequest
       tags: [members]
       summary: Approve (granting a role) or deny a pending sign-up request
-      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`).
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`) — whether it is the override or the role the visitor asked for.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/OrganizationId" }

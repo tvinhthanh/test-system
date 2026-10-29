@@ -236,6 +236,23 @@ func (s *service) AccessRequests(ctx context.Context, scope ScopeRef) ([]AccessR
 	return out, rows.Err()
 }
 
+// PendingAccessRequest reads one pending request on a node — what the HTTP
+// layer needs to know the role an approval would grant before it decides.
+// ErrNotFound when it is not pending there.
+func (s *service) PendingAccessRequest(ctx context.Context, scope ScopeRef, id string) (AccessRequest, error) {
+	if !isUUID(id) || !isUUID(scope.ID) || !membershipLevels[scope.Level] {
+		return AccessRequest{}, ErrNotFound
+	}
+	a, err := scanAccessRequest(s.db.Q(ctx).QueryRow(ctx, `
+		SELECT `+accessRequestColumns+` FROM access_requests ar JOIN users u ON u.id = ar.user_id
+		 WHERE ar.id = $1 AND ar.scope_level = $2 AND ar.scope_id = $3 AND ar.status = 'pending'`,
+		id, string(scope.Level), scope.ID))
+	if errors.Is(err, pg.ErrNoRows) {
+		return AccessRequest{}, ErrNotFound
+	}
+	return a, err
+}
+
 // DecideAccessRequest approves (granting a role — the requested one, or the
 // override in role) or denies a pending request on the given node. The HTTP
 // layer must have authorized member.manage on that scope. decision is

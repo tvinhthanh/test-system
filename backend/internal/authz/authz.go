@@ -435,6 +435,9 @@ type Service interface {
 	CompleteSignup(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
 	// AccessRequests lists a node's pending join requests, newest first.
 	AccessRequests(ctx context.Context, scope ScopeRef) ([]AccessRequest, error)
+	// PendingAccessRequest reads one pending request on a node (ErrNotFound
+	// otherwise), so an approval's role is known before deciding.
+	PendingAccessRequest(ctx context.Context, scope ScopeRef, id string) (AccessRequest, error)
 	// DecideAccessRequest approves (granting the requested role, or the
 	// override) or denies a pending request on scope; audited.
 	DecideAccessRequest(ctx context.Context, scope ScopeRef, id, decision string, role Role, actor string) error

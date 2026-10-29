@@ -157,3 +157,77 @@ func TestSignup(t *testing.T) {
 		t.Errorf("complete with signup off: %d %s", r.code, r.raw)
 	}
 }
+
+// The owner role stays the owners' to grant, also through sign-up: the form
+// accepts org_owner, so approving a request as asked must be checked like an
+// override. An org admin may still approve it with a lesser role, or deny it.
+func TestAccessRequestOwnerRule(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin}, CookieSecure: false}
+	handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	ten, az := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper))
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	orgScope := authz.ScopeRef{Level: authz.LevelOrganization, ID: string(org.ID)}
+	admin, _ := az.CreateUser(ctx, "oscar@example.com")
+	_ = az.SetPassword(ctx, admin.ID, "oscar passphrase long", "")
+	_ = az.VerifyEmail(ctx, admin.ID)
+	if _, err := az.GrantRole(ctx, admin.ID, orgScope, authz.RoleOrgAdmin); err != nil {
+		t.Fatal(err)
+	}
+	signUp := func(email string, role authz.Role) {
+		t.Helper()
+		_, token, err := az.IssueSignup(ctx, authz.SignupRequest{Email: email, Scope: orgScope, Role: role})
+		if err != nil || token == "" {
+			t.Fatalf("issue %s: %v", email, err)
+		}
+		if _, _, err := az.CompleteSignup(ctx, token, "a long enough passphrase", authz.SessionMeta{IP: "203.0.113.30"}); err != nil {
+			t.Fatalf("complete %s: %v", email, err)
+		}
+	}
+	signUp("wants.owner@example.com", authz.RoleOrgOwner)
+	signUp("wants.admin@example.com", authz.RoleOrgAdmin)
+
+	oscar := newClient(t, srv)
+	oscar.bootstrap()
+	if r := oscar.post("/v1/session", map[string]string{"email": "oscar@example.com", "password": "oscar passphrase long"}); r.code != 200 {
+		t.Fatalf("login: %d %s", r.code, r.raw)
+	}
+	oscar.csrf, _ = oscar.get("/v1/session").body["csrfToken"].(string)
+	queue := "/v1/organizations/" + string(org.ID) + "/access-requests"
+	ids := map[string]string{}
+	for _, it := range oscar.get(queue).items() {
+		m := it.(map[string]any)
+		ids[m["email"].(string)] = m["id"].(string)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("queue: %v", ids)
+	}
+	decide := func(email string, body map[string]any) resp {
+		return oscar.post(queue+"/"+ids[email]+"/decide", body)
+	}
+	if r := decide("wants.owner@example.com", map[string]any{"decision": "approved"}); r.code != 403 || r.errCode() != "OWNER_ONLY" {
+		t.Errorf("admin approving an owner request as asked: %d %s", r.code, r.raw)
+	}
+	owner, _ := az.GetUserByEmail(ctx, "wants.owner@example.com")
+	if ms, _ := az.ListMemberships(ctx, owner.ID); len(ms) != 0 {
+		t.Fatalf("refused approval granted a role: %+v", ms)
+	}
+	if r := decide("wants.owner@example.com", map[string]any{"decision": "approved", "role": "org_admin"}); r.code != 204 {
+		t.Errorf("approving it as org admin instead: %d %s", r.code, r.raw)
+	}
+	if ms, _ := az.ListMemberships(ctx, owner.ID); len(ms) != 1 || ms[0].Role != authz.RoleOrgAdmin {
+		t.Errorf("lesser role not granted: %+v", ms)
+	}
+	if r := decide("wants.admin@example.com", map[string]any{"decision": "approved"}); r.code != 204 {
+		t.Errorf("approving an admin request as asked: %d %s", r.code, r.raw)
+	}
+	if r := oscar.post(queue+"/00000000-0000-4000-8000-000000000000/decide", map[string]any{"decision": "approved"}); r.code != 404 {
+		t.Errorf("unknown request: %d %s", r.code, r.raw)
+	}
+}
