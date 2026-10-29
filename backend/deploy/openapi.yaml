@@ -3962,15 +3962,31 @@ paths:
         The URL names no project, so the release is looked up first and the
         token authorized against that project; a token of another tenant, an
         ingest-only token, or an unknown id all answer `404`. A deploy job
-        polls this and stops on `gate.verdict == "blocked"` unless
-        `status` shows a named override.
+        acts on `ci.pass` (`jq -e .ci.pass`), which the server decides: a
+        person's decision wins over the gate — `approved`/`shipped` goes,
+        `blocked` stops — and an `open` release goes only when the gate was
+        evaluated and is `approved` or `warn`; not evaluated (`gate: null`)
+        and `no_evidence` stop. `ci.reason` says which.
       security: [{ ingestToken: [] }]
       parameters:
         - { $ref: "#/components/parameters/ReleaseId" }
       responses:
         "200":
-          description: The release with its last gate result and decision.
-          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+          description: The release with its last gate result and decision, and the answer for CI.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Release" }
+                  - type: object
+                    required: [ci]
+                    properties:
+                      ci:
+                        type: object
+                        required: [pass, reason]
+                        properties:
+                          pass: { type: boolean, description: "Go on with the deploy." }
+                          reason: { type: string, description: "Which rule decided, e.g. \"release approved by carol@example.com\", \"gate blocked\"." }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 

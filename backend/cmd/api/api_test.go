@@ -828,7 +828,8 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	// token, a foreign token and no token are all refused.
 	readTok, _ := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, Permissions: []authz.Permission{authz.PermProjectRead}, Name: "deploy"})
 	ci := newClient(t, srv)
-	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" {
+	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" ||
+		r.body["ci"].(map[string]any)["pass"] != true || r.body["ci"].(map[string]any)["reason"] != "release approved by carol@example.com" {
 		t.Errorf("CI gate: %d %s", r.code, r.raw)
 	}
 	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + tok.Plaintext}); r.code != 404 {

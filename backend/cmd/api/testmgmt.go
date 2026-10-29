@@ -1200,7 +1200,40 @@ func (d *dashboard) gateForCI(w http.ResponseWriter, r *http.Request) {
 		d.tmErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, releaseOut(rel))
+	writeJSON(w, http.StatusOK, ciReleaseDTO{releaseDTO: releaseOut(rel), CI: ciVerdict(rel)})
+}
+
+// ciDTO is what a deploy job acts on: go on or stop, and why. The rule lives
+// here rather than in each pipeline's jq (21-10 review, finding 4, which
+// found the documented jq let a release through when a person had blocked
+// it, when nothing was evaluated, and on no evidence). A person's decision
+// wins over the gate — approved or shipped goes, blocked stops — and an
+// open release goes only on an evaluated gate that is approved or warn.
+type ciDTO struct {
+	Pass   bool   `json:"pass"`
+	Reason string `json:"reason"`
+}
+
+type ciReleaseDTO struct {
+	releaseDTO
+	CI ciDTO `json:"ci"`
+}
+
+func ciVerdict(r testmgmt.Release) ciDTO {
+	switch r.Status {
+	case testmgmt.ReleaseApproved, testmgmt.ReleaseShipped:
+		return ciDTO{Pass: true, Reason: "release " + string(r.Status) + " by " + r.DecidedBy}
+	case testmgmt.ReleaseBlocked:
+		return ciDTO{Reason: "release blocked by " + r.DecidedBy}
+	}
+	switch {
+	case r.Gate == nil:
+		return ciDTO{Reason: "gate not evaluated; evaluate it or have the release approved"}
+	case r.Gate.Verdict == testmgmt.VerdictApproved || r.Gate.Verdict == testmgmt.VerdictWarn:
+		return ciDTO{Pass: true, Reason: "gate " + string(r.Gate.Verdict)}
+	default:
+		return ciDTO{Reason: "gate " + string(r.Gate.Verdict)}
+	}
 }
 
 func decodeJSON(r *http.Request, v any) error { return json.NewDecoder(r.Body).Decode(v) }
