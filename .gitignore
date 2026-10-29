@@ -21,3 +21,6 @@ server/atp-root-ca.crt
 
 # The reporter tarballs server/atp.sh packs for Caddy's /downloads/.
 backend/deploy/downloads/
+
+# Local seed credentials written by setup (generated password).
+backend/deploy/SEED_CREDENTIALS.local.txt

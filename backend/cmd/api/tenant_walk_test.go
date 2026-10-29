@@ -188,6 +188,15 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A pending access request on A's project (ADR-001 join_org), seeded
+	// directly: the walk needs its id, not the anonymous sign-up path.
+	var accessReqA string
+	if err := db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO access_requests (user_id, scope_level, scope_id, requested_role, note)
+		VALUES ($1, 'project', $2, 'viewer', 'walk') RETURNING id`, a.userID, string(a.project)).Scan(&accessReqA); err != nil {
+		t.Fatal(err)
+	}
+
 	specializedBody := map[string]any{"schemaVersion": 1, "idempotencyKey": "walk-specialized", "kind": "recovery", "title": "Walk recovery", "state": "not_run", "notes": "Not executed", "environment": "test", "applicationVersion": "1", "source": "manual", "toolVersion": "1", "adapterVersion": "atp-v1", "details": map[string]any{}}
 	specialized := a.user.post(baseA+"/specialized-results", specializedBody)
 	if specialized.code != 201 {
@@ -203,6 +212,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"userId":      a.userID,
 		"workspaceId": a.wsID, "organizationId": a.orgID,
 		"invitationId":  inviteA.ID,
+		"requestId":     accessReqA,
 		"tokenId":       a.tokenID,
 		"environmentId": envA,
 		"checkId":       checkA.ID, "which": "desktop",
@@ -211,15 +221,18 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
-		"POST /v1/projects/{projectId}/results/{resultId}/triage-events":   map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
-		"POST /v1/runs/{localRunId}/events":                                map[string]any{"events": []any{event}},
-		"POST /v1/runs/{localRunId}/finish":                                map[string]any{},
-		"POST /v1/artifacts/{artifactId}/complete":                         map[string]any{"sha256": strings.Repeat("ab", 32)},
-		"POST /v1/artifacts":                                               declare,
-		"POST /v1/projects/{projectId}/review/{itemId}":                    map[string]any{"decision": "kept"},
-		"POST /v1/projects/{projectId}/identities/{identityId}/merge":      map[string]any{"into": identityA},
-		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge": map[string]any{},
-		"POST /v1/projects/{projectId}/identities/{identityId}/split":      map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
+		"POST /v1/projects/{projectId}/results/{resultId}/triage-events":             map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
+		"POST /v1/runs/{localRunId}/events":                                          map[string]any{"events": []any{event}},
+		"POST /v1/runs/{localRunId}/finish":                                          map[string]any{},
+		"POST /v1/artifacts/{artifactId}/complete":                                   map[string]any{"sha256": strings.Repeat("ab", 32)},
+		"POST /v1/artifacts":                                                         declare,
+		"POST /v1/projects/{projectId}/review/{itemId}":                              map[string]any{"decision": "kept"},
+		"POST /v1/projects/{projectId}/access-requests/{requestId}/decide":           map[string]any{"decision": "denied"},
+		"POST /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide":       map[string]any{"decision": "denied"},
+		"POST /v1/organizations/{organizationId}/access-requests/{requestId}/decide": map[string]any{"decision": "denied"},
+		"POST /v1/projects/{projectId}/identities/{identityId}/merge":                map[string]any{"into": identityA},
+		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge":           map[string]any{},
+		"POST /v1/projects/{projectId}/identities/{identityId}/split":                map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
 		// Test Management (P2). Valid bodies, so only the tenant check can refuse.
 		"POST /v1/projects/{projectId}/specialized-results":            specializedBody,
 		"POST /v1/projects/{projectId}/suites":                         map[string]any{"name": "Walk"},

@@ -2189,6 +2189,186 @@ paths:
         "409":
           description: "`LAST_OWNER`."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/access-requests:
+    get:
+      operationId: listProjectAccessRequests
+      tags: [members]
+      summary: Pending sign-up requests to join this project, newest first
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Pending requests (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, userId, email, requestedRole, level, note, createdAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            userId: { type: string, format: uuid }
+                            email: { type: string }
+                            requestedRole: { type: string }
+                            level: { type: string, enum: [organization, workspace, project] }
+                            note: { type: string }
+                            createdAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/access-requests/{requestId}/decide:
+    post:
+      operationId: decideProjectAccessRequest
+      tags: [members]
+      summary: Approve (granting a role) or deny a pending sign-up request
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, denied] }
+                role: { type: string, description: Optional override when approving. }
+      responses:
+        "204": { description: Decided. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/access-requests:
+    get:
+      operationId: listWorkspaceAccessRequests
+      tags: [members]
+      summary: Pending sign-up requests to join this workspace, newest first
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+      responses:
+        "200":
+          description: Pending requests (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, userId, email, requestedRole, level, note, createdAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            userId: { type: string, format: uuid }
+                            email: { type: string }
+                            requestedRole: { type: string }
+                            level: { type: string, enum: [organization, workspace, project] }
+                            note: { type: string }
+                            createdAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide:
+    post:
+      operationId: decideWorkspaceAccessRequest
+      tags: [members]
+      summary: Approve (granting a role) or deny a pending sign-up request
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, denied] }
+                role: { type: string, description: Optional override when approving. }
+      responses:
+        "204": { description: Decided. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/access-requests:
+    get:
+      operationId: listOrganizationAccessRequests
+      tags: [members]
+      summary: Pending sign-up requests to join this organization, newest first
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+      responses:
+        "200":
+          description: Pending requests (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, userId, email, requestedRole, level, note, createdAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            userId: { type: string, format: uuid }
+                            email: { type: string }
+                            requestedRole: { type: string }
+                            level: { type: string, enum: [organization, workspace, project] }
+                            note: { type: string }
+                            createdAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/access-requests/{requestId}/decide:
+    post:
+      operationId: decideOrganizationAccessRequest
+      tags: [members]
+      summary: Approve (granting a role) or deny a pending sign-up request
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, denied] }
+                role: { type: string, description: Optional override when approving. }
+      responses:
+        "204": { description: Decided. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/invitations:
     get:
       operationId: listProjectInvitations

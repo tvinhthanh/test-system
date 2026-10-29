@@ -150,6 +150,7 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	mailer := newMailer(cfg)
 	web.Invitations = mailer != nil
 	web.Logger = logger
+	web.Signup = cfg.Signup
 	web.DescribeScope = func(ctx context.Context, s authz.ScopeRef) string { return scopeName(ctx, ten, s) }
 	if mailer != nil {
 		web.SendReset = func(ctx context.Context, to, token string) error {

@@ -48,7 +48,7 @@ CREATE INDEX auto_specs_project ON auto_specs (project_id, updated_at DESC);
 
 -- One request for runnable cases drafted by a model: the worker opens the
 -- target (signed in when an account is named), reads the page and asks
--- for cases made of steps. Like case_suggestions (0039): nothing becomes a
+-- for cases made of steps. Like case_suggestions (0040): nothing becomes a
 -- test case until a tester keeps a draft; org_id is whose key pays.
 CREATE TABLE auto_drafts (
     id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),

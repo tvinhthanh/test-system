@@ -15,7 +15,7 @@
 // each page an ordinary check — optionally signed in as one of the
 // environment's test accounts (whose sign-in autotest keeps).
 //
-// Owns url_checks (migration 0037) and site_scans (0042). Imports only
+// Owns url_checks (migration 0038) and site_scans (0043). Imports only
 // platform/*. This file is the module's whole contract (§6.9.4).
 package urlcheck
 

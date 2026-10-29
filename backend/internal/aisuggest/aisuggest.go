@@ -11,7 +11,7 @@
 // LLM_API_KEY. No usable key: the feature says so instead of queueing work
 // that cannot run.
 //
-// Owns ai_settings and case_suggestions (migration 0039). Imports only
+// Owns ai_settings and case_suggestions (migration 0040). Imports only
 // platform/*. This file is the module's whole contract (§6.9.4).
 package aisuggest
 
@@ -42,7 +42,7 @@ const (
 )
 
 // TestTypes are the case taxonomy's usage tags and purposes (migration
-// 0033) — what the start flow offers and what a plan records (0038).
+// 0033) — what the start flow offers and what a plan records (0039).
 var TestTypes = []string{"smoke", "regression", "e2e", "functional", "performance", "security", "usability", "accessibility", "compatibility", "recovery"}
 
 // ValidTestType reports whether s is one of TestTypes.

@@ -17,7 +17,7 @@
 // model, which sees {{password}}.
 //
 // Owns environment_accounts, auto_specs, auto_drafts, auto_runs and
-// auto_run_cases (migration 0041). Imports platform/* and tenancy (an
+// auto_run_cases (migration 0042). Imports platform/* and tenancy (an
 // environment's address). This file is the module's whole contract
 // (§6.9.4).
 package autotest

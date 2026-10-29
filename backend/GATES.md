@@ -612,7 +612,7 @@ Giao cho agent frontend (không sửa ở đây): vite 6.4.3 → 6.4.5 (npm audi
 
 ## QĐ-14 — tester không cần source — 23-10-2026
 
-Environment có địa chỉ site (migration 0035) và plan chọn environment (0036), URL check (`internal/urlcheck`, 0037, service `checker/`), reporter phát từ `/downloads/`, trang hướng dẫn. Đã chạy trên laptop:
+Environment có địa chỉ site (migration 0036) và plan chọn environment (0037), URL check (`internal/urlcheck`, 0038, service `checker/`), reporter phát từ `/downloads/`, trang hướng dẫn. Đã chạy trên laptop:
 
 | Kiểm | Kết quả |
 |---|---|
@@ -632,7 +632,7 @@ Environment có địa chỉ site (migration 0035) và plan chọn environment (
 
 ## QĐ-15 — Start testing, case gợi ý (thư viện, bộ mẫu, AI), chạy từng case — 24-10-2026
 
-Plan có loại test (0038), module `aisuggest` (0039), `platform/llm` (anthropic-sdk-go v1.84.0), `platform/secretbox`, checker `/outline`, audit `organization.ai_settings` (0040); frontend Start testing, màn hình chạy, AI settings. Model luôn chọn trên giao diện; key riêng của organization hoặc key server `LLM_API_KEY` (không có `LLM_MODEL`).
+Plan có loại test (0039), module `aisuggest` (0040), `platform/llm` (anthropic-sdk-go v1.84.0), `platform/secretbox`, checker `/outline`, audit `organization.ai_settings` (0041); frontend Start testing, màn hình chạy, AI settings. Model luôn chọn trên giao diện; key riêng của organization hoặc key server `LLM_API_KEY` (không có `LLM_MODEL`).
 
 | Kiểm | Kết quả |
 |---|---|
@@ -649,7 +649,7 @@ Plan có loại test (0038), module `aisuggest` (0039), `platform/llm` (anthropi
 
 ## QĐ-16 — Auto test: case server tự chạy, AI soạn và sửa bước, quét site, chạy từ CI — 25-10-2026
 
-Module `autotest` (0041: tài khoản test theo environment, spec, bản nháp, run, case của run), quét site trong `urlcheck` (0042), checker `/sessions` + `src/steps.mjs` (bước là dữ liệu, diễn giải bằng locator Playwright, trình duyệt giữ trong site), `llm.JSON` chuyển sang streaming (accumulate), quyền token `project:autorun`; frontend trang Auto test, Auto run, Site scan. Kết quả mỗi run vào plan (execution + ảnh) và test run (JUnit import nội bộ, case được link vào test).
+Module `autotest` (0042: tài khoản test theo environment, spec, bản nháp, run, case của run), quét site trong `urlcheck` (0043), checker `/sessions` + `src/steps.mjs` (bước là dữ liệu, diễn giải bằng locator Playwright, trình duyệt giữ trong site), `llm.JSON` chuyển sang streaming (accumulate), quyền token `project:autorun`; frontend trang Auto test, Auto run, Site scan. Kết quả mỗi run vào plan (execution + ảnh) và test run (JUnit import nội bộ, case được link vào test).
 
 | Kiểm | Kết quả |
 |---|---|
