@@ -218,7 +218,11 @@ func TestMidStreamFallbackKeepsTheWholeAnswer(t *testing.T) {
 // structured answer, through LLM_BASE_URL when that is set. It spends real
 // tokens — cents, not dollars — so it runs only with LLM_LIVE_KEY set:
 //
-//	LLM_LIVE_KEY=sk-ant-... go test ./internal/platform/llm -run TestLive -v
+//	LLM_LIVE_KEY=sk-ant-... go test ./internal/platform/llm -run TestLive -v -count=1
+//
+// That is bash; in cmd.exe run `set LLM_LIVE_KEY=sk-ant-...` first, in
+// PowerShell `$env:LLM_LIVE_KEY = "sk-ant-..."`. -count=1: a cached pass
+// makes no call.
 func TestLive(t *testing.T) {
 	key := os.Getenv("LLM_LIVE_KEY")
 	if key == "" {

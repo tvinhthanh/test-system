@@ -350,7 +350,7 @@ func (s *service) run(ctx context.Context, job queue.Job) error {
 	}
 	_, err = q.Exec(ctx, `UPDATE case_suggestions SET status = 'done', drafts = $2, page_read = $3, model = $4, key_source = $5,
 		input_tokens = $6, output_tokens = $7, finished_at = now() WHERE id = $1`,
-		sug.ID, b, len(outline) > 0, model, source, res.InputTokens, res.OutputTokens)
+		sug.ID, b, len(outline) > 0, res.ServedBy(model), source, res.InputTokens, res.OutputTokens)
 	return err
 }
 

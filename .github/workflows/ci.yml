@@ -264,7 +264,7 @@ jobs:
           # with their artifacts, nothing given up.
           npm run example 2>&1 | tee example.log | tail -3
           npm run example 2>&1 | tee -a example.log | tail -1
-          if grep -E "gave up on the platform|upload failed|could not finish" example.log; then exit 1; fi
+          if grep -E "gave up on the platform|upload failed|could not finish|not uploaded in time" example.log; then exit 1; fi
           test "$(grep -cE '^\[atp-reporter\] run [0-9a-f-]+: [a-z]+, .*artifacts [1-9][0-9]* ok' example.log)" -eq 2
           sleep 65 # the worker links artifacts to attempts on its minute sweep
       - name: Live check — the real UI against the real api, no mocks

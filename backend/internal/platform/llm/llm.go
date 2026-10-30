@@ -76,12 +76,25 @@ type Request struct {
 	MaxTokens int64          // 0 = 16000
 }
 
-// Result is the schema-valid JSON and what it cost.
+// Result is the schema-valid JSON and what it cost. Model is the model that
+// wrote it: after a refusal fallback, the fallback model, and the token
+// counts are that attempt's (the API's top-level usage). The declined attempt
+// is only in usage.iterations; it is billed when it streamed output or its
+// refusal category is a billed one.
 type Result struct {
 	JSON         json.RawMessage
 	Model        string
 	InputTokens  int64
 	OutputTokens int64
+}
+
+// ServedBy is the model to record with the token counts: Model, or
+// requested when the answer did not name one.
+func (r Result) ServedBy(requested string) string {
+	if r.Model != "" {
+		return r.Model
+	}
+	return requested
 }
 
 type Client struct {

@@ -4968,7 +4968,7 @@ components:
                   required: [action, expected]
                   properties: { action: { type: string }, expected: { type: string } }
         pageRead: { type: boolean, description: "The site's outline reached the model." }
-        model: { type: string }
+        model: { type: string, description: "The model that wrote the drafts. After a refusal fallback it is the fallback model, which can be outside the offered list." }
         keySource: { type: string, enum: ["", organization, server] }
         error: { type: string }
         requestedBy: { type: string }
@@ -5100,7 +5100,7 @@ components:
               why: { type: string }
               steps: { type: array, items: { $ref: "#/components/schemas/AutoStep" } }
         pageRead: { type: boolean, description: "The start page reached the model; false: drafted from the description alone." }
-        model: { type: string }
+        model: { type: string, description: "The model that wrote the drafts. After a refusal fallback it is the fallback model, which can be outside the offered list." }
         keySource: { type: string, enum: ["", organization, server] }
         error: { type: string }
         requestedBy: { type: string }

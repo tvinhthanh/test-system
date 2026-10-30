@@ -24,6 +24,7 @@ var pepper = []byte("test-pepper-test-pepper-test-pepper!")
 
 type fakeLLM struct {
 	answer string
+	served string // the model the answer names; "" like an answer that names none
 	err    error
 	calls  []llm.Request
 	checks []string
@@ -34,7 +35,7 @@ func (f *fakeLLM) JSON(_ context.Context, req llm.Request) (llm.Result, error) {
 	if f.err != nil {
 		return llm.Result{}, f.err
 	}
-	return llm.Result{JSON: json.RawMessage(f.answer), InputTokens: 900, OutputTokens: 300}, nil
+	return llm.Result{JSON: json.RawMessage(f.answer), Model: f.served, InputTokens: 900, OutputTokens: 300}, nil
 }
 
 func (f *fakeLLM) CheckKey(_ context.Context, apiKey, model string) error {
@@ -201,6 +202,17 @@ func TestDraftRun(t *testing.T) {
 	got2, _ := svc2.Get(ctx, projB, s2.ID)
 	if got2.Status != StatusDone || got2.PageRead || got2.KeySource != SourceServer || !strings.Contains(fake.calls[1].User, "could not be read") {
 		t.Errorf("unread page: %+v", got2)
+	}
+
+	// After a refusal fallback the record names the model that wrote the
+	// drafts — the one the tokens belong to — not the one asked for.
+	fake.served = "claude-opus-4-8"
+	s3, _ := svc.Request(ctx, NewSuggestion{ProjectID: projA, OrgID: orgA, TestType: "smoke", Actor: "tia"})
+	if did, err := svc.Worker(1).RunOnce(ctx); !did || err != nil {
+		t.Fatal(err)
+	}
+	if got3, _ := svc.Get(ctx, projA, s3.ID); got3.Status != StatusDone || got3.Model != "claude-opus-4-8" || got3.InputTokens != 900 {
+		t.Errorf("after a fallback: %+v", got3)
 	}
 }
 

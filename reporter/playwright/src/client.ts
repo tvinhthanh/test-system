@@ -108,6 +108,11 @@ export class Client {
 
   /** Raw PUT to a presigned URL (endpoint 5 of §7.2): no auth header, same retry policy. */
   async put(url: string, body: Uint8Array, headers: Record<string, string>): Promise<{ etag: string }> {
+    // A URL that does not parse never will: the server's object store is
+    // misconfigured (CI's OBJSTORE_ENDPOINT placeholder, 30-10-2026). One
+    // failure, not retries until onEnd's budget is gone. The query — the
+    // upload grant — is not echoed.
+    if (!parses(url)) throw new ApiError(0, "UPLOAD_URL_INVALID", `upload URL does not parse: ${url.split("?")[0].slice(0, 120)}`);
     return this.retrying(async () => {
       const outcome = await this.withTimeout(async (signal) => {
         const res = await this.doFetch(url, { method: "PUT", body, headers, signal });
@@ -186,6 +191,15 @@ export class Client {
         await this.sleep(wait);
       }
     }
+  }
+}
+
+function parses(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
   }
 }
 

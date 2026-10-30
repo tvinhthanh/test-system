@@ -115,8 +115,9 @@ func (s *fakeSession) Close(context.Context) error { return nil }
 
 // The model: drafts for the chat page, a repair for "Send", sign-in steps.
 type fakeLLM struct {
-	mu    sync.Mutex
-	calls []llm.Request
+	mu     sync.Mutex
+	calls  []llm.Request
+	served string // the model the answers name; "" like an answer that names none
 }
 
 func (f *fakeLLM) JSON(_ context.Context, req llm.Request) (llm.Result, error) {
@@ -147,7 +148,7 @@ func (f *fakeLLM) JSON(_ context.Context, req llm.Request) (llm.Result, error) {
 	default:
 		return llm.Result{}, errors.New("unexpected system prompt")
 	}
-	return llm.Result{JSON: json.RawMessage(answer), InputTokens: 100, OutputTokens: 50}, nil
+	return llm.Result{JSON: json.RawMessage(answer), Model: f.served, InputTokens: 100, OutputTokens: 50}, nil
 }
 
 type fakeKeys struct{ ok bool }
@@ -291,11 +292,14 @@ func TestDraft(t *testing.T) {
 	if _, err := f.svc.RequestDraft(ctx, NewDraft{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, Target: "https://evil.example/x", Actor: "tia"}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a target off the site: %v", err)
 	}
+	// Answered by a refusal fallback: the record names the model that wrote
+	// the drafts, the one the tokens belong to.
+	f.model.served = "claude-opus-4-8"
 	if n, err := f.svc.DraftWorker(1).Drain(ctx); err != nil || n != 1 {
 		t.Fatalf("drain: %d %v", n, err)
 	}
 	d, err = f.svc.Draft(ctx, f.project, d.ID)
-	if err != nil || d.Status != StatusDone || !d.PageRead {
+	if err != nil || d.Status != StatusDone || !d.PageRead || d.Model != "claude-opus-4-8" || d.InputTokens == 0 {
 		t.Fatalf("draft: %+v %v", d, err)
 	}
 	if len(d.Drafts) != 2 || d.Drafts[0].Title != "Gửi tin nhắn" || len(d.Drafts[0].Steps) != 3 || d.Drafts[1].Priority != "p2" {

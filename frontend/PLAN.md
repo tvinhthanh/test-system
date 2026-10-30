@@ -23,6 +23,18 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Reporter and AI draft fixes after the e2e run (2026-10-30)
+
+- The reporter now sends `finish` even when the object store refuses or
+  hangs: uploads stop at a deadline inside `flushTimeoutMs`. So the live
+  check's runs end `passed`/`failed` instead of staying `running`.
+- A draft's `model` (case suggestions, auto drafts) is now the model that
+  wrote the drafts. After a refusal fallback that can be an id outside the
+  offered list, such as `claude-opus-4-8`. No screen shows that field today;
+  if one does, show unknown ids as they are.
+- No frontend code changed. Details: `backend/GATES.md`, 30-10-2026,
+  findings 12 and 13.
+
 ### CI e2e job run without Docker (2026-10-30)
 
 - The `e2e` job had never run on this branch. On 2026-10-30 its steps were

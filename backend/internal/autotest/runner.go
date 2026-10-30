@@ -351,7 +351,7 @@ func (s *service) runDraft(ctx context.Context, job queue.Job) error {
 	}
 	_, err = q.Exec(ctx, `UPDATE auto_drafts SET status = 'done', drafts = $2, page_read = $3, model = $4, key_source = $5,
 		input_tokens = $6, output_tokens = $7, finished_at = clock_timestamp() WHERE id = $1`,
-		d.ID, b, view != nil, model, source, res.InputTokens, res.OutputTokens)
+		d.ID, b, view != nil, res.ServedBy(model), source, res.InputTokens, res.OutputTokens)
 	return err
 }
 
