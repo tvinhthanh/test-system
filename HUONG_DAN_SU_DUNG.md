@@ -464,8 +464,9 @@ Các tùy chọn trong `backend/deploy/.env`:
 - `CHECKER_SESSIONS=4`: số trình duyệt Auto test mở cùng lúc, mỗi cái khoảng 150 MB.
 - `URLCHECK_ALLOW_PRIVATE=on`: cho URL check mở địa chỉ trong mạng LAN.
 - `LLM_API_KEY=sk-ant-…`: key Anthropic của server cho phần AI. Model không đặt ở đây mà chọn trong **AI settings** trên giao diện.
+- `MAIL=smtp`, kèm `SMTP_HOST`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD` và `PUBLIC_URL`: gửi email mời, quên mật khẩu và link đăng ký. Dùng được SES, Resend, Mailgun, Postmark, Gmail (mật khẩu ứng dụng) và Microsoft 365. Với Microsoft 365, tenant phải còn cho đăng nhập SMTP bằng mật khẩu; Microsoft đang tắt dần cách này, nên về lâu dài nên dùng một dịch vụ gửi mail.
 - `SIGNUP=on`: mở tự đăng ký có duyệt (mục 1.4). Cần `MAIL=smtp`; thiếu thì server không khởi động.
 
-Sau khi sửa `.env`, chạy lại `bash server/atp.sh up` (với `URLCHECK`) hoặc `bash server/atp.sh restart` (với `LLM_API_KEY`, `SIGNUP`).
+Sau khi sửa `.env`, chạy lại `bash server/atp.sh up` (với `URLCHECK`) hoặc `bash server/atp.sh restart` (với `LLM_API_KEY`, `MAIL`, `SIGNUP`).
 
 > **Không bao giờ chạy `bash server/atp.sh reset` trên server có dữ liệu thật.** Lệnh này xóa toàn bộ dữ liệu, kể cả bản sao lưu.

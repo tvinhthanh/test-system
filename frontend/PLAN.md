@@ -23,6 +23,26 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### CI e2e job run without Docker (2026-10-30)
+
+- The `e2e` job had never run on this branch. On 2026-10-30 its steps were
+  run on a laptop without Docker: host binaries, a Node stand-in for Caddy,
+  and the dashboard and reporter from a clean `HEAD` worktree.
+- As CI stands, `live-check.mjs` fails on one console error. The CI tokens
+  page reads `/downloads/index.json`, and CI never packed the reporter, so
+  Caddy answers 404. `tokensRepository.reporterPackage` already returns
+  `null` for that, but Chrome still logs the 404. The fix is in CI, not the
+  page: the job now packs the reporter, as `server/atp.sh up` does.
+- CI also left `OBJSTORE_ENDPOINT` at the R2 placeholder. The reporter's
+  uploads never reached the memory bucket, so both example runs stayed
+  `running`, and the live check accepts `running`. The job now points the
+  endpoint at Caddy's `/_objstore` and fails if the reporter gives up.
+- With both fixes, all four live scripts pass. `live-check.mjs` passes 20/20
+  steps with no browser errors, and manual history, case bulk and
+  specialized results pass too. Both runs finished, with 17 verified
+  artifacts each. Frontend code is unchanged. Details: `backend/GATES.md`,
+  30-10-2026.
+
 ### Self-serve sign-up screens (2026-10-30)
 
 - `/signup` is one page with two modes, like `/forgot` and `/reset`. The

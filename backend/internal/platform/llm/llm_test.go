@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A stand-in for the Messages API: it checks what the SDK sends and answers
@@ -173,5 +175,90 @@ func TestErrors(t *testing.T) {
 	}
 	if err := c.CheckKey(context.Background(), "good-key", "claude-fable-5-1"); !errors.Is(err, ErrModel) {
 		t.Errorf("model the key cannot use: %v", err)
+	}
+}
+
+// A decline mid-answer is re-served on the same stream: the declined
+// model's partial text stays, a fallback block marks the switch, and the
+// fallback model continues the text (server-side-fallback-2026-07-01). The
+// answer is every text block together; the model is the one that finished.
+func TestMidStreamFallbackKeepsTheWholeAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, e := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":120,"output_tokens":1}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"cases\":[{\"ti"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-opus-4-8"},"trigger":{"type":"refusal","category":"cyber"}}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"tle\":\"SQL injection in the search box\"}]}"}}`,
+			`{"type":"content_block_stop","index":2}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":40}}`,
+			`{"type":"message_stop"}`,
+		} {
+			var ev struct{ Type string }
+			_ = json.Unmarshal([]byte(e), &ev)
+			_, _ = w.Write([]byte("event: " + ev.Type + "\ndata: " + e + "\n\n"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	res, err := New(srv.URL).JSON(context.Background(), Request{APIKey: "good-key", Model: "claude-opus-5-5", Schema: map[string]any{"type": "object"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.JSON) != `{"cases":[{"title":"SQL injection in the search box"}]}` || res.Model != "claude-opus-4-8" {
+		t.Errorf("answer %s from %s", res.JSON, res.Model)
+	}
+}
+
+// TestLive is the one call to the real Messages API: each offered model
+// (or LLM_LIVE_MODELS, comma-separated) gets the key check and one small
+// structured answer, through LLM_BASE_URL when that is set. It spends real
+// tokens — cents, not dollars — so it runs only with LLM_LIVE_KEY set:
+//
+//	LLM_LIVE_KEY=sk-ant-... go test ./internal/platform/llm -run TestLive -v
+func TestLive(t *testing.T) {
+	key := os.Getenv("LLM_LIVE_KEY")
+	if key == "" {
+		t.Skip("LLM_LIVE_KEY not set: no call to the real API")
+	}
+	var models []string
+	for _, m := range Models {
+		models = append(models, m.ID)
+	}
+	if only := os.Getenv("LLM_LIVE_MODELS"); only != "" {
+		models = strings.Split(only, ",")
+	}
+	schema := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []any{"cases"},
+		"properties": map[string]any{"cases": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"title"},
+			"properties": map[string]any{"title": map[string]any{"type": "string"}},
+		}}},
+	}
+	c := New(os.Getenv("LLM_BASE_URL"))
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			if err := c.CheckKey(ctx, key, model); err != nil {
+				t.Fatalf("key check: %v", err)
+			}
+			res, err := c.JSON(ctx, Request{
+				APIKey: key, Model: model, Schema: schema,
+				System: "You write manual test cases for web pages.",
+				User:   "Two test cases for a sign-in form with an email and a password field. Titles only.",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out struct{ Cases []struct{ Title string } }
+			if err := json.Unmarshal(res.JSON, &out); err != nil || len(out.Cases) == 0 || out.Cases[0].Title == "" {
+				t.Fatalf("answer %s: %v", res.JSON, err)
+			}
+			t.Logf("served by %s: %d cases (%q …), %d input / %d output tokens", res.Model, len(out.Cases), out.Cases[0].Title, res.InputTokens, res.OutputTokens)
+		})
 	}
 }

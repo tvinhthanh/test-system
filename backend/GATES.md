@@ -691,7 +691,7 @@ Module `autotest` (0042: tài khoản test theo environment, spec, bản nháp, 
 
 Test của `internal/platform/mail` chỉ phủ hội thoại SMTP chung; lần này thêm phần nối dây ở binary và mail đăng ký đi qua SMTP thật.
 
-**Chưa kiểm:** nhà cung cấp SMTP thật (TLS/STARTTLS, AUTH, độ trễ), stack Docker với `SIGNUP=on`. Giao diện đăng ký (30-10) được kiểm bằng vitest và một lượt trình duyệt thật, ghi ở dưới.
+**Chưa kiểm** (lúc ghép; SMTP thật và job e2e được kiểm tiếp ở mục "Kiểm phần còn mở" ngay sau): nhà cung cấp SMTP thật (TLS/STARTTLS, AUTH, độ trễ), stack Docker với `SIGNUP=on`. Giao diện đăng ký (30-10) được kiểm bằng vitest và một lượt trình duyệt thật, ghi ở dưới.
 
 **Giao diện đăng ký trên trình duyệt thật (30-10):**
 - **Worktree sạch ở `ca9ae47`:** `npm ci` (npm 10.9.2) chạy được; 123/123 vitest (30 file, gồm 8 ca của `tests/signup.test.ts`); typecheck; build + bundle gate (JS ban đầu 60,0 KiB gzip; trang đăng ký là chunk lazy 4,3 KiB).
@@ -700,3 +700,56 @@ Test của `internal/platform/mail` chỉ phủ hội thoại SMTP chung; lần 
 - **Người xin:** mở link → form đã biết project, không phải gõ id; gửi → "Check your email"; đúng một mail, link trỏ về chính dashboard. Mở link → token rời thanh địa chỉ; đặt mật khẩu → "Your account is ready", chưa thấy project nào.
 - **Duyệt:** admin thấy yêu cầu kèm ghi chú và vai trò đã xin, đổi sang member rồi Approve → yêu cầu biến mất, danh sách thành viên có người mới với vai trò member; người mới thấy project.
 - **Chung:** khổ 390 px không cuộn ngang; 0 lỗi console; api 0 dòng ERROR, 0 phản hồi 5xx. Ảnh sáng và tối đã xem.
+
+## Kiểm phần còn mở: SMTP thật, gọi Claude, job e2e không Docker — 30-10-2026
+
+Ba mục "chưa kiểm" của đợt ghép `main`. Máy này không có Docker và không có key Anthropic; mỗi mục ghi phần đã chạy thật và phần còn thiếu.
+
+**1. Nhà cung cấp SMTP thật: TLS và AUTH.** Một chương trình dò đi đúng đường của `mail.(*SMTP).Send` tới bước AUTH rồi QUIT: cùng cách dial, cùng `tls.Config{ServerName: host, MinVersion: TLS 1.2}`, cùng client `net/smtp` (EHLO `localhost`). Nó không đăng nhập và không gửi mail. Chứng chỉ được kiểm bằng kho CA của Windows; image chạy thật (distroless/static-debian12) có sẵn bộ CA.
+
+| Máy chủ (cổng, chế độ) | TLS | AUTH sau TLS |
+|---|---|---|
+| smtp.gmail.com (587 starttls, 465 tls) | 1.3, chuỗi hợp lệ | LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH |
+| **smtp.office365.com** (587 starttls) | 1.3, hợp lệ | **LOGIN XOAUTH2**, không có PLAIN |
+| **smtp-mail.outlook.com** (587 starttls) | 1.3, hợp lệ | **LOGIN XOAUTH2** |
+| SES us-east-1 (587 starttls), ap-southeast-1 (465 tls) | 1.3, hợp lệ | PLAIN LOGIN |
+| smtp.resend.com, smtp.mailgun.org, smtp.sendgrid.net (587 starttls) | 1.3, hợp lệ | PLAIN LOGIN |
+| smtp.postmarkapp.com (587 starttls) | 1.2, hợp lệ | PLAIN LOGIN CRAM-MD5 DIGEST-MD5 |
+| smtp.zoho.com, smtp-relay.brevo.com (587 starttls) | 1.3, hợp lệ | LOGIN PLAIN (Brevo thêm CRAM-MD5) |
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 9 | Trung bình (mail không đi qua Microsoft) | Client chỉ nói `AUTH PLAIN`, vì `smtp.PlainAuth` không xem máy chủ đưa ra cơ chế nào. Microsoft 365 và Outlook chỉ có `LOGIN XOAUTH2` nên trả 504 5.7.4: lời mời, quên mật khẩu và link đăng ký không gửi được, mà `SIGNUP=on` lại cần mail | Dùng PLAIN khi máy chủ có (hoặc không liệt kê gì, như trước), không thì LOGIN; không có cả hai thì báo lỗi nêu đúng danh sách máy chủ đưa. LOGIN giữ luật của PlainAuth: mật khẩu chỉ đi qua TLS hoặc tới localhost, và chỉ tới đúng host đã cấu hình. OAuth (XOAUTH2) chưa có | `TestAuthUsesAMechanismTheServerOffers` (chỉ LOGIN → LOGIN; PLAIN LOGIN → PLAIN; không liệt kê → PLAIN), `TestAuthRefusesAMechanismItCannotSpeak`, `TestLoginAuthNeedsTLSAwayFromLocalhost`; hai test đầu fail trên code cũ |
+
+- **Microsoft:** việc bỏ đăng nhập bằng mật khẩu cho SMTP AUTH ở Exchange Online đang hoãn (Message Center MC786329, cập nhật 27-01-2026; ngày bỏ hẳn sẽ được báo trong 2027). Tenant đã tắt cách này thì phải gửi qua relay (SES, Resend, …).
+- **Chưa kiểm:** một lần đăng nhập thật và một mail thật qua nhà cung cấp, vì cần tài khoản. Độ trễ gửi không làm người dùng phải chờ: form đăng ký trả `202` trước khi gửi (26 ms, mục trên).
+
+**2. Gọi Claude.** Máy này không có key: `ANTHROPIC_API_KEY` và `LLM_API_KEY` đều trống, `deploy/.env` không có `LLM_API_KEY`, không có CLI `ant`. Vì vậy **chưa gọi API thật**. Phần kiểm được:
+- **Đối chiếu với API hiện hành:**
+  - SDK Go chính thức v1.84.0, gửi `anthropic-version: 2023-06-01`. Bốn model id đều đang có: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1`.
+  - Không gửi `thinking` (mặc định adaptive; Opus 5.5 và Fable 5.1 luôn bật). `effort: medium` được đặt rõ, vì mặc định của từng model khác nhau.
+  - JSON đi qua structured output (`output_config.format`). Schema của `aisuggest` và `autotest` chỉ dùng kiểu, `enum`, `required` và `additionalProperties: false`; không có ràng buộc API từ chối (`minLength`, `minimum`, schema đệ quy).
+  - `fallbacks: "default"` với beta `server-side-fallback-2026-07-01` chỉ gửi cho Opus 5.5, Sonnet 5.5 và Fable 5.1; Haiku 5.5 không có fallback phía server.
+  - Không prefill, không `tool_choice` ép, không `temperature` hay `budget_tokens`; những thứ đó trả 400 trên các model này.
+- **Fallback giữa chừng:** API giữ phần chữ model đầu đã viết, chèn một block `fallback`, rồi model sau viết tiếp trên cùng stream. Fake cũ chỉ phát một block chữ. `TestMidStreamFallbackKeepsTheWholeAnswer` phát đúng dạng đó: JSON được ghép đủ, `Model` là model viết xong (SDK đổi nhãn khi gặp block `fallback`). Bản ghi draft lưu model đã chọn và số token của lượt cuối, nên khi có fallback, model ghi lại không phải model đã viết xong và số token thấp hơn thực tế.
+- **Gọi thật khi có key:** `LLM_LIVE_KEY=sk-ant-… go test ./internal/platform/llm -run TestLive -v`. Với từng model, test kiểm key qua Models API rồi lấy một câu trả lời có schema. `LLM_LIVE_MODELS=claude-haiku-5-5` để chạy bớt; đặt `LLM_BASE_URL` nếu đi qua proxy. Tốn vài cent. Không đặt key thì test tự bỏ qua.
+
+**3. Job `e2e` của CI, chạy không Docker.** Job này chưa từng chạy trên nhánh: chưa có PR, và CI của `main` đỏ từ 25-10 nên e2e bị bỏ qua. Lần này từng bước của job được chạy trên máy này:
+- Postgres 17 của máy.
+- `migrate`, `api`, `worker`, `admin` build từ `backend/`.
+- Dashboard và reporter từ worktree sạch ở `HEAD` (`npm ci` bằng npm 10.9.2).
+- Một proxy Node thay Caddy: cùng route `/v1`, `/healthz`, `/_objstore`, `/downloads`, SPA fallback, TLS tự ký trên `localhost:18443`.
+- Shell như GitHub chạy khi `ci.yml` không ghi `shell:`: `bash -e`, không pipefail.
+
+| # | Mức | Phát hiện | Sửa | Kiểm |
+|---|---|---|---|---|
+| 10 | Cao (CI đỏ khi mở PR) | Trang CI tokens đọc `/downloads/index.json` (QĐ-14, 23-10). CI dựng stack không qua `server/atp.sh` nên không có tarball reporter: Caddy trả 404, Chrome ghi lỗi console, và `live-check.mjs` fail dù 20/20 bước đã đạt | Bước mới trong job: đóng gói reporter vào `backend/deploy/downloads` như `atp.sh up` làm (`npm ci`, `npm run build`, `pack-for-server.mjs`) | Lượt (a), đúng như CI hiện tại: FAIL vì lỗi này. Lượt (b), có bước mới: PASS |
+| 11 | Trung bình (gate T0 kiểm hụt từ 17-09) | `.env` của CI giữ `OBJSTORE_ENDPOINT` mẫu R2 (`https://<account>…`), nên URL upload của bucket bộ nhớ không dùng được. Reporter thử lại tới hết 30 giây rồi bỏ, không gửi finish: cả hai run nằm `running`, 24 artifact `pending`. Live check chấp nhận `running` nên job vẫn xanh, mà chưa từng kiểm finish, việc worker resolve, hay gắn artifact | `sed` đặt `OBJSTORE_ENDPOINT=https://localhost/_objstore` (route Caddy có sẵn cho đúng việc này). Bước reporter fail nếu log có "gave up on the platform", "upload failed" hay "could not finish", và đòi đúng 2 dòng run đã kết thúc có artifact | (a): `running` 2, `pending` 24, phép kiểm mới fail. (b): 2 run `failed` (bộ example cố ý fail), 34 artifact `verified`, cả 34 được worker gắn vào attempt; phép kiểm mới đạt |
+
+- **Lượt (b):**
+  - migrate áp 44 migration; seed như CI.
+  - Reporter: 2 run × 7 event, mỗi run 17 artifact ok.
+  - `live-check.mjs` đạt 20/20 bước: 153 lời gọi `/v1` đều 2xx trừ 401/400 cố ý, 0 lỗi trình duyệt. `live-manual-history`, `live-case-bulk` và `live-specialized-results` đều đạt.
+  - api và worker: 0 dòng ERROR, 0 phản hồi 5xx. Non-2xx chỉ có 401, 400 và 6 lần 409 do script cố ý phát lại import.
+- **Thấy thêm, chưa sửa:** reporter coi "Failed to parse URL" (URL hỏng, thử lại không bao giờ đúng) như lỗi mạng và thử lại tới hết ngân sách. Nó cũng chờ mọi upload rồi mới finish, nên khi bucket hỏng, run chờ worker auto-close (§7.4) dù mọi event đã tới.
+- **Khác CI vì không có Docker:** không build image, không `docker compose`, không Caddy thật (HTTP/2, nén), Postgres không TLS. Script chạy lượt này nằm ngoài repo.

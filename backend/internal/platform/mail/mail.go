@@ -2,7 +2,9 @@
 // any provider speaks it (SES, Resend, Mailgun, Postmark, a company relay).
 // Plain text only; every header value is checked for CR/LF so no input can
 // add a header or a recipient; the connection has a deadline; STARTTLS is
-// required unless the configuration says otherwise.
+// required unless the configuration says otherwise. Login is AUTH PLAIN, or
+// AUTH LOGIN where a server offers that and not PLAIN (Microsoft 365,
+// Exchange).
 //
 // This is platform code: it knows nothing about the business (§6.9.3).
 package mail
@@ -20,6 +22,7 @@ import (
 	"net"
 	netmail "net/mail"
 	"net/smtp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -120,7 +123,11 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 		}
 	}
 	if s.Username != "" {
-		if err := c.Auth(smtp.PlainAuth("", s.Username, s.Password, s.Host)); err != nil {
+		auth, err := s.auth(c)
+		if err != nil {
+			return err
+		}
+		if err := c.Auth(auth); err != nil {
 			return fmt.Errorf("mail: auth: %w", err)
 		}
 	}
@@ -141,4 +148,53 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 		return fmt.Errorf("mail: end of data: %w", err)
 	}
 	return c.Quit()
+}
+
+// auth picks what the server offers after EHLO: PLAIN when it is listed
+// (or nothing is), else LOGIN. smtp.office365.com and smtp-mail.outlook.com
+// list only "LOGIN XOAUTH2" (probed 30-10-2026), so PLAIN alone failed there
+// with 504 5.7.4.
+func (s *SMTP) auth(c *smtp.Client) (smtp.Auth, error) {
+	_, offered := c.Extension("AUTH")
+	mechs := strings.Fields(strings.ToUpper(offered))
+	switch {
+	case len(mechs) == 0 || slices.Contains(mechs, "PLAIN"):
+		return smtp.PlainAuth("", s.Username, s.Password, s.Host), nil
+	case slices.Contains(mechs, "LOGIN"):
+		return &loginAuth{username: s.Username, password: s.Password, host: s.Host}, nil
+	}
+	return nil, fmt.Errorf("mail: auth: %s offers AUTH %s; only PLAIN and LOGIN are spoken", s.Host, offered)
+}
+
+// loginAuth is SASL LOGIN with smtp.PlainAuth's rule: the password only
+// goes over TLS or to this machine, and only to the configured host.
+type loginAuth struct {
+	username, password, host string
+	step                     int
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !server.TLS && server.Name != "localhost" && server.Name != "127.0.0.1" && server.Name != "::1" {
+		return "", nil, errors.New("unencrypted connection")
+	}
+	if server.Name != a.host {
+		return "", nil, errors.New("wrong host name")
+	}
+	return "LOGIN", nil, nil
+}
+
+// Next answers the two challenges in order; servers word them differently
+// ("Username:", "User Name"), so the order is what counts.
+func (a *loginAuth) Next(_ []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	a.step++
+	switch a.step {
+	case 1:
+		return []byte(a.username), nil
+	case 2:
+		return []byte(a.password), nil
+	}
+	return nil, errors.New("unexpected AUTH LOGIN challenge")
 }
