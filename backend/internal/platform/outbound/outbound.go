@@ -1,7 +1,8 @@
 // Package outbound is the one HTTP client for fixed endpoints — the OAuth
-// providers of §11.2 and the URL checker service (QĐ-14, which is handed
-// the user's address as data and opens it itself). §11.6 API7 (SSRF) and
-// API10 (unsafe consumption) are its shape:
+// providers of §11.2, the URL checker service (QĐ-14, which is handed the
+// user's address as data and opens it itself) and the language model
+// providers platform/llm speaks Chat Completions to (QĐ-18). §11.6 API7
+// (SSRF) and API10 (unsafe consumption) are its shape:
 //
 //   - the hosts it may reach are fixed when it is built, from configuration,
 //     never from a request (a URL a client hands the api is rendered, not
@@ -135,4 +136,38 @@ func (c *Client) GetJSON(ctx context.Context, rawURL, bearer string, v any) erro
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	return c.do(req, v)
+}
+
+// Send makes one request to an allowed host and hands back the answer as it
+// came — any status, the headers, and a body that ends at the answer cap —
+// for a caller that reads a stream or explains a refusal itself (the Chat
+// Completions endpoints of platform/llm, QĐ-18). Redirects are not followed
+// here either: a 3xx comes back as the answer. The caller closes the body;
+// only a refused host or a failed exchange is an error.
+func (c *Client) Send(ctx context.Context, method, rawURL string, header http.Header, body []byte) (*http.Response, error) {
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, r)
+	if err != nil {
+		return nil, err
+	}
+	if !c.hosts[strings.ToLower(req.URL.Host)] {
+		return nil, fmt.Errorf("%w: %s", ErrHost, req.URL.Host)
+	}
+	for k, v := range header {
+		req.Header[k] = v
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", ErrAnswer, req.URL.Host, err)
+	}
+	resp.Body = capped{Reader: io.LimitReader(resp.Body, c.max), Closer: resp.Body}
+	return resp, nil
+}
+
+type capped struct {
+	io.Reader
+	io.Closer
 }

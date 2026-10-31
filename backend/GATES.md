@@ -760,3 +760,67 @@ Ba mục "chưa kiểm" của đợt ghép `main`. Máy này không có Docker v
 |---|---|---|---|---|
 | 12 | Trung bình (run mở 6 giờ rồi thành `error`) | Reporter chờ mọi upload rồi mới `finish`, và thử lại URL upload không parse được như lỗi mạng. Object store hỏng hay treo làm hết `flushTimeoutMs`, reporter bỏ finish, và server tự đóng run sau 6 giờ với trạng thái `error`. Như vậy trái §10.4: artifact không bao giờ làm fail run | Upload có hạn trong ngân sách: trừ 5 s để dành cho finish (1/3 nếu ngân sách ngắn hơn 15 s). Quá hạn thì bỏ upload, finish vẫn gửi, và dòng tổng kết ghi `N not uploaded in time`. URL không parse được thì fail ngay, không retry, không in query (grant upload). `ATP_URL` không phải http(s) thì reporter tự tắt với một warning. Reporter lên **0.1.1** (mỗi run gửi `reporter.version`); project đã cài tarball cũ phải chạy lại lệnh cài trên trang CI tokens | `reporter.test.ts`: URL hỏng (đúng ca của CI) và store treo vẫn finish trước khi hết ngân sách; `ATP_URL` sai. `client.test.ts`: URL hỏng không gửi request nào. 4 test mới fail trên code cũ. 24/24 test, cộng outage trên `playwright test` thật (79 s) |
 | 13 | Thấp (số liệu hiển thị) | Sau một refusal fallback, bản ghi draft (`case_suggestions`, `auto_drafts`) lưu model đã *chọn* cùng số token của model *viết xong*, nên cặp model–token lệch nhau | Lưu `res.ServedBy(model)`: model viết xong (SDK đổi nhãn khi gặp block `fallback`), và token là của lượt đó. Lượt bị từ chối chỉ có trong `usage.iterations` và chưa được lưu; lượt đó bị tính tiền khi đã stream ra chữ, hoặc khi loại từ chối thuộc nhóm bị tính. openapi ghi rõ `model` có thể nằm ngoài danh sách model được chọn | `TestDraftRun`, `TestDraft`: fail trên code cũ |
+
+## QĐ-18 — key của mọi nhà cung cấp AI — 31-10-2026
+
+Chủ dự án có key OpenAI, hỏi dùng được không, rồi quyết "sửa đi có thể dùng mọi loại key". Phần AI (soạn case QĐ-15, Auto test QĐ-16) giờ nhận key của 8 provider, cộng endpoint tương thích OpenAI của người vận hành. Thiết kế ở SPEC §1.18; phần dưới là những gì đã chạy.
+
+**Đã chạy, trên laptop, Postgres 17.5:**
+
+- `go test ./...`: 34/34 package xanh, kể cả test kiến trúc. `platform/llm` không tự mở HTTP: Chat Completions đi qua `platform/outbound.Send` (thêm mới, có test riêng: host ngoài allowlist bị chặn, không theo redirect, body cắt ở cap, cancel trả `context.Canceled`).
+- `platform/llm`: 14 test.
+  - Dialect từng provider: tên trường giới hạn, stream hay không, `stream_options`, schema hay JSON mode, `provider.require_parameters` của OpenRouter.
+  - Lùi khi provider từ chối schema hoặc giới hạn output.
+  - Retry: 5xx một lần rồi qua; 429 dừng sau 3 lần; `insufficient_quota` không retry.
+  - Lỗi theo đủ hình dạng của từng bên (OpenAI, list của Google, `{"code","error"}` của xAI, lỗi giữa stream của OpenRouter). Refusal, `content_filter`, `length`, stream đứt, câu trả lời sai schema.
+  - Kiểm key bằng danh sách model: không gọi completion; tiền tố `models/` của Google; `/key` của OpenRouter; lùi về completion 16 token khi không có `/models` hoặc key bị giới hạn quyền.
+  - `llm.Validate`; bảng provider (id, host https, tiền tố key không trùng nhau).
+- `aisuggest` `TestProviders`:
+  - key OpenAI lưu và dùng đúng provider, model ngoài gợi ý vẫn nhận;
+  - key đã lưu không mang sang provider khác;
+  - key `sk-proj-…` dán dưới Anthropic bị từ chối và có tên OpenAI;
+  - key server chỉ cho `LLM_PROVIDER`, lựa chọn cũ chờ lưu lại khi `LLM_PROVIDER` đổi;
+  - OpenRouter ghi provider vào suggestion; endpoint `openai-compatible` nhận key dạng gì cũng được.
+- `cmd/api` `TestAISettingsAnyProvider`: server `LLM_PROVIDER=openai` trỏ vào OpenAI giả. Đủ 8 provider trong `providers`, `AI_KEY_REJECTED` / `AI_KEY_NO_CREDIT` / `AI_MODEL_UNAVAILABLE` (kèm model key dùng được) / `INVALID_PAYLOAD` với đúng `details.field`, audit có `provider` và không có key.
+- Migration 0045, 0046 trên DB trống: 46 migration chạy hết. Test 0044 (`authz`) từng đếm đúng một migration chạy sau nó; giờ kiểm migration đầu tiên.
+- Frontend (worktree sạch, `npm ci`): `vue-tsc` sạch, vitest 124/124, build + bundle gate PASS (60,3 KiB gzip).
+
+**Host thật, key giả** (`LLM_LIVE_HOSTS=1 go test ./internal/platform/llm -run TestLiveHostsRejectAFakeKey -v -count=1`). Không tốn gì, không cần key; chứng minh host, đường dẫn và cách đọc lỗi khớp server thật:
+
+| Provider | Trả lời | Đọc thành |
+|---|---|---|
+| Anthropic | 401 | `ErrKey` |
+| OpenAI | 401 "Incorrect API key provided" | `ErrKey` |
+| Google (Gemini) | **400** "Please pass a valid API key" | `ErrKey` |
+| xAI | **400** "Incorrect API key provided" | `ErrKey` |
+| Mistral | 401 "Invalid API Key" | `ErrKey` |
+| DeepSeek | 401 "Authentication Fails" | `ErrKey` |
+| Groq | 401 "Invalid API Key" | `ErrKey` |
+| OpenRouter | 401 tại `/key` | `ErrKey` |
+
+**Giao diện trên api thật + Chromium** (Playwright; api build từ nhánh, `LLM_PROVIDER=openai` với một server key giả, Vite từ worktree sạch):
+
+- Trang mở với "Drafting uses GPT-6 Astra from OpenAI (GPT) with the server's key".
+- Chọn Anthropic: 4 model Claude; "key của server" bị khóa, ghi "The server's key is for OpenAI (GPT)".
+- Dán `sk-or-v1-…`: tự chuyển sang OpenRouter, ô model id hiện ra. Save → OpenRouter thật trả 401 → "The provider rejected this API key…".
+- OpenAI + key server: api.openai.com thật từ chối key giả → "The provider rejected the server's key…".
+- Màn hình điện thoại, chế độ tối, đều xem bằng ảnh chụp. Log api không có key nào.
+- Ba chỗ sửa sau lần chụp đầu:
+  - tiêu đề bị hai lớp ngoặc;
+  - ghi chú "đã chuyển" và lỗi cũ còn lại khi tự đổi provider;
+  - ô model id lặp lại model đã chọn ở danh sách.
+
+**Chưa kiểm:**
+
+- **Một lần gọi thành công với key thật** của từng provider. Chạy được ngay với key OpenAI. `TestLive` tự đoán provider theo phần đầu key; key `sk-…` không có `proj` thì đặt thêm `LLM_LIVE_PROVIDER=openai`. Trên cmd.exe, từ `backend\`:
+  ```
+  set "LLM_LIVE_KEY=sk-proj-…"
+  go test ./internal/platform/llm -run TestLive -v -count=1
+  set LLM_LIVE_KEY=
+  ```
+  Mỗi model gợi ý được kiểm key rồi lấy một câu trả lời có schema. Tốn vài cent; `set "LLM_LIVE_MODELS=gpt-6-luna"` để chạy bớt.
+- **Chỗ tài liệu provider không nói, mình phải chọn:**
+  - tên trường giới hạn output của Gemini và xAI (`max_tokens`). Nếu sai, 400 → gọi lại không có giới hạn, nên không hỏng, chỉ mất trần chi phí;
+  - xAI, Mistral, OpenRouter có trả usage khi stream không (không có thì số token ghi 0);
+  - tên model `mistral-*-latest` (trang model của Mistral không liệt kê alias). Sai thì lúc lưu báo lỗi kèm model key dùng được.
+- Endpoint `openai-compatible` mới chạy với server giả, chưa chạy với Ollama, vLLM hay LiteLLM thật.

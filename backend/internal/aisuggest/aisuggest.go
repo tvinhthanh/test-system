@@ -5,13 +5,14 @@
 // and stores the drafts. Nothing becomes a test case until the tester picks
 // a draft — the dashboard then creates it through testmgmt like any other.
 //
-// The model is always the organization's choice in the dashboard (default
-// llm.DefaultModel). Whose key pays is its choice too: its own Anthropic API
-// key (ai_settings, sealed with platform/secretbox) or the server's
-// LLM_API_KEY. No usable key: the feature says so instead of queueing work
-// that cannot run.
+// The provider and model are always the organization's choice in the
+// dashboard (default: the server's — LLM_PROVIDER, LLM_MODEL). Whose key pays
+// is its choice too: its own key for any provider platform/llm lists
+// (QĐ-18; ai_settings, sealed with platform/secretbox) or the server's
+// LLM_API_KEY, which serves only the server's provider. No usable key: the
+// feature says so instead of queueing work that cannot run.
 //
-// Owns ai_settings and case_suggestions (migration 0040). Imports only
+// Owns ai_settings and case_suggestions (migrations 0040, 0045). Imports only
 // platform/*. This file is the module's whole contract (§6.9.4).
 package aisuggest
 
@@ -61,10 +62,12 @@ const (
 	SourceServer       = "server"
 )
 
-// Settings is an organization's choices: the model, and whether it pays
-// with its own key (only the key's hint is readable) or the server's.
+// Settings is an organization's choices: the provider and model, and
+// whether it pays with its own key (only the key's hint is readable) or the
+// server's.
 type Settings struct {
 	OrgID     string
+	Provider  string
 	Model     string
 	OwnKey    bool
 	KeyHint   string // the own key's last four characters; "" with the server's
@@ -72,19 +75,23 @@ type Settings struct {
 	UpdatedAt time.Time
 }
 
-// SaveInput is one save of the settings page. OwnKey with APIKey ""
-// keeps the stored key; OwnKey false forgets any stored key.
+// SaveInput is one save of the settings page. Provider "" is the one that
+// offers Model by name, else Anthropic (a dashboard from before providers).
+// OwnKey with APIKey "" keeps the stored key, while the provider stays the
+// same; OwnKey false forgets any stored key.
 type SaveInput struct {
-	Model  string
-	OwnKey bool
-	APIKey string
-	Actor  string
+	Provider string
+	Model    string
+	OwnKey   bool
+	APIKey   string
+	Actor    string
 }
 
 // Access is what a project of the organization would use now.
 type Access struct {
 	Available bool
 	Source    string // SourceOrganization | SourceServer | ""
+	Provider  string
 	Model     string
 }
 
@@ -120,6 +127,7 @@ type Suggestion struct {
 	Status        string
 	Drafts        []Draft
 	PageRead      bool // the page outline reached the model
+	Provider      string
 	Model         string
 	KeySource     string
 	InputTokens   int
@@ -144,7 +152,7 @@ type NewSuggestion struct {
 // LLM is what this module needs of platform/llm.
 type LLM interface {
 	JSON(ctx context.Context, req llm.Request) (llm.Result, error)
-	CheckKey(ctx context.Context, apiKey, model string) error
+	CheckKey(ctx context.Context, acct llm.Account) error
 }
 
 // PageReader returns a page's outline (title, headings, links, forms,
@@ -160,6 +168,11 @@ type Deps struct {
 	LLM       LLM
 	Pages     PageReader
 	ServerKey string // LLM_API_KEY; "" = none
+	// ServerProvider is the server key's (LLM_PROVIDER; "" = Anthropic), and
+	// ServerModel the model used with it when nothing is chosen (LLM_MODEL;
+	// "" = the provider's default).
+	ServerProvider string
+	ServerModel    string
 }
 
 var (
@@ -173,19 +186,22 @@ var (
 
 type Service interface {
 	// Settings returns the organization's choices; false when it made none
-	// (the server's key, if any, with llm.DefaultModel).
+	// (the server's key, if any, with the server's model).
 	Settings(ctx context.Context, orgID string) (Settings, bool, error)
 	// SaveSettings stores the choices after checking with the provider that
-	// the key that will pay may use the model (llm.ErrKey / llm.ErrModel
-	// otherwise); nothing is stored on a refusal.
+	// the key that will pay may use the model (llm.ErrKey, llm.ErrQuota,
+	// llm.ErrModel otherwise); nothing is stored on a refusal.
 	SaveSettings(ctx context.Context, orgID string, in SaveInput) (Settings, error)
 	// DeleteSettings forgets the choices and any stored key; false if none.
 	DeleteSettings(ctx context.Context, orgID string) (bool, error)
 	Access(ctx context.Context, orgID string) (Access, error)
-	// Credentials is the key and model a job of the organization uses now,
-	// for other modules' jobs (autotest, QĐ-16): the organization's own key,
-	// else the server's. ok false: there is no key anywhere.
-	Credentials(ctx context.Context, orgID string) (key, model, source string, ok bool, err error)
+	// Credentials is the provider, key and model a job of the organization
+	// uses now, for other modules' jobs (autotest, QĐ-16): the organization's
+	// own key, else the server's. ok false: there is no key anywhere.
+	Credentials(ctx context.Context, orgID string) (acct llm.Account, source string, ok bool, err error)
+	// ServerProvider and ServerModel are what the server's key serves.
+	ServerProvider() string
+	ServerModel() string
 	// Request queues a suggestion with its job, after the key and limit checks.
 	Request(ctx context.Context, in NewSuggestion) (Suggestion, error)
 	Get(ctx context.Context, projectID, id string) (Suggestion, error)

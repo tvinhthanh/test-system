@@ -17,7 +17,7 @@
 // model, which sees {{password}}.
 //
 // Owns environment_accounts, auto_specs, auto_drafts, auto_runs and
-// auto_run_cases (migration 0042). Imports platform/* and tenancy (an
+// auto_run_cases (migrations 0042, 0046). Imports platform/* and tenancy (an
 // environment's address). This file is the module's whole contract
 // (§6.9.4).
 package autotest
@@ -153,6 +153,7 @@ type DraftRequest struct {
 	Status        string
 	Drafts        []Draft
 	PageRead      bool
+	Provider      string
 	Model         string
 	KeySource     string
 	InputTokens   int
@@ -328,10 +329,10 @@ type LLM interface {
 	JSON(ctx context.Context, req llm.Request) (llm.Result, error)
 }
 
-// Keys picks the API key and model an organization's jobs use now
-// (aisuggest's settings, QĐ-15); ok false: no key anywhere.
+// Keys picks the provider, API key and model an organization's jobs use
+// now (aisuggest's settings, QĐ-15, QĐ-18); ok false: no key anywhere.
 type Keys interface {
-	Credentials(ctx context.Context, orgID string) (key, model, source string, ok bool, err error)
+	Credentials(ctx context.Context, orgID string) (acct llm.Account, source string, ok bool, err error)
 }
 
 // Recorder writes a run where people read results; cmd/worker implements

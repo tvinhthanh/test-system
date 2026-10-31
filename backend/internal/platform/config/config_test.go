@@ -7,16 +7,24 @@ import (
 )
 
 func TestLoadDefaultsAndValidation(t *testing.T) {
-	for _, k := range []string{"APP_ENV", "HTTP_ADDR", "METRICS_ADDR", "DATABASE_URL"} {
+	for _, k := range []string{"APP_ENV", "HTTP_ADDR", "METRICS_ADDR", "DATABASE_URL", "LLM_PROVIDER", "LLM_MODEL"} {
 		t.Setenv(k, "")
 	}
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("defaults must validate: %v", err)
 	}
-	if c.Env != "dev" || c.HTTPAddr != ":8080" || !strings.HasPrefix(c.MetricsAddr, "127.0.0.1:") || c.JobRetention != 168*time.Hour {
+	if c.Env != "dev" || c.HTTPAddr != ":8080" || !strings.HasPrefix(c.MetricsAddr, "127.0.0.1:") || c.JobRetention != 168*time.Hour ||
+		c.LLMProvider != "anthropic" || c.LLMModel != "" {
 		t.Errorf("unexpected defaults: %+v", c)
 	}
+	// The provider's name is read as written in any case; platform/llm
+	// decides at boot whether it is one.
+	t.Setenv("LLM_PROVIDER", " OpenAI ")
+	if c, err := Load(); err != nil || c.LLMProvider != "openai" {
+		t.Errorf("LLM_PROVIDER: %q %v", c.LLMProvider, err)
+	}
+	t.Setenv("LLM_PROVIDER", "")
 
 	cases := []struct {
 		name string

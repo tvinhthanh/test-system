@@ -72,6 +72,10 @@ func main() {
 		logger.Error("boot", "err", err)
 		os.Exit(2)
 	}
+	if _, _, err := llm.Server(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel); err != nil {
+		logger.Error("boot", "err", err)
+		os.Exit(2)
+	}
 	handler, _ := buildHandler(cfg, db, store, reg, logger)
 
 	api := &http.Server{
@@ -178,7 +182,12 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
 	qry := query.New(db)
 	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
-	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: llm.New(cfg.LLMBaseURL), ServerKey: cfg.LLMAPIKey})
+	model, serverModel, err := llm.Server(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
+	if err != nil {
+		panic(err) // main refused this configuration before building anything
+	}
+	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model,
+		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
 	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck,
 		ai:           ai,
 		llmServerKey: cfg.LLMAPIKey != "",

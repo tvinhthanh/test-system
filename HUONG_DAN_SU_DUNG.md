@@ -89,21 +89,23 @@ Chỉ có khi người vận hành bật `SIGNUP=on` (xem mục 10).
 
 Vào **Team**, chọn organization, bấm **AI settings**. Trang này chỉ hiện với org owner và org admin.
 
-1. **Model**: chọn model Claude dùng để soạn case.
-   - Claude Opus 5.5: mặc định, tốt nhất.
-   - Claude Sonnet 5.5
-   - Claude Haiku 5.5: nhanh và rẻ nhất.
-   - Claude Fable 5.1
-2. **Whose API key pays**: chọn key trả tiền cho mỗi lần soạn.
-   - **The server's key**: dùng key người vận hành đặt trong `LLM_API_KEY` trên server. Lựa chọn này bị mờ nếu server chưa có key.
-   - **Our own key**: dán key Anthropic của organization. Lấy key ở console.anthropic.com → API keys.
-3. Bấm **Save**.
-   - Trước khi lưu, ATP gọi thử Anthropic để kiểm tra key và model. Nếu key sai hoặc model không dùng được với key đó, bạn sẽ thấy lỗi ngay.
-   - Key riêng được mã hóa khi lưu. Sau đó app chỉ hiện 4 ký tự cuối.
+1. **Provider**: chọn nơi cấp key: Anthropic (Claude), OpenAI (GPT), Google (Gemini), xAI (Grok), Mistral, DeepSeek, Groq, hoặc OpenRouter. OpenRouter dùng một key cho hàng trăm model của nhiều hãng.
+   - Dán key trước cũng được. Key có phần đầu riêng (`sk-ant-`, `sk-proj-`, `AIza`, `xai-`, `gsk_`, `sk-or-`) thì trang tự chuyển sang đúng provider.
+   - Server có endpoint riêng tương thích OpenAI (gateway công ty, Ollama, vLLM) thì danh sách có thêm mục **OpenAI-compatible endpoint (this server)**.
+2. **Model**: chọn model trong danh sách gợi ý của provider.
+   - Với Anthropic: Claude Opus 5.5 (mặc định), Sonnet 5.5, Haiku 5.5 (nhanh và rẻ nhất), Fable 5.1.
+   - Với các provider khác có thêm ô **Or type any model id this key can use**: gõ bất kỳ model nào key dùng được, ví dụ `openai/gpt-6-astra` trên OpenRouter.
+3. **Whose API key pays**: chọn key trả tiền cho mỗi lần soạn.
+   - **The server's key**: dùng key người vận hành đặt trong `LLM_API_KEY`. Key này chỉ dùng được với provider của server (`LLM_PROVIDER`); với provider khác lựa chọn bị mờ và ghi rõ key của server thuộc provider nào.
+   - **Our own key**: dán key của organization. Trang ghi đường dẫn lấy key của provider đang chọn.
+4. Bấm **Save**.
+   - Trước khi lưu, ATP hỏi chính provider đó xem key có đúng và dùng được model không. Key sai, hết tiền, hoặc model không có, bạn sẽ thấy lỗi ngay. Gõ sai tên model thì lỗi kể vài model mà key dùng được.
+   - Key của provider này dán vào provider khác (ví dụ key `sk-proj-…` khi đang chọn Anthropic) bị từ chối, kèm lời nhắc chọn đúng provider.
+   - Key riêng được mã hóa khi lưu. Sau đó app chỉ hiện 4 ký tự cuối. Đổi provider thì phải dán key mới cho provider đó.
    - Chuyển sang dùng key của server thì key riêng bị xóa.
    - **Reset** xóa toàn bộ cài đặt AI của organization.
 
-Dữ liệu gửi sang Anthropic: chỉ khi tester bấm **Draft cases**. Gồm loại test, mô tả tester viết, và (nếu server bật URL check) cấu trúc trang: tiêu đề, heading, link, ô nhập, nút bấm, đoạn đầu nội dung. Ngoài ra không gửi gì khác từ ATP.
+Dữ liệu gửi cho provider đang dùng: chỉ khi tester bấm **Draft cases**. Gồm loại test, mô tả tester viết, và (nếu server bật URL check) cấu trúc trang: tiêu đề, heading, link, ô nhập, nút bấm, đoạn đầu nội dung. Ngoài ra không gửi gì khác từ ATP.
 
 ### 2.4 CI token (cho automation)
 
@@ -430,7 +432,8 @@ Nút bên cạnh biểu tượng khiên dùng để đăng xuất (**Sign out**)
 | *"This plan has no site address"* trên màn hình chạy | Plan chưa gắn environment có địa chỉ. Gắn ở trang plan (**Environment**, **Add address**). |
 | *"AI drafting is not set up"* | Admin cần cấu hình AI ([mục 2.3](#23-bật-ai-soạn-test-case-không-bắt-buộc)). |
 | AI báo *"The site could not be read…"* | Site không mở được từ server, hoặc URL check đang tắt. AI vẫn soạn case, nhưng chỉ dựa trên mô tả của bạn. |
-| AI báo key bị từ chối, hoặc model không dùng được | Key sai hoặc đã bị thu hồi, hoặc tài khoản Anthropic không có quyền dùng model đó. Lưu lại key hoặc chọn model khác trong **AI settings**. |
+| AI báo key bị từ chối, hoặc model không dùng được | Key sai hoặc đã bị thu hồi, key của provider khác với provider đang chọn, hoặc tài khoản không có quyền dùng model đó. Lưu lại key, chọn đúng provider, hoặc chọn model khác trong **AI settings**. |
+| AI báo tài khoản hết tiền (*out of credit*) | Nạp thêm tiền ở trang billing của provider, hoặc lưu key khác. Thử lại không giúp gì. |
 | Báo quá nhiều yêu cầu AI hoặc URL check | Đang có quá nhiều yêu cầu chờ, hoặc project đã dùng hết lượt soạn AI của ngày. Đợi yêu cầu trước xong rồi thử lại. |
 | Nút **passed** bị mờ | Còn bước nào đang failed hoặc blocked. |
 | *"This plan is closed"* | Plan đã đóng. Member trở lên bấm **Reopen** trên trang plan. |
@@ -463,10 +466,10 @@ Các tùy chọn trong `backend/deploy/.env`:
 - `URLCHECK=on`: bật URL check, quét site và Auto test. Thêm một service Chromium, image khoảng 1 GB.
 - `CHECKER_SESSIONS=4`: số trình duyệt Auto test mở cùng lúc, mỗi cái khoảng 150 MB.
 - `URLCHECK_ALLOW_PRIVATE=on`: cho URL check mở địa chỉ trong mạng LAN.
-- `LLM_API_KEY=sk-ant-…`: key Anthropic của server cho phần AI. Model không đặt ở đây mà chọn trong **AI settings** trên giao diện.
+- `LLM_API_KEY=…`: key của server cho phần AI, thuộc provider `LLM_PROVIDER`. Provider mặc định là `anthropic`; có thể đặt `openai`, `gemini`, `xai`, `mistral`, `deepseek`, `groq`, `openrouter`, hoặc `openai-compatible` cho endpoint riêng tại `LLM_BASE_URL` (khi đó bắt buộc có `LLM_MODEL`). Organization vẫn chọn provider, model và key riêng trong **AI settings**. `LLM_MODEL` chỉ là model key của server dùng khi organization chưa chọn gì.
 - `MAIL=smtp`, kèm `SMTP_HOST`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD` và `PUBLIC_URL`: gửi email mời, quên mật khẩu và link đăng ký. Dùng được SES, Resend, Mailgun, Postmark, Gmail (mật khẩu ứng dụng) và Microsoft 365. Với Microsoft 365, tenant phải còn cho đăng nhập SMTP bằng mật khẩu; Microsoft đang tắt dần cách này, nên về lâu dài nên dùng một dịch vụ gửi mail.
 - `SIGNUP=on`: mở tự đăng ký có duyệt (mục 1.4). Cần `MAIL=smtp`; thiếu thì server không khởi động.
 
-Sau khi sửa `.env`, chạy lại `bash server/atp.sh up` (với `URLCHECK`) hoặc `bash server/atp.sh restart` (với `LLM_API_KEY`, `MAIL`, `SIGNUP`).
+Sau khi sửa `.env`, chạy lại `bash server/atp.sh up` (với `URLCHECK`) hoặc `bash server/atp.sh restart` (với `LLM_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`, `MAIL`, `SIGNUP`).
 
 > **Không bao giờ chạy `bash server/atp.sh reset` trên server có dữ liệu thật.** Lệnh này xóa toàn bộ dữ liệu, kể cả bản sao lưu.

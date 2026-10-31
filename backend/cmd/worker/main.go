@@ -116,9 +116,13 @@ func main() {
 		}
 		pages = outliner
 	}
-	model := llm.New(cfg.LLMBaseURL)
+	model, serverModel, err := llm.Server(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
+	if err != nil {
+		logger.Error("boot", "err", err)
+		os.Exit(2)
+	}
 	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model, Pages: pages,
-		ServerKey: cfg.LLMAPIKey})
+		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
 	tm := testmgmt.New(db, idn, nil, testmgmt.Policy{})
 	// Auto test (QĐ-16): cases run in the checker service's browser
 	// sessions, so the pools run with URLCHECK=on; the key and model are the
@@ -170,7 +174,8 @@ func main() {
 		defer wg.Done()
 		w := ai.Worker(aiConcurrency)
 		w.Logger, w.Metrics = logger, reg
-		logger.Info("worker pool started", "kind", aisuggest.JobDraft, "concurrency", aiConcurrency, "server_key", cfg.LLMAPIKey != "", "reads_pages", pages != nil)
+		logger.Info("worker pool started", "kind", aisuggest.JobDraft, "concurrency", aiConcurrency, "server_key", cfg.LLMAPIKey != "",
+			"server_provider", ai.ServerProvider(), "reads_pages", pages != nil)
 		w.Run(ctx)
 	}()
 	if cfg.URLCheck {

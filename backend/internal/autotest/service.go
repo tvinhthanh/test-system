@@ -345,7 +345,7 @@ func (s *service) keysAvailable(ctx context.Context, orgID string) error {
 	if s.Keys == nil {
 		return ErrNotConfigured
 	}
-	_, _, _, ok, err := s.Keys.Credentials(ctx, orgID)
+	_, _, ok, err := s.Keys.Credentials(ctx, orgID)
 	if err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func (s *service) ApplyHeal(ctx context.Context, projectID, runID, caseID string
 // ----------------------------------------------------------------- drafts
 
 const draftColumns = `id, project_id, environment_id, target, account, inputs, context, count, test_type, status,
-	coalesce(drafts, '[]'::jsonb), page_read, model, key_source, input_tokens, output_tokens, coalesce(error, ''),
+	coalesce(drafts, '[]'::jsonb), page_read, provider, model, key_source, input_tokens, output_tokens, coalesce(error, ''),
 	requested_by, created_at, finished_at`
 
 func scanDraft(row interface{ Scan(dest ...any) error }) (DraftRequest, error) {
@@ -536,7 +536,7 @@ func scanDraft(row interface{ Scan(dest ...any) error }) (DraftRequest, error) {
 	var inputs, drafts []byte
 	var finished *time.Time
 	err := row.Scan(&d.ID, &d.ProjectID, &d.EnvironmentID, &d.Target, &d.Account, &inputs, &d.Context, &d.Count, &d.TestType, &d.Status,
-		&drafts, &d.PageRead, &d.Model, &d.KeySource, &d.InputTokens, &d.OutputTokens, &d.Error, &d.RequestedBy, &d.CreatedAt, &finished)
+		&drafts, &d.PageRead, &d.Provider, &d.Model, &d.KeySource, &d.InputTokens, &d.OutputTokens, &d.Error, &d.RequestedBy, &d.CreatedAt, &finished)
 	if errors.Is(err, pg.ErrNoRows) {
 		return DraftRequest{}, ErrNotFound
 	}

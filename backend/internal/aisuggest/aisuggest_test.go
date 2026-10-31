@@ -23,11 +23,12 @@ const (
 var pepper = []byte("test-pepper-test-pepper-test-pepper!")
 
 type fakeLLM struct {
-	answer string
-	served string // the model the answer names; "" like an answer that names none
-	err    error
-	calls  []llm.Request
-	checks []string
+	answer   string
+	served   string // the model the answer names; "" like an answer that names none
+	err      error
+	calls    []llm.Request
+	checks   []string // key|model
+	accounts []llm.Account
 }
 
 func (f *fakeLLM) JSON(_ context.Context, req llm.Request) (llm.Result, error) {
@@ -38,9 +39,10 @@ func (f *fakeLLM) JSON(_ context.Context, req llm.Request) (llm.Result, error) {
 	return llm.Result{JSON: json.RawMessage(f.answer), Model: f.served, InputTokens: 900, OutputTokens: 300}, nil
 }
 
-func (f *fakeLLM) CheckKey(_ context.Context, apiKey, model string) error {
-	f.checks = append(f.checks, apiKey+"|"+model)
-	if apiKey == "sk-bad" {
+func (f *fakeLLM) CheckKey(_ context.Context, acct llm.Account) error {
+	f.checks = append(f.checks, acct.APIKey+"|"+acct.Model)
+	f.accounts = append(f.accounts, acct)
+	if acct.APIKey == "sk-bad" {
 		return llm.ErrKey
 	}
 	return nil
@@ -144,6 +146,101 @@ func TestSettingsAndAccess(t *testing.T) {
 	}
 }
 
+// Any provider platform/llm lists (QĐ-18): the organization's key is checked
+// with the provider it was saved for, a key pasted under the wrong one is
+// named, and the server's key serves only the server's provider.
+func TestProviders(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	fake := &fakeLLM{answer: answer}
+	svc := New(Deps{DB: db, Pepper: pepper, LLM: fake, ServerKey: "sk-server"})
+	last := func() llm.Account { return fake.accounts[len(fake.accounts)-1] }
+
+	st, err := svc.SaveSettings(ctx, orgA, SaveInput{Provider: "openai", Model: "gpt-6.1-sol", OwnKey: true, APIKey: "sk-proj-abc1234", Actor: "ana"})
+	if err != nil || st.Provider != "openai" || st.Model != "gpt-6.1-sol" || st.KeyHint != "1234" || last() != (llm.Account{Provider: "openai", APIKey: "sk-proj-abc1234", Model: "gpt-6.1-sol"}) {
+		t.Fatalf("OpenAI key: %+v %v %+v", st, err, fake.accounts)
+	}
+	if a, _ := svc.Access(ctx, orgA); !a.Available || a.Source != SourceOrganization || a.Provider != "openai" || a.Model != "gpt-6.1-sol" {
+		t.Errorf("access: %+v", a)
+	}
+	if acct, source, ok, err := svc.Credentials(ctx, orgA); !ok || err != nil || source != SourceOrganization || acct != (llm.Account{Provider: "openai", APIKey: "sk-proj-abc1234", Model: "gpt-6.1-sol"}) {
+		t.Errorf("credentials: %+v %s %v %v", acct, source, ok, err)
+	}
+	// Any model id the key may use, not only the suggestions; the same key
+	// stays while the provider does.
+	if _, err := svc.SaveSettings(ctx, orgA, SaveInput{Provider: "openai", Model: "gpt-4.1", OwnKey: true, Actor: "ana"}); err != nil || last().APIKey != "sk-proj-abc1234" {
+		t.Errorf("another OpenAI model on the saved key: %v %+v", err, last())
+	}
+	for name, in := range map[string]SaveInput{
+		"the saved key under another provider":        {Provider: "gemini", Model: "gemini-3.8-flash", OwnKey: true},
+		"an OpenAI key under Anthropic":               {Provider: "anthropic", Model: "claude-opus-5-5", OwnKey: true, APIKey: "sk-proj-zzz9999"},
+		"the server's key for another provider":       {Provider: "openai", Model: "gpt-6-astra"},
+		"a provider nobody lists":                     {Provider: "nope", Model: "x", OwnKey: true, APIKey: "k"},
+		"the operator's endpoint on a server without": {Provider: llm.Custom, Model: "llama3.1:8b", OwnKey: true, APIKey: "k"},
+		"a model id with a space":                     {Provider: "openrouter", Model: "openai/gpt 6", OwnKey: true, APIKey: "sk-or-v1-x"},
+	} {
+		in.Actor = "ana"
+		if _, err := svc.SaveSettings(ctx, orgA, in); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := svc.SaveSettings(ctx, orgA, SaveInput{Provider: "anthropic", Model: "claude-opus-5-5", OwnKey: true, APIKey: "sk-proj-zzz9999", Actor: "ana"}); err == nil ||
+		!strings.Contains(err.Error(), "OpenAI (GPT)") {
+		t.Errorf("the key's provider is named: %v", err)
+	}
+	// A model alone names its provider when one offers it by name.
+	if st, err := svc.SaveSettings(ctx, orgA, SaveInput{Model: "grok-4.7", OwnKey: true, APIKey: "xai-abc5678", Actor: "ana"}); err != nil || st.Provider != "xai" {
+		t.Errorf("provider from the model: %+v %v", st, err)
+	}
+	if st, err := svc.SaveSettings(ctx, orgA, SaveInput{Provider: "openrouter", Model: "openai/gpt-6-astra", OwnKey: true, APIKey: "sk-or-v1-abcd", Actor: "ana"}); err != nil || st.Provider != "openrouter" {
+		t.Fatalf("OpenRouter: %+v %v", st, err)
+	}
+
+	// The drafts record who wrote them.
+	sug, err := svc.Request(ctx, NewSuggestion{ProjectID: projA, OrgID: orgA, TestType: "smoke", Actor: "tia"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if did, err := svc.Worker(1).RunOnce(ctx); !did || err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Get(ctx, projA, sug.ID); got.Status != StatusDone || got.Provider != "openrouter" || got.Model != "openai/gpt-6-astra" ||
+		fake.calls[len(fake.calls)-1].Account != (llm.Account{Provider: "openrouter", APIKey: "sk-or-v1-abcd", Model: "openai/gpt-6-astra"}) {
+		t.Errorf("drafts by OpenRouter: %+v %+v", got, fake.calls)
+	}
+
+	// A server whose key is OpenAI's: its default model, LLM_MODEL over it,
+	// and a choice of the server's key made when it was Anthropic's waits for
+	// a new save.
+	if _, err := svc.SaveSettings(ctx, orgB, SaveInput{Model: "claude-haiku-5-5", Actor: "bo"}); err != nil {
+		t.Fatal(err)
+	}
+	openai := New(Deps{DB: db, Pepper: pepper, LLM: fake, ServerKey: "sk-proj-server", ServerProvider: "openai"})
+	if a, _ := openai.Access(ctx, "33333333-3333-4333-8333-333333333333"); !a.Available || a.Provider != "openai" || a.Model != "gpt-6-astra" {
+		t.Errorf("OpenAI server, nothing chosen: %+v", a)
+	}
+	if a, _ := New(Deps{DB: db, Pepper: pepper, LLM: fake, ServerKey: "k", ServerProvider: "openai", ServerModel: "gpt-6-luna"}).Access(ctx, "33333333-3333-4333-8333-333333333333"); a.Model != "gpt-6-luna" {
+		t.Errorf("LLM_MODEL: %+v", a)
+	}
+	if a, _ := openai.Access(ctx, orgB); a.Available || a.Provider != "anthropic" {
+		t.Errorf("Anthropic choice on an OpenAI server's key: %+v", a)
+	}
+	if _, err := openai.SaveSettings(ctx, orgB, SaveInput{Provider: "openai", Model: "gpt-6-luna", Actor: "bo"}); err != nil || last().APIKey != "sk-proj-server" {
+		t.Errorf("the server's OpenAI key: %v %+v", err, last())
+	}
+
+	// The operator's endpoint, where the server has one.
+	custom := New(Deps{DB: db, Pepper: pepper, LLM: fake, ServerKey: "local", ServerProvider: llm.Custom, ServerModel: "llama3.1:8b"})
+	if st, err := custom.SaveSettings(ctx, orgB, SaveInput{Provider: llm.Custom, Model: "llama3.1:8b", Actor: "bo"}); err != nil || st.Provider != llm.Custom {
+		t.Errorf("operator's endpoint: %+v %v", st, err)
+	}
+	// Any key format goes to the operator's endpoint — a gateway may hand out
+	// keys that look like anyone's.
+	if _, err := custom.SaveSettings(ctx, orgB, SaveInput{Provider: llm.Custom, Model: "llama3.1:8b", OwnKey: true, APIKey: "sk-ant-gateway-1", Actor: "bo"}); err != nil {
+		t.Errorf("a gateway key: %v", err)
+	}
+}
+
 // A suggestion runs once: the organization's key and model, the page outline
 // and the tester's words reach the model; the drafts that come back are cut
 // to the count and to sane sizes, with the tokens recorded.
@@ -229,8 +326,17 @@ func TestDraftFailures(t *testing.T) {
 	if did, err := w.RunOnce(ctx); !did || err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := svc.Get(ctx, projA, s1.ID); got.Status != StatusError || !strings.Contains(got.Error, "rejected") {
+	if got, _ := svc.Get(ctx, projA, s1.ID); got.Status != StatusError || !strings.Contains(got.Error, "rejected by Anthropic (Claude)") {
 		t.Fatalf("rejected key: %+v", got)
+	}
+	// Out of credit is said as such, at once: retrying cannot pay.
+	fake.err = llm.ErrQuota
+	sq, _ := svc.Request(ctx, NewSuggestion{ProjectID: projA, OrgID: orgA, TestType: "smoke", Actor: "tia"})
+	if did, err := w.RunOnce(ctx); !did || err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Get(ctx, projA, sq.ID); got.Status != StatusError || !strings.Contains(got.Error, "out of credit") {
+		t.Fatalf("no credit: %+v", got)
 	}
 
 	fake.err = llm.ErrUnavailable

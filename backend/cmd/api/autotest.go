@@ -550,6 +550,7 @@ type autoDraftDTO struct {
 	Status        string            `json:"status"`
 	Drafts        []autotest.Draft  `json:"drafts"`
 	PageRead      bool              `json:"pageRead"`
+	Provider      string            `json:"provider"`
 	Model         string            `json:"model"`
 	KeySource     string            `json:"keySource"`
 	Error         string            `json:"error"`
@@ -560,7 +561,7 @@ type autoDraftDTO struct {
 
 func autoDraftOut(dr autotest.DraftRequest) autoDraftDTO {
 	out := autoDraftDTO{ID: dr.ID, EnvironmentID: dr.EnvironmentID, Target: dr.Target, Account: dr.Account, Inputs: dr.Inputs, Context: dr.Context,
-		Count: dr.Count, TestType: dr.TestType, Status: dr.Status, Drafts: dr.Drafts, PageRead: dr.PageRead, Model: dr.Model, KeySource: dr.KeySource,
+		Count: dr.Count, TestType: dr.TestType, Status: dr.Status, Drafts: dr.Drafts, PageRead: dr.PageRead, Provider: dr.Provider, Model: dr.Model, KeySource: dr.KeySource,
 		Error: dr.Error, RequestedBy: dr.RequestedBy, CreatedAt: dr.CreatedAt}
 	if !dr.FinishedAt.IsZero() {
 		at := dr.FinishedAt

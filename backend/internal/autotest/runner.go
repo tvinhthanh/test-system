@@ -59,12 +59,14 @@ func outside() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
-func llmMessage(err error, model string) string {
+func llmMessage(err error, acct llm.Account) string {
 	switch {
 	case errors.Is(err, llm.ErrKey):
-		return "The API key was rejected by Anthropic. Check it under Team → AI settings (or LLM_API_KEY on the server)."
+		return "The API key was rejected by " + llm.Label(acct.Provider) + ". Check it under Team → AI settings (or LLM_API_KEY on the server)."
+	case errors.Is(err, llm.ErrQuota):
+		return "The " + llm.Label(acct.Provider) + " account behind this key is out of credit or over its spending limit. Add credit there, or use another key under Team → AI settings."
 	case errors.Is(err, llm.ErrModel):
-		return "This key cannot use " + model + ". Pick another model under Team → AI settings."
+		return "This key cannot use " + acct.Model + ". Pick another model under Team → AI settings."
 	case errors.Is(err, llm.ErrRefused):
 		return "The model declined this request. Rephrase the description and try again."
 	case errors.Is(err, llm.ErrTruncated):
@@ -91,7 +93,7 @@ func (s *service) findLogin(ctx context.Context, orgID string, env tenancy.Envir
 	if s.Browser == nil || s.LLM == nil || s.Keys == nil {
 		return nil, tell("the account has no sign-in steps and this server cannot find them: write them on the account")
 	}
-	key, model, _, ok, err := s.Keys.Credentials(ctx, orgID)
+	acct, _, ok, err := s.Keys.Credentials(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,9 +122,9 @@ func (s *service) findLogin(ctx context.Context, orgID string, env tenancy.Envir
 	if !o.OK {
 		return nil, tell("the sign-in page %s did not open: %s", start, o.Results[len(o.Results)-1].Error)
 	}
-	res, err := s.LLM.JSON(ctx, llm.Request{APIKey: key, Model: model, System: loginSystem, User: loginPrompt(view), Schema: loginSchema, MaxTokens: 8000})
+	res, err := s.LLM.JSON(ctx, llm.Request{Account: acct, System: loginSystem, User: loginPrompt(view), Schema: loginSchema, MaxTokens: 8000})
 	if err != nil {
-		if msg := llmMessage(err, model); msg != "" {
+		if msg := llmMessage(err, acct); msg != "" {
 			return nil, tell("%s", msg)
 		}
 		return nil, err
@@ -294,7 +296,7 @@ func (s *service) runDraft(ctx context.Context, job queue.Job) error {
 	if s.LLM == nil || s.Keys == nil {
 		return errors.New("autotest: no model configured in this process")
 	}
-	key, model, source, ok, err := s.Keys.Credentials(ctx, p.OrgID)
+	acct, source, ok, err := s.Keys.Credentials(ctx, p.OrgID)
 	if err != nil {
 		return err
 	}
@@ -331,9 +333,9 @@ func (s *service) runDraft(ctx context.Context, job queue.Job) error {
 			view = nil // drafted from the description; page_read says so
 		}
 	}
-	res, err := s.LLM.JSON(ctx, llm.Request{APIKey: key, Model: model, System: draftSystem, User: draftPrompt(d, view), Schema: draftSchema, MaxTokens: 32000})
+	res, err := s.LLM.JSON(ctx, llm.Request{Account: acct, System: draftSystem, User: draftPrompt(d, view), Schema: draftSchema, MaxTokens: 32000})
 	if err != nil {
-		if msg := llmMessage(err, model); msg != "" {
+		if msg := llmMessage(err, acct); msg != "" {
 			return fail(msg)
 		}
 		if job.Attempts < job.MaxAttempts {
@@ -349,9 +351,9 @@ func (s *service) runDraft(ctx context.Context, job queue.Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = q.Exec(ctx, `UPDATE auto_drafts SET status = 'done', drafts = $2, page_read = $3, model = $4, key_source = $5,
-		input_tokens = $6, output_tokens = $7, finished_at = clock_timestamp() WHERE id = $1`,
-		d.ID, b, view != nil, res.ServedBy(model), source, res.InputTokens, res.OutputTokens)
+	_, err = q.Exec(ctx, `UPDATE auto_drafts SET status = 'done', drafts = $2, page_read = $3, provider = $4, model = $5, key_source = $6,
+		input_tokens = $7, output_tokens = $8, finished_at = clock_timestamp() WHERE id = $1`,
+		d.ID, b, view != nil, acct.Provider, res.ServedBy(acct.Model), source, res.InputTokens, res.OutputTokens)
 	return err
 }
 
@@ -555,11 +557,11 @@ func (s *service) execute(ctx context.Context, run Run, rc RunCase) (caseOutcome
 // heal asks the model for steps to put in place of one that lost its
 // element; nil when it gives up, or on any trouble (a repair is a bonus).
 func (s *service) heal(ctx context.Context, orgID, title string, done []Step, failed Step, errText string, view View, inputs map[string]string, account bool) (*Heal, int, int) {
-	key, model, _, ok, err := s.Keys.Credentials(ctx, orgID)
+	acct, _, ok, err := s.Keys.Credentials(ctx, orgID)
 	if err != nil || !ok {
 		return nil, 0, 0
 	}
-	res, err := s.LLM.JSON(ctx, llm.Request{APIKey: key, Model: model, System: healSystem, User: healPrompt(title, done, failed, errText, view), Schema: healSchema, MaxTokens: 8000})
+	res, err := s.LLM.JSON(ctx, llm.Request{Account: acct, System: healSystem, User: healPrompt(title, done, failed, errText, view), Schema: healSchema, MaxTokens: 8000})
 	if err != nil {
 		return nil, 0, 0
 	}

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// An organization's AI settings (QĐ-15): the model drafting test cases
-// uses — always chosen here — and whose Anthropic API key pays: the
-// server's (the operator's LLM_API_KEY, when set) or the organization's
-// own. An own key is checked with Anthropic before it is saved, stored
-// sealed, and never shown again — only its last four characters.
-// Organization admins and owners.
+// An organization's AI settings (QĐ-15, QĐ-18): the provider and model that
+// draft test cases — always chosen here — and whose API key pays: the
+// server's (the operator's LLM_API_KEY, for its LLM_PROVIDER only) or the
+// organization's own, for any provider the server lists. A pasted key whose
+// beginning is one provider's alone picks that provider. The key is checked
+// with the provider before it is saved, stored sealed, and never shown
+// again — only its last four characters. Organization admins and owners.
 import { KeyRound, Server, Sparkles, Trash2 } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
@@ -17,6 +18,7 @@ import ErrorNote from "../testmgmt/ErrorNote.vue";
 import { explain } from "../testmgmt/explain";
 import AsyncState from "../../shared/AsyncState.vue";
 import BackLink from "../../shared/BackLink.vue";
+import NativeSelect from "../../shared/NativeSelect.vue";
 import PageHeader from "../../shared/PageHeader.vue";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -31,22 +33,82 @@ const refresh = () =>
   settings.load((signal) => testmgmt.aiSettings(org.value, signal));
 watch(org, refresh, { immediate: true });
 
+const providerId = ref("");
 const keySource = ref<"organization" | "server">("organization");
 const apiKey = ref("");
 const model = ref("");
+const detected = ref("");
+const providers = computed(() => settings.data.value?.providers ?? []);
+const provider = computed(
+  () =>
+    providers.value.find((p) => p.id === providerId.value) ??
+    providers.value[0],
+);
+const providerLabel = (id: string) =>
+  providers.value.find((p) => p.id === id)?.label ?? id;
 watch(
   () => settings.data.value,
   (s) => {
     if (!s) return;
-    model.value = s.organization?.model ?? s.defaultModel;
+    providerId.value = s.organization?.provider ?? s.server.provider;
+    model.value = s.organization?.model ?? s.server.model;
     keySource.value =
       s.organization?.keySource ??
       (s.server.available ? "server" : "organization");
   },
 );
+// The server's key pays only for the server's own provider.
+const serverFits = computed(
+  () =>
+    !!settings.data.value?.server.available &&
+    settings.data.value.server.provider === providerId.value,
+);
 const ownKeyStored = computed(
   () => settings.data.value?.organization?.keySource === "organization",
 );
+// A saved key is kept only while the provider stays the one it is for.
+const keyKept = computed(
+  () =>
+    ownKeyStored.value &&
+    settings.data.value?.organization?.provider === providerId.value,
+);
+// The model list's own pick shows there; the field below holds an id of
+// one's own.
+const suggested = computed(
+  () => !!provider.value?.models.some((m) => m.id === model.value),
+);
+function typeModel(value: string | number) {
+  model.value = String(value);
+}
+function choose(id: string) {
+  providerId.value = id;
+  const saved = settings.data.value?.organization;
+  model.value =
+    saved?.provider === id ? saved.model : (provider.value?.defaultModel ?? "");
+  if (!serverFits.value) keySource.value = "organization";
+  detected.value = "";
+  mutation.error.value = null; // it was about the provider left behind
+}
+watch(apiKey, (typed) => {
+  const key = typed.trim();
+  const owner = providers.value.find((p) =>
+    p.keyPrefixes.some((prefix) => key.startsWith(prefix)),
+  );
+  detected.value = "";
+  if (owner && owner.id !== providerId.value && providerId.value !== "openai-compatible") {
+    choose(owner.id);
+    keySource.value = "organization";
+    detected.value = owner.label;
+  }
+});
+const consoleHost = computed(() => {
+  try {
+    return new URL(provider.value?.console ?? "").host;
+  } catch {
+    return "";
+  }
+});
+
 const mutation = useMutation();
 const saved = ref(false);
 async function save() {
@@ -55,7 +117,8 @@ async function save() {
     testmgmt.saveAiSettings(
       org.value,
       {
-        model: model.value,
+        provider: providerId.value,
+        model: model.value.trim(),
         keySource: keySource.value,
         apiKey: apiKey.value.trim(),
       },
@@ -65,6 +128,7 @@ async function save() {
   if (out) {
     settings.data.value = out;
     apiKey.value = "";
+    detected.value = "";
     saved.value = true;
   }
 }
@@ -80,8 +144,10 @@ async function reset() {
   );
   if (out) settings.data.value = out;
 }
-const modelLabel = (id: string) =>
-  settings.data.value?.models.find((m) => m.id === id)?.label ?? id;
+const modelLabel = (providerId: string, id: string) =>
+  providers.value
+    .find((p) => p.id === providerId)
+    ?.models.find((m) => m.id === id)?.label ?? id;
 const choice = (on: boolean) =>
   [
     "flex cursor-pointer items-start gap-3 rounded-md border p-3",
@@ -95,7 +161,7 @@ const choice = (on: boolean) =>
   <PageHeader
     eyebrow="Organization"
     title="AI settings"
-    description="Which model drafts test cases, and whose Anthropic API key pays for it."
+    description="Which AI provider and model draft test cases, and whose API key pays for it."
   />
   <AsyncState
     :loading="settings.loading.value"
@@ -108,7 +174,14 @@ const choice = (on: boolean) =>
         <AlertTitle>
           <template v-if="settings.data.value.effective.available"
             >Drafting uses
-            {{ modelLabel(settings.data.value.effective.model) }} with
+            {{
+              modelLabel(
+                settings.data.value.effective.provider,
+                settings.data.value.effective.model,
+              )
+            }}
+            from {{ providerLabel(settings.data.value.effective.provider) }}
+            with
             {{
               settings.data.value.effective.source === "organization"
                 ? "this organization's key"
@@ -120,7 +193,9 @@ const choice = (on: boolean) =>
         <AlertDescription>
           <template v-if="settings.data.value.organization">
             <template v-if="ownKeyStored"
-              >Own key ending in
+              >Own key for
+              {{ providerLabel(settings.data.value.organization.provider) }}
+              ending in
               <code>{{ settings.data.value.organization.keyHint }}</code
               >.
             </template>
@@ -128,22 +203,44 @@ const choice = (on: boolean) =>
             {{ time(settings.data.value.organization.updatedAt) }}.
           </template>
           <template v-else-if="!settings.data.value.server.available">
-            Add an Anthropic API key below to turn it on.
+            Add an API key below to turn it on — from any provider listed.
           </template>
           <template v-else>
-            Nothing chosen yet: the server's key with the default model.
+            Nothing chosen yet: the server's key with its default model.
           </template>
         </AlertDescription>
       </Alert>
 
       <form
+        v-if="provider"
         class="ai-settings bg-card space-y-6 rounded-lg border p-5"
         @submit.prevent="save"
       >
+        <div class="space-y-2">
+          <Label for="ai-provider">Provider</Label>
+          <NativeSelect
+            id="ai-provider"
+            :model-value="providerId"
+            class="w-full sm:w-80"
+            @update:model-value="choose"
+          >
+            <option v-for="p in providers" :key="p.id" :value="p.id">
+              {{ p.label }}
+            </option>
+          </NativeSelect>
+          <p
+            v-if="detected"
+            class="text-muted-foreground text-xs"
+            role="status"
+          >
+            Switched to {{ detected }} to match the key.
+          </p>
+        </div>
+
         <fieldset class="space-y-2">
           <legend class="text-sm font-medium">Model</legend>
           <label
-            v-for="m in settings.data.value.models"
+            v-for="m in provider.models"
             :key="m.id"
             :class="choice(model === m.id)"
           >
@@ -162,6 +259,24 @@ const choice = (on: boolean) =>
               }}</span>
             </span>
           </label>
+          <div v-if="provider.anyModel" class="space-y-1 pt-1">
+            <Label for="ai-model-id" class="text-xs font-normal">{{
+              provider.models.length
+                ? "Or type any model id this key can use"
+                : "Model id"
+            }}</Label>
+            <Input
+              id="ai-model-id"
+              :model-value="suggested ? '' : model"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="200"
+              class="sm:w-80"
+              :placeholder="provider.defaultModel || 'author/model'"
+              :required="!suggested"
+              @update:model-value="typeModel"
+            />
+          </div>
         </fieldset>
 
         <fieldset class="space-y-2">
@@ -169,9 +284,7 @@ const choice = (on: boolean) =>
           <label
             :class="[
               choice(keySource === 'server'),
-              settings.data.value.server.available
-                ? ''
-                : 'cursor-not-allowed opacity-60',
+              serverFits ? '' : 'cursor-not-allowed opacity-60',
             ]"
           >
             <input
@@ -180,17 +293,22 @@ const choice = (on: boolean) =>
               name="ai-key-source"
               value="server"
               class="mt-1 size-4"
-              :disabled="!settings.data.value.server.available"
+              :disabled="!serverFits"
             />
             <span class="text-sm">
               <strong class="inline-flex items-center gap-1.5 font-medium"
                 ><Server class="size-3.5" />The server's key</strong
               >
               <span class="text-muted-foreground block text-xs">
-                <template v-if="settings.data.value.server.available"
+                <template v-if="serverFits"
                   >The key the operator set on this server
                   (<code>LLM_API_KEY</code>); calls are billed to their
                   account.</template
+                >
+                <template v-else-if="settings.data.value.server.available"
+                  >The server's key is for
+                  {{ providerLabel(settings.data.value.server.provider) }}, not
+                  {{ provider.label }}.</template
                 >
                 <template v-else
                   >Not available: the operator has not set
@@ -212,11 +330,23 @@ const choice = (on: boolean) =>
                 ><KeyRound class="size-3.5" />Our own key</strong
               >
               <span class="text-muted-foreground block text-xs"
-                >Billed to your Anthropic account. Create one at
-                console.anthropic.com → API keys.</span
+                >Billed to your {{ provider.label }} account.<template
+                  v-if="consoleHost"
+                >
+                  Create one at
+                  <a
+                    :href="provider.console"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="underline"
+                    >{{ consoleHost }}</a
+                  >.</template
+                ></span
               >
               <template v-if="keySource === 'organization'">
-                <Label for="ai-key" class="sr-only">Anthropic API key</Label>
+                <Label for="ai-key" class="sr-only"
+                  >{{ provider.label }} API key</Label
+                >
                 <Input
                   id="ai-key"
                   v-model="apiKey"
@@ -225,19 +355,20 @@ const choice = (on: boolean) =>
                   spellcheck="false"
                   maxlength="500"
                   :placeholder="
-                    ownKeyStored
+                    keyKept
                       ? `Saved key ends in ${settings.data.value.organization?.keyHint} — leave empty to keep it`
-                      : 'sk-ant-…'
+                      : provider.keyHint || 'API key'
                   "
-                  :required="!ownKeyStored"
+                  :required="!keyKept"
                 />
               </template>
             </span>
           </label>
           <p class="text-muted-foreground text-xs">
-            The key that will pay is checked with Anthropic for the chosen model
-            before anything is saved. An own key is stored encrypted and never
-            shown again; choosing the server's key forgets it.
+            The key that will pay is checked with {{ provider.label }} for the
+            chosen model before anything is saved. An own key is stored
+            encrypted and never shown again; choosing the server's key forgets
+            it.
           </p>
         </fieldset>
 
@@ -268,7 +399,14 @@ const choice = (on: boolean) =>
       </form>
 
       <section class="text-muted-foreground space-y-2 text-sm">
-        <h2 class="text-foreground font-semibold">What is sent to Anthropic</h2>
+        <h2 class="text-foreground font-semibold">
+          What is sent to
+          {{
+            settings.data.value.effective.available
+              ? providerLabel(settings.data.value.effective.provider)
+              : "the AI provider"
+          }}
+        </h2>
         <p>
           When a tester asks for drafts: the kind of testing, what they wrote,
           and — if URL checks are on — the site's page structure (title,

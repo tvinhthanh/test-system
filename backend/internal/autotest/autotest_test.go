@@ -153,11 +153,11 @@ func (f *fakeLLM) JSON(_ context.Context, req llm.Request) (llm.Result, error) {
 
 type fakeKeys struct{ ok bool }
 
-func (k fakeKeys) Credentials(context.Context, string) (string, string, string, bool, error) {
+func (k fakeKeys) Credentials(context.Context, string) (llm.Account, string, bool, error) {
 	if !k.ok {
-		return "", "", "", false, nil
+		return llm.Account{}, "", false, nil
 	}
-	return "sk-test", "claude-haiku-5-5", "server", true, nil
+	return llm.Account{Provider: "anthropic", APIKey: "sk-test", Model: "claude-haiku-5-5"}, "server", true, nil
 }
 
 type fakeRecorder struct {
@@ -299,7 +299,7 @@ func TestDraft(t *testing.T) {
 		t.Fatalf("drain: %d %v", n, err)
 	}
 	d, err = f.svc.Draft(ctx, f.project, d.ID)
-	if err != nil || d.Status != StatusDone || !d.PageRead || d.Model != "claude-opus-4-8" || d.InputTokens == 0 {
+	if err != nil || d.Status != StatusDone || !d.PageRead || d.Provider != "anthropic" || d.Model != "claude-opus-4-8" || d.InputTokens == 0 {
 		t.Fatalf("draft: %+v %v", d, err)
 	}
 	if len(d.Drafts) != 2 || d.Drafts[0].Title != "Gửi tin nhắn" || len(d.Drafts[0].Steps) != 3 || d.Drafts[1].Priority != "p2" {

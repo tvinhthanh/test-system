@@ -85,13 +85,19 @@ type Config struct {
 	// body to that one fixed host.
 	URLCheck    bool
 	URLCheckURL string
-	// AI-drafted test cases (QĐ-15): the server's own Anthropic API key
-	// (LLM_API_KEY, "" = none — organizations may still bring theirs). The
-	// model is not configuration: each organization picks it in the
-	// dashboard. LLM_BASE_URL points the client elsewhere (tests, an egress
-	// proxy); "" is the Anthropic API.
-	LLMAPIKey  string
-	LLMBaseURL string
+	// AI-drafted test cases (QĐ-15, QĐ-18): the server's own API key
+	// (LLM_API_KEY, "" = none — organizations may still bring theirs) for
+	// LLM_PROVIDER (default anthropic; any provider platform/llm lists, or
+	// openai-compatible for the operator's own endpoint). Each organization
+	// picks its provider and model in the dashboard; LLM_MODEL is only what
+	// the server's key uses when it picked none ("" = the provider's
+	// default; required for openai-compatible). LLM_BASE_URL points
+	// LLM_PROVIDER's calls elsewhere (tests, an egress proxy) — for
+	// openai-compatible it is the endpoint. platform/llm checks the names.
+	LLMAPIKey   string
+	LLMBaseURL  string
+	LLMProvider string
+	LLMModel    string
 	// Signup turns on self-serve sign-up with role approval (SIGNUP=on|off,
 	// default off: accounts only by seed, invitation or OAuth into an
 	// existing one). ADR-001 variant A, QĐ-17. Needs MAIL=smtp: the link
@@ -175,7 +181,9 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("URLCHECK=%q: want on|off", v)
 	}
 	c.LLMAPIKey = strings.TrimSpace(os.Getenv("LLM_API_KEY"))
-	c.LLMBaseURL = strings.TrimSuffix(os.Getenv("LLM_BASE_URL"), "/")
+	c.LLMBaseURL = strings.TrimSuffix(strings.TrimSpace(os.Getenv("LLM_BASE_URL")), "/")
+	c.LLMProvider = strings.ToLower(strings.TrimSpace(getenv("LLM_PROVIDER", "anthropic")))
+	c.LLMModel = strings.TrimSpace(os.Getenv("LLM_MODEL"))
 	c.URLCheckURL = strings.TrimSuffix(getenv("URLCHECK_URL", "http://checker:8090"), "/")
 	if u, err := url.Parse(c.URLCheckURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return c, fmt.Errorf("URLCHECK_URL=%q: want http(s)://host[:port]", c.URLCheckURL)

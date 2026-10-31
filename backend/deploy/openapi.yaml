@@ -1293,12 +1293,17 @@ paths:
     get:
       operationId: getAiSettings
       tags: [dashboard]
-      summary: The organization's AI choices — model and whose key — and what projects use now (QĐ-15)
+      summary: The organization's AI choices — provider, model and whose key — and what projects use now (QĐ-15, QĐ-18)
       description: |
         Organization owners and admins (`member.manage` at the organization).
-        `organization` is null until they save once — then the server's key
-        applies if `server.available`, with `defaultModel`. A key is never
-        returned; `keyHint` is an own key's last four characters.
+        `providers` is what this server offers: every provider platform/llm
+        lists, plus the operator's own OpenAI-compatible endpoint when
+        `LLM_PROVIDER=openai-compatible`. `organization` is null until they
+        save once — then the server's key applies if `server.available`,
+        with `server.model` (`defaultModel` says the same). The server's key
+        serves `server.provider` only. A key is never returned; `keyHint` is
+        an own key's last four characters. `models` is Anthropic's list, kept
+        for dashboards from before providers.
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: "#/components/parameters/OrganizationId" }]
       responses:
@@ -1311,16 +1316,24 @@ paths:
     post:
       operationId: saveAiSettings
       tags: [dashboard]
-      summary: Choose the model and whose Anthropic API key pays
+      summary: Choose the provider, the model and whose API key pays
       description: |
-        The model is always chosen here. `keySource: server` uses the
-        server's LLM_API_KEY (only when it has one; any stored own key is
-        forgotten); `organization` uses the organization's own key — give
-        `apiKey` the first time, omit it to keep the stored one. Whichever
-        key will pay is checked with Anthropic for the model (Models API, no
-        tokens spent) before anything is stored; an own key is sealed with a
-        key derived from `TOKEN_PEPPER`. Audited as
-        `organization.ai_settings` with the model, key source and hint.
+        The provider and model are always chosen here. `provider` omitted:
+        the one that offers `model` by name, else Anthropic; `model` omitted:
+        the provider's suggestion. Anthropic takes only its listed models;
+        the others take any model id the key may use. `keySource: server`
+        uses the server's LLM_API_KEY (only when it has one, and only for
+        `LLM_PROVIDER`; any stored own key is forgotten); `organization` uses
+        the organization's own key — give `apiKey` the first time and when
+        the provider changes, omit it to keep the stored one. A key whose
+        beginning is another provider's alone (`sk-ant-`, `sk-proj-`,
+        `AIza`, `xai-`, `gsk_`, `sk-or-`) is refused as `INVALID_PAYLOAD`.
+        Whichever key will pay is checked with the chosen provider for the
+        model — its model list, no tokens spent; where no list can be read,
+        the smallest completion — before anything is stored; an own key is
+        sealed with a key derived from `TOKEN_PEPPER`. Audited as
+        `organization.ai_settings` with the provider, model, key source and
+        hint.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters: [{ $ref: "#/components/parameters/OrganizationId" }]
       requestBody:
@@ -1330,21 +1343,22 @@ paths:
             schema:
               type: object
               properties:
-                model: { type: string, enum: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-fable-5-1], default: claude-opus-5-5 }
+                provider: { type: string, enum: [anthropic, openai, gemini, xai, mistral, deepseek, groq, openrouter, openai-compatible], description: "Omitted: the one that offers `model` by name, else anthropic. openai-compatible only where the server has that endpoint." }
+                model: { type: string, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$", description: "Anthropic: one of its listed models. Others: any model id the key may use. Omitted: the provider's suggestion." }
                 keySource: { type: string, enum: [organization, server], default: organization }
-                apiKey: { type: string, maxLength: 500, description: "keySource organization only; required the first time." }
+                apiKey: { type: string, maxLength: 500, description: "keySource organization only; required the first time and when the provider changes." }
       responses:
         "200":
           description: The settings after saving.
           content: { application/json: { schema: { $ref: "#/components/schemas/AiSettings" } } }
         "400":
-          description: "`INVALID_PAYLOAD` (e.g. keySource server on a server without a key), `AI_KEY_REJECTED` (Anthropic refused the own key), `AI_SERVER_KEY_REJECTED` (it refused the server's) or `AI_MODEL_UNAVAILABLE` (the key cannot use that model) — `details.field` names the input."
+          description: "`INVALID_PAYLOAD` (e.g. keySource server on a server without a key or with another provider's, a key that is another provider's), `AI_KEY_REJECTED` (the provider refused the own key), `AI_SERVER_KEY_REJECTED` (it refused the server's), `AI_KEY_NO_CREDIT` (the key's account is out of credit or over a spending limit) or `AI_MODEL_UNAVAILABLE` (the key cannot use that model; `details.available` lists some it can, when the provider listed them) — `details.field` names the input, `details.provider` the provider."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502":
-          description: "`AI_UNREACHABLE` — Anthropic could not be reached to check the key; nothing was stored."
+          description: "`AI_UNREACHABLE` — the provider could not be reached to check the key; nothing was stored."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     delete:
       operationId: deleteAiSettings
@@ -1363,7 +1377,7 @@ paths:
     get:
       operationId: getAiStatus
       tags: [dashboard]
-      summary: Whether AI drafting is available in this project, with whose key and which model
+      summary: Whether AI drafting is available in this project, with whose key, which provider and which model
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: "#/components/parameters/ProjectId" }]
       responses:
@@ -1373,10 +1387,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [available, source, model, readsPages]
+                required: [available, source, provider, model, readsPages]
                 properties:
                   available: { type: boolean }
                   source: { type: string, enum: ["", organization, server] }
+                  provider: { type: string }
                   model: { type: string }
                   readsPages: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -4904,27 +4919,43 @@ components:
       type: string
       enum: [smoke, regression, e2e, functional, performance, security, usability, accessibility, compatibility, recovery]
       description: "The case taxonomy's usage tags and purposes (QĐ-15)."
+    AiModel:
+      type: object
+      required: [id, label, note]
+      properties: { id: { type: string }, label: { type: string }, note: { type: string } }
+    AiProvider:
+      type: object
+      description: A provider whose keys this server takes (QĐ-18).
+      required: [id, label, console, keyHint, keyPrefixes, models, defaultModel, anyModel]
+      properties:
+        id: { type: string, description: "anthropic, openai, gemini, xai, mistral, deepseek, groq, openrouter, or openai-compatible (the operator's endpoint)." }
+        label: { type: string }
+        console: { type: string, description: "Where its API keys are made; \"\" for the operator's endpoint." }
+        keyHint: { type: string, description: "How its keys begin, for a placeholder; \"\" when they have no telling beginning." }
+        keyPrefixes: { type: array, items: { type: string }, description: "Beginnings only this provider's keys have — a pasted key can name its provider." }
+        models: { type: array, items: { $ref: "#/components/schemas/AiModel" }, description: "Suggested models; for Anthropic the only ones taken." }
+        defaultModel: { type: string, description: "\"\" when none is suggested and the model id is typed (OpenRouter)." }
+        anyModel: { type: boolean, description: "Model ids beyond `models` are taken (all but Anthropic)." }
     AiSettings:
       type: object
-      required: [models, server, defaultModel, organization, effective]
+      required: [providers, models, server, defaultModel, organization, effective]
       properties:
-        models:
-          type: array
-          items:
-            type: object
-            required: [id, label, note]
-            properties: { id: { type: string }, label: { type: string }, note: { type: string } }
+        providers: { type: array, items: { $ref: "#/components/schemas/AiProvider" } }
+        models: { type: array, items: { $ref: "#/components/schemas/AiModel" }, description: "Anthropic's list, as before providers." }
         server:
           type: object
-          required: [available]
+          required: [available, provider, model]
           properties:
             available: { type: boolean, description: "The server has LLM_API_KEY." }
-        defaultModel: { type: string, description: "The model before the organization chooses one." }
+            provider: { type: string, description: "LLM_PROVIDER — the only provider the server's key serves." }
+            model: { type: string, description: "What the server's key uses when nothing is chosen (LLM_MODEL, else the provider's default)." }
+        defaultModel: { type: string, description: "The model before the organization chooses one: `server.model`." }
         organization:
           oneOf:
             - type: object
-              required: [model, keySource, keyHint, updatedBy, updatedAt]
+              required: [provider, model, keySource, keyHint, updatedBy, updatedAt]
               properties:
+                provider: { type: string }
                 model: { type: string }
                 keySource: { type: string, enum: [organization, server] }
                 keyHint: { type: string, description: "An own key's last four characters; \"\" with the server's." }
@@ -4933,14 +4964,15 @@ components:
             - { type: "null" }
         effective:
           type: object
-          required: [available, source, model]
+          required: [available, source, provider, model]
           properties:
-            available: { type: boolean }
+            available: { type: boolean, description: "false also when the server's key was chosen for a provider the server no longer has." }
             source: { type: string, enum: ["", organization, server] }
+            provider: { type: string }
             model: { type: string }
     CaseSuggestion:
       type: object
-      required: [id, environmentId, testType, url, context, count, status, drafts, pageRead, model, keySource, error, requestedBy, createdAt, finishedAt]
+      required: [id, environmentId, testType, url, context, count, status, drafts, pageRead, provider, model, keySource, error, requestedBy, createdAt, finishedAt]
       properties:
         id: { type: string, format: uuid }
         environmentId: { type: string }
@@ -4968,7 +5000,8 @@ components:
                   required: [action, expected]
                   properties: { action: { type: string }, expected: { type: string } }
         pageRead: { type: boolean, description: "The site's outline reached the model." }
-        model: { type: string, description: "The model that wrote the drafts. After a refusal fallback it is the fallback model, which can be outside the offered list." }
+        provider: { type: string, description: "The provider that wrote the drafts (QĐ-18); \"\" while queued." }
+        model: { type: string, description: "The model that wrote the drafts, as its provider names it (a dated snapshot, say). After an Anthropic refusal fallback it is the fallback model, which can be outside the offered list." }
         keySource: { type: string, enum: ["", organization, server] }
         error: { type: string }
         requestedBy: { type: string }
@@ -5077,7 +5110,7 @@ components:
             finishedAt: { type: string, format: date-time }
     AutoDraft:
       type: object
-      required: [id, environmentId, target, account, inputs, context, count, testType, status, drafts, pageRead, model, keySource, error, requestedBy, createdAt, finishedAt]
+      required: [id, environmentId, target, account, inputs, context, count, testType, status, drafts, pageRead, provider, model, keySource, error, requestedBy, createdAt, finishedAt]
       properties:
         id: { type: string, format: uuid }
         environmentId: { type: string, format: uuid }
@@ -5100,7 +5133,8 @@ components:
               why: { type: string }
               steps: { type: array, items: { $ref: "#/components/schemas/AutoStep" } }
         pageRead: { type: boolean, description: "The start page reached the model; false: drafted from the description alone." }
-        model: { type: string, description: "The model that wrote the drafts. After a refusal fallback it is the fallback model, which can be outside the offered list." }
+        provider: { type: string, description: "The provider that wrote the drafts (QĐ-18); \"\" while queued." }
+        model: { type: string, description: "The model that wrote the drafts, as its provider names it (a dated snapshot, say). After an Anthropic refusal fallback it is the fallback model, which can be outside the offered list." }
         keySource: { type: string, enum: ["", organization, server] }
         error: { type: string }
         requestedBy: { type: string }

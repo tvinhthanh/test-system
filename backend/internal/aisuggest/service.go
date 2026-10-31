@@ -44,8 +44,8 @@ func (s *service) Settings(ctx context.Context, orgID string) (Settings, bool, e
 		return Settings{}, false, ErrNotFound
 	}
 	st := Settings{OrgID: orgID}
-	err := s.DB.Q(ctx).QueryRow(ctx, `SELECT model, key_sealed IS NOT NULL, key_hint, updated_by, updated_at FROM ai_settings WHERE org_id = $1`, orgID).
-		Scan(&st.Model, &st.OwnKey, &st.KeyHint, &st.UpdatedBy, &st.UpdatedAt)
+	err := s.DB.Q(ctx).QueryRow(ctx, `SELECT provider, model, key_sealed IS NOT NULL, key_hint, updated_by, updated_at FROM ai_settings WHERE org_id = $1`, orgID).
+		Scan(&st.Provider, &st.Model, &st.OwnKey, &st.KeyHint, &st.UpdatedBy, &st.UpdatedAt)
 	if errors.Is(err, pg.ErrNoRows) {
 		return Settings{}, false, nil
 	}
@@ -57,12 +57,24 @@ func (s *service) SaveSettings(ctx context.Context, orgID string, in SaveInput) 
 	if !uuidRe.MatchString(orgID) {
 		return Settings{}, ErrNotFound
 	}
-	apiKey, actor, model := strings.TrimSpace(in.APIKey), strings.TrimSpace(in.Actor), in.Model
-	if !llm.ValidModel(model) {
+	apiKey, actor, model := strings.TrimSpace(in.APIKey), strings.TrimSpace(in.Actor), strings.TrimSpace(in.Model)
+	provider := in.Provider
+	if provider == "" {
+		provider = llm.ProviderOf(model)
+	}
+	if !s.offers(provider) {
+		return Settings{}, fmt.Errorf("%w: provider", ErrInvalid)
+	}
+	if !llm.ValidModel(provider, model) {
 		return Settings{}, fmt.Errorf("%w: model", ErrInvalid)
 	}
 	if len(apiKey) > 500 || strings.ContainsAny(apiKey, " \t\r\n") {
 		return Settings{}, fmt.Errorf("%w: apiKey", ErrInvalid)
+	}
+	// A key whose beginning is another provider's alone was pasted under the
+	// wrong one: say so, rather than have that provider call it rejected.
+	if guess := llm.GuessProvider(apiKey); guess != "" && guess != provider && provider != llm.Custom {
+		return Settings{}, fmt.Errorf("%w: apiKey: this key looks like one for %s — choose that provider", ErrInvalid, llm.Label(guess))
 	}
 	if actor == "" || len(actor) > 254 {
 		return Settings{}, fmt.Errorf("%w: actor", ErrInvalid)
@@ -71,20 +83,25 @@ func (s *service) SaveSettings(ctx context.Context, orgID string, in SaveInput) 
 	switch {
 	case !in.OwnKey && s.ServerKey == "":
 		return Settings{}, fmt.Errorf("%w: keySource: the server has no API key; use your own", ErrInvalid)
+	case !in.OwnKey && provider != s.ServerProvider():
+		return Settings{}, fmt.Errorf("%w: keySource: the server's key is for %s; use your own key for %s", ErrInvalid, llm.Label(s.ServerProvider()), llm.Label(provider))
 	case !in.OwnKey:
 		key = s.ServerKey
 	case key == "":
-		var err error
-		if key, err = s.orgKey(ctx, orgID); err != nil {
-			if errors.Is(err, pg.ErrNoRows) {
-				return Settings{}, fmt.Errorf("%w: apiKey is required the first time", ErrInvalid)
-			}
+		stored, storedKey, err := s.orgKey(ctx, orgID)
+		switch {
+		case errors.Is(err, pg.ErrNoRows):
+			return Settings{}, fmt.Errorf("%w: apiKey is required the first time", ErrInvalid)
+		case err != nil:
 			return Settings{}, err
+		case stored != provider:
+			return Settings{}, fmt.Errorf("%w: apiKey: the saved key is for %s; paste a key for %s", ErrInvalid, llm.Label(stored), llm.Label(provider))
 		}
+		key = storedKey
 	}
 	// The provider says whether the key that will pay may use this model —
 	// before anything is stored, so a typo fails here and not under a tester.
-	if err := s.LLM.CheckKey(ctx, key, model); err != nil {
+	if err := s.LLM.CheckKey(ctx, llm.Account{Provider: provider, APIKey: key, Model: model}); err != nil {
 		return Settings{}, err
 	}
 	// The server's key is never stored; choosing it forgets any own key.
@@ -98,11 +115,11 @@ func (s *service) SaveSettings(ctx context.Context, orgID string, in SaveInput) 
 		}
 	}
 	_, err := s.DB.Q(ctx).Exec(ctx, `
-		INSERT INTO ai_settings (org_id, model, key_sealed, key_hint, updated_by, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
-		ON CONFLICT (org_id) DO UPDATE SET model = EXCLUDED.model, key_sealed = EXCLUDED.key_sealed,
+		INSERT INTO ai_settings (org_id, provider, model, key_sealed, key_hint, updated_by, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
+		ON CONFLICT (org_id) DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model, key_sealed = EXCLUDED.key_sealed,
 			key_hint = EXCLUDED.key_hint, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-		orgID, model, sealed, hint, actor)
+		orgID, provider, model, sealed, hint, actor)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -110,16 +127,39 @@ func (s *service) SaveSettings(ctx context.Context, orgID string, in SaveInput) 
 	return st, err
 }
 
-func (s *service) orgKey(ctx context.Context, orgID string) (string, error) {
+// offers reports whether an organization may choose the provider here: any
+// platform/llm lists, and the operator's endpoint where this server has one.
+func (s *service) offers(provider string) bool {
+	_, ok := llm.Find(provider)
+	return ok && (provider != llm.Custom || s.ServerProvider() == llm.Custom)
+}
+
+func (s *service) ServerProvider() string {
+	if s.Deps.ServerProvider == "" {
+		return llm.Anthropic
+	}
+	return s.Deps.ServerProvider
+}
+
+func (s *service) ServerModel() string {
+	if s.Deps.ServerModel != "" {
+		return s.Deps.ServerModel
+	}
+	p, _ := llm.Find(s.ServerProvider())
+	return p.DefaultModel
+}
+
+// orgKey is the organization's own key and the provider it was saved for.
+func (s *service) orgKey(ctx context.Context, orgID string) (provider, key string, err error) {
 	var sealed []byte
-	if err := s.DB.Q(ctx).QueryRow(ctx, `SELECT key_sealed FROM ai_settings WHERE org_id = $1 AND key_sealed IS NOT NULL`, orgID).Scan(&sealed); err != nil {
-		return "", err
+	if err := s.DB.Q(ctx).QueryRow(ctx, `SELECT provider, key_sealed FROM ai_settings WHERE org_id = $1 AND key_sealed IS NOT NULL`, orgID).Scan(&provider, &sealed); err != nil {
+		return "", "", err
 	}
-	key, err := s.box.Open(orgID, sealed)
+	plain, err := s.box.Open(orgID, sealed)
 	if err != nil {
-		return "", fmt.Errorf("aisuggest: the stored key no longer opens (TOKEN_PEPPER changed?) — save it again: %w", err)
+		return "", "", fmt.Errorf("aisuggest: the stored key no longer opens (TOKEN_PEPPER changed?) — save it again: %w", err)
 	}
-	return string(key), nil
+	return provider, string(plain), nil
 }
 
 func (s *service) DeleteSettings(ctx context.Context, orgID string) (bool, error) {
@@ -135,44 +175,46 @@ func (s *service) Access(ctx context.Context, orgID string) (Access, error) {
 	if err != nil {
 		return Access{}, err
 	}
-	model := llm.DefaultModel
+	provider, model := s.ServerProvider(), s.ServerModel()
 	if chosen {
-		model = st.Model
+		provider, model = st.Provider, st.Model
 	}
 	switch {
 	case st.OwnKey:
-		return Access{Available: true, Source: SourceOrganization, Model: model}, nil
-	case s.ServerKey != "":
-		return Access{Available: true, Source: SourceServer, Model: model}, nil
+		return Access{Available: true, Source: SourceOrganization, Provider: provider, Model: model}, nil
+	// The server's key serves its own provider only: a choice made for
+	// another (LLM_PROVIDER changed since) waits for a new save.
+	case s.ServerKey != "" && provider == s.ServerProvider():
+		return Access{Available: true, Source: SourceServer, Provider: provider, Model: model}, nil
 	}
-	return Access{Model: model}, nil
+	return Access{Provider: provider, Model: model}, nil
 }
 
-// credentials picks the key and model a job uses now: the organization's,
-// else the server's.
-func (s *service) credentials(ctx context.Context, orgID string) (key, model, source string, err error) {
+// credentials picks the provider, key and model a job uses now: the
+// organization's, else the server's.
+func (s *service) credentials(ctx context.Context, orgID string) (llm.Account, string, error) {
 	access, err := s.Access(ctx, orgID)
 	switch {
 	case err != nil:
-		return "", "", "", err
+		return llm.Account{}, "", err
 	case access.Source == SourceOrganization:
-		key, err = s.orgKey(ctx, orgID)
-		return key, access.Model, SourceOrganization, err
+		_, key, err := s.orgKey(ctx, orgID)
+		return llm.Account{Provider: access.Provider, APIKey: key, Model: access.Model}, SourceOrganization, err
 	case access.Source == SourceServer:
-		return s.ServerKey, access.Model, SourceServer, nil
+		return llm.Account{Provider: access.Provider, APIKey: s.ServerKey, Model: access.Model}, SourceServer, nil
 	}
-	return "", "", "", ErrNotConfigured
+	return llm.Account{}, "", ErrNotConfigured
 }
 
-func (s *service) Credentials(ctx context.Context, orgID string) (key, model, source string, ok bool, err error) {
+func (s *service) Credentials(ctx context.Context, orgID string) (llm.Account, string, bool, error) {
 	if !uuidRe.MatchString(orgID) {
-		return "", "", "", false, ErrNotFound
+		return llm.Account{}, "", false, ErrNotFound
 	}
-	key, model, source, err = s.credentials(ctx, orgID)
+	acct, source, err := s.credentials(ctx, orgID)
 	if errors.Is(err, ErrNotConfigured) {
-		return "", "", "", false, nil
+		return llm.Account{}, "", false, nil
 	}
-	return key, model, source, err == nil, err
+	return acct, source, err == nil, err
 }
 
 // ---------------------------------------------------------- suggestions
@@ -240,7 +282,7 @@ func (s *service) Request(ctx context.Context, in NewSuggestion) (Suggestion, er
 }
 
 const columns = `id, project_id, coalesce(environment_id::text, ''), test_type, coalesce(url, ''), context, count, status,
-	coalesce(drafts, '[]'::jsonb), page_read, model, key_source, input_tokens, output_tokens, coalesce(error, ''),
+	coalesce(drafts, '[]'::jsonb), page_read, provider, model, key_source, input_tokens, output_tokens, coalesce(error, ''),
 	requested_by, created_at, finished_at`
 
 func scan(row interface{ Scan(dest ...any) error }) (Suggestion, error) {
@@ -248,7 +290,7 @@ func scan(row interface{ Scan(dest ...any) error }) (Suggestion, error) {
 	var drafts json.RawMessage
 	var finished *time.Time
 	err := row.Scan(&s.ID, &s.ProjectID, &s.EnvironmentID, &s.TestType, &s.URL, &s.Context, &s.Count, &s.Status,
-		&drafts, &s.PageRead, &s.Model, &s.KeySource, &s.InputTokens, &s.OutputTokens, &s.Error,
+		&drafts, &s.PageRead, &s.Provider, &s.Model, &s.KeySource, &s.InputTokens, &s.OutputTokens, &s.Error,
 		&s.RequestedBy, &s.CreatedAt, &finished)
 	if errors.Is(err, pg.ErrNoRows) {
 		return Suggestion{}, ErrNotFound
@@ -307,7 +349,7 @@ func (s *service) run(ctx context.Context, job queue.Job) error {
 		_, err := q.Exec(ctx, `UPDATE case_suggestions SET status = 'error', error = $2, finished_at = now() WHERE id = $1`, sug.ID, msg)
 		return err
 	}
-	key, model, source, err := s.credentials(ctx, orgID)
+	acct, source, err := s.credentials(ctx, orgID)
 	if err != nil {
 		if errors.Is(err, ErrNotConfigured) {
 			return fail("No API key: an organization admin adds one under Team → AI settings, or the server operator sets LLM_API_KEY.")
@@ -323,13 +365,15 @@ func (s *service) run(ctx context.Context, job queue.Job) error {
 			outline = nil // drafts from the description alone; page_read says so
 		}
 	}
-	res, err := s.LLM.JSON(ctx, llm.Request{APIKey: key, Model: model, System: systemPrompt, User: userPrompt(sug, outline), Schema: draftSchema})
+	res, err := s.LLM.JSON(ctx, llm.Request{Account: acct, System: systemPrompt, User: userPrompt(sug, outline), Schema: draftSchema})
 	if err != nil {
 		switch {
 		case errors.Is(err, llm.ErrKey):
-			return fail("The API key was rejected by Anthropic. Check it under Team → AI settings (or LLM_API_KEY on the server).")
+			return fail("The API key was rejected by " + llm.Label(acct.Provider) + ". Check it under Team → AI settings (or LLM_API_KEY on the server).")
+		case errors.Is(err, llm.ErrQuota):
+			return fail("The " + llm.Label(acct.Provider) + " account behind this key is out of credit or over its spending limit. Add credit there, or use another key under Team → AI settings.")
 		case errors.Is(err, llm.ErrModel):
-			return fail("This key cannot use " + model + ". Pick another model under Team → AI settings.")
+			return fail("This key cannot use " + acct.Model + ". Pick another model under Team → AI settings.")
 		case errors.Is(err, llm.ErrRefused):
 			return fail("The model declined this request. Rephrase the description and try again.")
 		case errors.Is(err, llm.ErrTruncated):
@@ -348,9 +392,9 @@ func (s *service) run(ctx context.Context, job queue.Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = q.Exec(ctx, `UPDATE case_suggestions SET status = 'done', drafts = $2, page_read = $3, model = $4, key_source = $5,
-		input_tokens = $6, output_tokens = $7, finished_at = now() WHERE id = $1`,
-		sug.ID, b, len(outline) > 0, res.ServedBy(model), source, res.InputTokens, res.OutputTokens)
+	_, err = q.Exec(ctx, `UPDATE case_suggestions SET status = 'done', drafts = $2, page_read = $3, provider = $4, model = $5, key_source = $6,
+		input_tokens = $7, output_tokens = $8, finished_at = now() WHERE id = $1`,
+		sug.ID, b, len(outline) > 0, acct.Provider, res.ServedBy(acct.Model), source, res.InputTokens, res.OutputTokens)
 	return err
 }
 

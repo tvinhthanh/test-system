@@ -249,6 +249,7 @@ function urlCheck(value: unknown): UrlCheck {
 export interface AiStatus {
   available: boolean;
   source: "" | "organization" | "server";
+  provider: string;
   model: string;
   readsPages: boolean;
 }
@@ -275,11 +276,31 @@ export interface CaseSuggestion {
   createdAt: string;
   finishedAt: string | null;
 }
+export interface AiModel {
+  id: string;
+  label: string;
+  note: string;
+}
+// A provider whose keys the server takes (QĐ-18): how its keys begin, where
+// they are made, the models it suggests and whether another id may be typed
+// (Anthropic's list is the only one that is also the allowlist).
+export interface AiProvider {
+  id: string;
+  label: string;
+  console: string;
+  keyHint: string;
+  keyPrefixes: string[];
+  models: AiModel[];
+  defaultModel: string;
+  anyModel: boolean;
+}
 export interface AiSettings {
-  models: { id: string; label: string; note: string }[];
-  server: { available: boolean };
+  providers: AiProvider[];
+  models: AiModel[];
+  server: { available: boolean; provider: string; model: string };
   defaultModel: string;
   organization: {
+    provider: string;
     model: string;
     keySource: "organization" | "server";
     keyHint: string;
@@ -330,30 +351,74 @@ function aiStatus(value: unknown): AiStatus {
   return {
     available: bool(x.available),
     source: oneOf(x.source ?? "", keySources),
+    provider: d.string(x.provider ?? "anthropic"),
     model: d.string(x.model ?? ""),
     readsPages: bool(x.readsPages ?? false),
   };
+}
+function aiModels(value: unknown): AiModel[] {
+  return d.array(
+    value,
+    (v) => {
+      const m = d.record(v);
+      return {
+        id: d.string(m.id),
+        label: d.string(m.label),
+        note: d.string(m.note),
+      };
+    },
+    20,
+  );
 }
 function aiSettings(value: unknown): AiSettings {
   const x = d.record(value);
   const server = d.record(x.server);
   const org = x.organization == null ? null : d.record(x.organization);
+  const models = aiModels(x.models);
+  const defaultModel = d.string(x.defaultModel);
+  // A server from before providers offers Anthropic alone, as models.
+  const providers =
+    x.providers == null
+      ? [
+          {
+            id: "anthropic",
+            label: "Anthropic (Claude)",
+            console: "https://console.anthropic.com/settings/keys",
+            keyHint: "sk-ant-…",
+            keyPrefixes: ["sk-ant-"],
+            models,
+            defaultModel,
+            anyModel: false,
+          },
+        ]
+      : d.array(
+          x.providers,
+          (v) => {
+            const p = d.record(v);
+            return {
+              id: d.string(p.id),
+              label: d.string(p.label),
+              console: d.string(p.console),
+              keyHint: d.string(p.keyHint),
+              keyPrefixes: d.array(p.keyPrefixes, d.string, 10),
+              models: aiModels(p.models),
+              defaultModel: d.string(p.defaultModel),
+              anyModel: bool(p.anyModel),
+            };
+          },
+          20,
+        );
   return {
-    models: d.array(
-      x.models,
-      (v) => {
-        const m = d.record(v);
-        return {
-          id: d.string(m.id),
-          label: d.string(m.label),
-          note: d.string(m.note),
-        };
-      },
-      20,
-    ),
-    server: { available: bool(server.available) },
-    defaultModel: d.string(x.defaultModel),
+    providers,
+    models,
+    server: {
+      available: bool(server.available),
+      provider: d.string(server.provider ?? "anthropic"),
+      model: d.string(server.model ?? defaultModel),
+    },
+    defaultModel,
     organization: org && {
+      provider: d.string(org.provider ?? "anthropic"),
       model: d.string(org.model),
       keySource: oneOf(org.keySource, ["organization", "server"]),
       keyHint: d.string(org.keyHint),
@@ -1249,6 +1314,7 @@ export class TestmgmtRepository {
   async saveAiSettings(
     orgId: string,
     input: {
+      provider: string;
       model: string;
       keySource: "organization" | "server";
       apiKey: string;
@@ -1259,6 +1325,7 @@ export class TestmgmtRepository {
       await this.api.request(`/v1/organizations/${enc(orgId)}/ai-settings`, {
         method: "POST",
         body: {
+          provider: input.provider,
           model: input.model,
           keySource: input.keySource,
           ...(input.keySource === "organization" && input.apiKey

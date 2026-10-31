@@ -95,6 +95,16 @@ func writeSSE(w http.ResponseWriter, raw []byte) {
 	event("message_stop", map[string]any{"type": "message_stop"})
 }
 
+func mustNew(t *testing.T, provider, baseURL string) *Client {
+	t.Helper()
+	c, err := New(provider, baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.backoff = time.Millisecond
+	return c
+}
+
 func message(text, stop string) string {
 	b, _ := json.Marshal(map[string]any{
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
@@ -112,7 +122,7 @@ func TestJSONRequestShape(t *testing.T) {
 		_, _ = w.Write([]byte(message(`{"cases":[{"title":"Log in"}]}`, "end_turn")))
 	})
 	schema := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"cases": map[string]any{"type": "array"}}}
-	res, err := New(srv.URL).JSON(context.Background(), Request{APIKey: "good-key", Model: "claude-opus-5-5", System: "sys", User: "usr", Schema: schema})
+	res, err := mustNew(t, Anthropic, srv.URL).JSON(context.Background(), Request{Account: Account{APIKey: "good-key", Model: "claude-opus-5-5"}, System: "sys", User: "usr", Schema: schema})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +142,7 @@ func TestJSONRequestShape(t *testing.T) {
 	}
 
 	// Haiku has no server-side fallback: none is asked for.
-	if _, err := New(srv.URL).JSON(context.Background(), Request{APIKey: "good-key", Model: "claude-haiku-5-5", Schema: schema}); err != nil {
+	if _, err := mustNew(t, Anthropic, srv.URL).JSON(context.Background(), Request{Account: Account{APIKey: "good-key", Model: "claude-haiku-5-5"}, Schema: schema}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := seen["fallbacks"]; ok {
@@ -144,8 +154,8 @@ func TestErrors(t *testing.T) {
 	stop := "refusal"
 	text := `{}`
 	srv := fakeAPI(t, func(w http.ResponseWriter, _ map[string]any) { _, _ = w.Write([]byte(message(text, stop))) })
-	c := New(srv.URL)
-	req := Request{APIKey: "good-key", Model: "claude-sonnet-5-5", Schema: map[string]any{"type": "object"}}
+	c := mustNew(t, Anthropic, srv.URL)
+	req := Request{Account: Account{APIKey: "good-key", Model: "claude-sonnet-5-5"}, Schema: map[string]any{"type": "object"}}
 	if _, err := c.JSON(context.Background(), req); !errors.Is(err, ErrRefused) {
 		t.Errorf("refusal: %v", err)
 	}
@@ -167,14 +177,28 @@ func TestErrors(t *testing.T) {
 	if _, err := c.JSON(context.Background(), other); !errors.Is(err, ErrModel) {
 		t.Errorf("model off the list: %v", err)
 	}
-	if err := c.CheckKey(context.Background(), "good-key", "claude-opus-5-5"); err != nil {
+	if err := c.CheckKey(context.Background(), Account{APIKey: "good-key", Model: "claude-opus-5-5"}); err != nil {
 		t.Errorf("good key: %v", err)
 	}
-	if err := c.CheckKey(context.Background(), "bad-key", "claude-opus-5-5"); !errors.Is(err, ErrKey) {
+	if err := c.CheckKey(context.Background(), Account{APIKey: "bad-key", Model: "claude-opus-5-5"}); !errors.Is(err, ErrKey) {
 		t.Errorf("bad key check: %v", err)
 	}
-	if err := c.CheckKey(context.Background(), "good-key", "claude-fable-5-1"); !errors.Is(err, ErrModel) {
+	if err := c.CheckKey(context.Background(), Account{APIKey: "good-key", Model: "claude-fable-5-1"}); !errors.Is(err, ErrModel) {
 		t.Errorf("model the key cannot use: %v", err)
+	}
+}
+
+// Anthropic says an empty account with a 400, not a status of its own.
+func TestCreditBalanceIsAQuota(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, err := mustNew(t, Anthropic, srv.URL).JSON(context.Background(), Request{Account: Account{APIKey: "good-key", Model: "claude-haiku-5-5"}, Schema: map[string]any{"type": "object"}})
+	if !errors.Is(err, ErrQuota) {
+		t.Errorf("credit balance: %v", err)
 	}
 }
 
@@ -204,7 +228,7 @@ func TestMidStreamFallbackKeepsTheWholeAnswer(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	res, err := New(srv.URL).JSON(context.Background(), Request{APIKey: "good-key", Model: "claude-opus-5-5", Schema: map[string]any{"type": "object"}})
+	res, err := mustNew(t, Anthropic, srv.URL).JSON(context.Background(), Request{Account: Account{APIKey: "good-key", Model: "claude-opus-5-5"}, Schema: map[string]any{"type": "object"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,28 +237,71 @@ func TestMidStreamFallbackKeepsTheWholeAnswer(t *testing.T) {
 	}
 }
 
-// TestLive is the one call to the real Messages API: each offered model
-// (or LLM_LIVE_MODELS, comma-separated) gets the key check and one small
-// structured answer, through LLM_BASE_URL when that is set. It spends real
-// tokens — cents, not dollars — so it runs only with LLM_LIVE_KEY set:
+// TestLiveHostsRejectAFakeKey asks every provider's real host to check a key
+// that cannot be anyone's: each must answer with a refusal this package
+// reads as ErrKey — the host, the path and the error shape are right, with
+// nothing spent. Opt-in (LLM_LIVE_HOSTS=1): it goes to the network.
+func TestLiveHostsRejectAFakeKey(t *testing.T) {
+	if os.Getenv("LLM_LIVE_HOSTS") != "1" {
+		t.Skip("LLM_LIVE_HOSTS not set: no call to the real hosts")
+	}
+	c := mustNew(t, Anthropic, "")
+	for _, p := range Providers() {
+		t.Run(p.ID, func(t *testing.T) {
+			model := p.DefaultModel
+			if model == "" {
+				model = "openai/gpt-6-astra"
+			}
+			fake := "atp-live-check-not-a-key"
+			if len(p.KeyPrefixes) > 0 {
+				fake = p.KeyPrefixes[0] + fake
+			}
+			err := c.CheckKey(context.Background(), Account{Provider: p.ID, APIKey: fake, Model: model})
+			t.Logf("%s: %v", p.Label, err)
+			if !errors.Is(err, ErrKey) {
+				t.Errorf("a fake key was not read as rejected: %v", err)
+			}
+		})
+	}
+}
+
+// TestLive is the one call to a real provider: each model it offers (or
+// LLM_LIVE_MODELS, comma-separated) gets the key check and one small
+// structured answer, through LLM_BASE_URL when that is set. The provider is
+// LLM_LIVE_PROVIDER, else the one the key's beginning names, else
+// Anthropic. It spends real tokens — cents, not dollars — so it runs only
+// with LLM_LIVE_KEY set:
 //
-//	LLM_LIVE_KEY=sk-ant-... go test ./internal/platform/llm -run TestLive -v -count=1
+//	LLM_LIVE_KEY=sk-proj-... go test ./internal/platform/llm -run TestLive -v -count=1
 //
-// That is bash; in cmd.exe run `set LLM_LIVE_KEY=sk-ant-...` first, in
-// PowerShell `$env:LLM_LIVE_KEY = "sk-ant-..."`. -count=1: a cached pass
-// makes no call.
+// That is bash; in cmd.exe run `set "LLM_LIVE_KEY=sk-proj-..."` first, in
+// PowerShell `$env:LLM_LIVE_KEY = "sk-proj-..."`. A key whose beginning is
+// not its provider's alone (DeepSeek's, Mistral's, an older OpenAI "sk-…")
+// needs LLM_LIVE_PROVIDER too. -count=1: a cached pass makes no call.
 func TestLive(t *testing.T) {
-	key := os.Getenv("LLM_LIVE_KEY")
+	key := strings.TrimSpace(os.Getenv("LLM_LIVE_KEY")) // as config reads LLM_API_KEY; cmd's `set` keeps a trailing space
 	if key == "" {
 		t.Skip("LLM_LIVE_KEY not set: no call to the real API")
 	}
+	provider := strings.TrimSpace(os.Getenv("LLM_LIVE_PROVIDER"))
+	if provider == "" {
+		provider = GuessProvider(key)
+	}
+	p, ok := Find(provider)
+	if !ok {
+		t.Fatalf("LLM_LIVE_PROVIDER=%q is not one of %s", provider, strings.Join(ids(), ", "))
+	}
 	var models []string
-	for _, m := range Models {
+	for _, m := range p.Models {
 		models = append(models, m.ID)
 	}
 	if only := os.Getenv("LLM_LIVE_MODELS"); only != "" {
 		models = strings.Split(only, ",")
 	}
+	if len(models) == 0 {
+		t.Fatalf("%s suggests no model: name one in LLM_LIVE_MODELS", p.Label)
+	}
+	t.Logf("provider %s, %d model(s)", p.Label, len(models))
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"cases"},
 		"properties": map[string]any{"cases": map[string]any{"type": "array", "items": map[string]any{
@@ -242,16 +309,25 @@ func TestLive(t *testing.T) {
 			"properties": map[string]any{"title": map[string]any{"type": "string"}},
 		}}},
 	}
-	c := New(os.Getenv("LLM_BASE_URL"))
+	c, err := New(p.ID, os.Getenv("LLM_BASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, model := range models {
+		model = strings.TrimSpace(model)
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			defer cancel()
-			if err := c.CheckKey(ctx, key, model); err != nil {
+			acct := Account{Provider: p.ID, APIKey: key, Model: model}
+			if err := c.CheckKey(ctx, acct); err != nil {
+				var me *ModelError
+				if errors.As(err, &me) && len(me.Available) > 0 {
+					t.Fatalf("key check: %v — this key has %s", err, strings.Join(me.Available, ", "))
+				}
 				t.Fatalf("key check: %v", err)
 			}
 			res, err := c.JSON(ctx, Request{
-				APIKey: key, Model: model, Schema: schema,
+				Account: acct, Schema: schema,
 				System: "You write manual test cases for web pages.",
 				User:   "Two test cases for a sign-in form with an email and a password field. Titles only.",
 			})

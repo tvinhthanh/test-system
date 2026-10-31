@@ -244,7 +244,7 @@ func TestSignupVerificationMigrationUnverifiesUnprovenAccounts(t *testing.T) {
 	}
 
 	ran, err := pg.Migrate(ctx, db, migrations.FS)
-	if err != nil || len(ran) != 1 || ran[0] != "0044_signup_verification" {
+	if err != nil || len(ran) == 0 || ran[0] != "0044_signup_verification" {
 		t.Fatalf("0044: %v %v", ran, err)
 	}
 	for _, c := range []struct {

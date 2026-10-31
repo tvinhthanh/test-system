@@ -23,6 +23,24 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Any provider's AI key (QĐ-18, 2026-10-31)
+
+- AI settings has a provider select. The choices are Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Groq and OpenRouter, plus the operator's OpenAI-compatible endpoint when the server has one.
+- The model list follows the provider. Providers other than Anthropic also take a typed model id; OpenRouter takes only that.
+- A pasted key whose beginning belongs to one provider alone switches to that provider. The prefixes come from the api as `keyPrefixes`.
+- "The server's key" is enabled only for the server's own provider (`server.provider`).
+- The copy no longer says Anthropic:
+  - the `explain.ts` texts are provider-neutral;
+  - `AI_KEY_NO_CREDIT` is new;
+  - `AI_MODEL_UNAVAILABLE` shows the server's sentence, which names models the key can use.
+- `AiSettings` decodes `providers`, `server.provider`/`server.model`, `organization.provider` and `effective.provider`. A response without `providers` is read as Anthropic alone, so the dev fixtures work unchanged.
+- Files changed, at the user's direct request: `AiSettingsPage.vue`, `testmgmtRepository.ts`, `explain.ts`, one sentence in `StartTestingPage.vue`, and `tests/start-testing.test.ts`.
+- Checked:
+  - vue-tsc;
+  - vitest 124/124;
+  - build and the bundle gate;
+  - a Playwright walk-through on the real api (`backend/GATES.md`, 31-10-2026).
+
 ### Reporter and AI draft fixes after the e2e run (2026-10-30)
 
 - The reporter now sends `finish` even when the object store refuses or

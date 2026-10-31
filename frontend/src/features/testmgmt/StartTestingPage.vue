@@ -407,7 +407,7 @@ const tabClass = (on: boolean) =>
           <template v-else-if="!ai.data.value?.available">
             <p class="text-sm">
               AI drafting is not set up for this organization. An organization
-              admin adds an Anthropic API key and picks the model under
+              admin adds an API key and picks the provider and model under
               <strong>Team → organization → AI settings</strong>, or the server
               operator sets <code>LLM_API_KEY</code>.
             </p>

@@ -147,38 +147,123 @@ it("saves AI settings with POST: model always, a key only for the own-key choice
   });
   const out = await r.saveAiSettings(
     "o1",
-    { model: "claude-opus-5-5", keySource: "organization", apiKey: "" },
+    {
+      provider: "anthropic",
+      model: "claude-opus-5-5",
+      keySource: "organization",
+      apiKey: "",
+    },
     signal(),
   );
   expect(out.organization?.keyHint).toBe("1234");
   expect(out.server.available).toBe(true);
+  // A server from before providers: Anthropic alone, from its models.
+  expect(out.providers.map((p) => p.id)).toEqual(["anthropic"]);
+  expect(out.providers[0]?.models[0]?.id).toBe("claude-opus-5-5");
+  expect(out.organization?.provider).toBe("anthropic");
+  expect(out.server.provider).toBe("anthropic");
   await r.saveAiSettings(
     "o1",
-    { model: "claude-opus-5-5", keySource: "organization", apiKey: "sk-ant-x" },
+    {
+      provider: "openai",
+      model: "gpt-6.1-sol",
+      keySource: "organization",
+      apiKey: "sk-proj-x",
+    },
     signal(),
   );
   // The server's key: a typed key is never sent along.
   await r.saveAiSettings(
     "o1",
-    { model: "claude-sonnet-5-5", keySource: "server", apiKey: "sk-ant-x" },
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      keySource: "server",
+      apiKey: "sk-ant-x",
+    },
     signal(),
   );
   expect(sent).toEqual([
     {
       method: "POST",
-      body: { model: "claude-opus-5-5", keySource: "organization" },
-    },
-    {
-      method: "POST",
       body: {
+        provider: "anthropic",
         model: "claude-opus-5-5",
         keySource: "organization",
-        apiKey: "sk-ant-x",
       },
     },
     {
       method: "POST",
-      body: { model: "claude-sonnet-5-5", keySource: "server" },
+      body: {
+        provider: "openai",
+        model: "gpt-6.1-sol",
+        keySource: "organization",
+        apiKey: "sk-proj-x",
+      },
+    },
+    {
+      method: "POST",
+      body: {
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        keySource: "server",
+      },
     },
   ]);
+});
+
+it("reads every provider the server offers (QĐ-18)", async () => {
+  const r = repo(async () =>
+    json({
+      providers: [
+        {
+          id: "anthropic",
+          label: "Anthropic (Claude)",
+          console: "https://console.anthropic.com/settings/keys",
+          keyHint: "sk-ant-…",
+          keyPrefixes: ["sk-ant-"],
+          models: [
+            { id: "claude-opus-5-5", label: "Claude Opus 5.5", note: "Default." },
+          ],
+          defaultModel: "claude-opus-5-5",
+          anyModel: false,
+        },
+        {
+          id: "openrouter",
+          label: "OpenRouter (many models, one key)",
+          console: "https://openrouter.ai/settings/keys",
+          keyHint: "sk-or-v1-…",
+          keyPrefixes: ["sk-or-"],
+          models: [],
+          defaultModel: "",
+          anyModel: true,
+        },
+      ],
+      models: [
+        { id: "claude-opus-5-5", label: "Claude Opus 5.5", note: "Default." },
+      ],
+      server: { available: true, provider: "openai", model: "gpt-6-astra" },
+      defaultModel: "gpt-6-astra",
+      organization: {
+        provider: "openrouter",
+        model: "openai/gpt-6-astra",
+        keySource: "organization",
+        keyHint: "abcd",
+        updatedBy: "ana",
+        updatedAt: at,
+      },
+      effective: {
+        available: true,
+        source: "organization",
+        provider: "openrouter",
+        model: "openai/gpt-6-astra",
+      },
+    }),
+  );
+  const s = await r.aiSettings("o1", signal());
+  expect(s.providers.map((p) => p.id)).toEqual(["anthropic", "openrouter"]);
+  expect(s.providers[1]).toMatchObject({ anyModel: true, models: [], keyPrefixes: ["sk-or-"] });
+  expect(s.server).toEqual({ available: true, provider: "openai", model: "gpt-6-astra" });
+  expect(s.organization?.provider).toBe("openrouter");
+  expect(s.effective.provider).toBe("openrouter");
 });

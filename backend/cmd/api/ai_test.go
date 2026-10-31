@@ -47,7 +47,100 @@ func (d *draftingLLM) JSON(_ context.Context, req llm.Request) (llm.Result, erro
 	d.user = req.User
 	return llm.Result{JSON: json.RawMessage(`{"cases":[{"title":"Đăng nhập đúng","priority":"p0","preconditions":"","why":"Chặn release.","steps":[{"action":"Mở trang đăng nhập","expected":"Thấy form"}]}]}`)}, nil
 }
-func (d *draftingLLM) CheckKey(context.Context, string, string) error { return nil }
+func (d *draftingLLM) CheckKey(context.Context, llm.Account) error { return nil }
+
+// A stand-in for OpenAI's model list: "sk-proj-good" may use three models,
+// "sk-proj-broke" has no credit, anything else is rejected.
+func fakeOpenAI(t *testing.T) string {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Header.Get("Authorization") {
+		case "Bearer sk-proj-good":
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-6-astra"},{"id":"gpt-6.1-sol"},{"id":"gpt-6-luna"}]}`))
+		case "Bearer sk-proj-broke":
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}`))
+		default:
+			w.WriteHeader(401)
+			_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided.","type":"invalid_request_error","code":"invalid_api_key"}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// QĐ-18 through the api, on a server whose LLM_PROVIDER is OpenAI: every
+// provider is offered, the key is checked with the one chosen, and what
+// goes wrong names that provider.
+func TestAISettingsAnyProvider(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(store.Close)
+	cfg := config.Config{Env: "dev", TokenPepper: "test-pepper-test-pepper-test-pepper!", DashboardOrigins: []string{origin},
+		LLMProvider: "openai", LLMBaseURL: fakeOpenAI(t)}
+	handler, _ := buildHandler(cfg, db, store, metric.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	ten, az := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper))
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	u, _ := az.CreateUser(ctx, "ana@acme.example")
+	_ = az.SetPassword(ctx, u.ID, "ana passphrase long", "")
+	_ = az.VerifyEmail(ctx, u.ID)
+	if _, err := az.GrantRole(ctx, u.ID, authz.ScopeRef{Level: authz.LevelOrganization, ID: string(org.ID)}, authz.RoleOrgAdmin); err != nil {
+		t.Fatal(err)
+	}
+	admin := newClient(t, srv)
+	admin.bootstrap()
+	if r := admin.post("/v1/session", map[string]string{"email": "ana@acme.example", "password": "ana passphrase long"}); r.code != 200 {
+		t.Fatalf("login: %d %s", r.code, r.raw)
+	}
+	admin.csrf, _ = admin.get("/v1/session").body["csrfToken"].(string)
+	settings := "/v1/organizations/" + string(org.ID) + "/ai-settings"
+
+	got := admin.get(settings)
+	providers, _ := got.body["providers"].([]any)
+	server, _ := got.body["server"].(map[string]any)
+	if got.code != 200 || len(providers) < 8 || server["provider"] != "openai" || server["model"] != "gpt-6-astra" || got.body["defaultModel"] != "gpt-6-astra" {
+		t.Fatalf("settings: %d %s", got.code, got.raw)
+	}
+	var openai map[string]any
+	for _, p := range providers {
+		if m := p.(map[string]any); m["id"] == "openai" {
+			openai = m
+		}
+	}
+	if openai["label"] != "OpenAI (GPT)" || openai["anyModel"] != true || len(openai["models"].([]any)) != 4 || openai["keyPrefixes"].([]any)[0] != "sk-proj-" {
+		t.Errorf("OpenAI as offered: %v", openai)
+	}
+	for _, tc := range []struct {
+		name, code, field, says string
+		body                    map[string]any
+	}{
+		{"rejected", "AI_KEY_REJECTED", "apiKey", "OpenAI (GPT) rejected", map[string]any{"provider": "openai", "model": "gpt-6.1-sol", "apiKey": "sk-proj-wrong"}},
+		{"no credit", "AI_KEY_NO_CREDIT", "apiKey", "out of credit", map[string]any{"provider": "openai", "model": "gpt-6.1-sol", "apiKey": "sk-proj-broke"}},
+		{"mistyped model", "AI_MODEL_UNAVAILABLE", "model", "include gpt-6-astra", map[string]any{"provider": "openai", "model": "gpt-6-astr", "apiKey": "sk-proj-good"}},
+		{"key under the wrong provider", "INVALID_PAYLOAD", "apiKey", "OpenAI (GPT)", map[string]any{"provider": "anthropic", "model": "claude-opus-5-5", "apiKey": "sk-proj-good"}},
+		{"unknown provider", "INVALID_PAYLOAD", "provider", "provider", map[string]any{"provider": "nope", "model": "x", "apiKey": "k"}},
+	} {
+		r := admin.do("POST", settings, tc.body, nil)
+		details, _ := r.body["error"].(map[string]any)["details"].(map[string]any)
+		if r.code != 400 || r.errCode() != tc.code || details["field"] != tc.field || !strings.Contains(r.raw, tc.says) {
+			t.Errorf("%s: %d %s", tc.name, r.code, r.raw)
+		}
+	}
+	saved := admin.do("POST", settings, map[string]any{"provider": "openai", "model": "gpt-6.1-sol", "keySource": "organization", "apiKey": "sk-proj-good"}, nil)
+	own, _ := saved.body["organization"].(map[string]any)
+	effective, _ := saved.body["effective"].(map[string]any)
+	if saved.code != 200 || own["provider"] != "openai" || own["model"] != "gpt-6.1-sol" || effective["provider"] != "openai" || strings.Contains(saved.raw, "sk-proj-good") {
+		t.Fatalf("save: %d %s", saved.code, saved.raw)
+	}
+	var details string
+	if err := db.Q(ctx).QueryRow(ctx, `SELECT details::text FROM authz_audit WHERE action = 'organization.ai_settings'`).Scan(&details); err != nil ||
+		!strings.Contains(details, `"provider": "openai"`) || strings.Contains(details, "sk-proj") {
+		t.Errorf("audit: %q %v", details, err)
+	}
+}
 
 // QĐ-15 through the api: organization admins keep the key (checked with the
 // provider, never shown back, audited), testers ask for drafts with the
