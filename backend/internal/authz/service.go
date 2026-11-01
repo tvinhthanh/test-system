@@ -677,7 +677,7 @@ func (s *service) AuditRun(ctx context.Context, action, runID, projectID, actor 
 
 func (s *service) AuditOrganization(ctx context.Context, action, orgID, actor string, details map[string]any) error {
 	switch action {
-	case "organization.delete", "organization.restore", "organization.purge":
+	case "organization.delete", "organization.restore", "organization.purge", "organization.ai_settings":
 	default:
 		return fmt.Errorf("%w: audit action %q", ErrInvalid, action)
 	}

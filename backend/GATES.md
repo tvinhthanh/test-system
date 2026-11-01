@@ -361,6 +361,18 @@ govulncheck pin v1.1.4 → v1.9.0. Local với go1.26.9: `govulncheck ./...` →
 được gọi** (18 advisory nằm trong module require nhưng code không gọi), build/vet/
 gofmt/unit sạch.
 
+**Dependency review 21-10:** lần rà soát cuối trước bàn giao, `govulncheck ./...`
+trên go1.26.9 báo **1 lỗ hổng được gọi**: GO-2026-6809 (`crypto/x509` tin nhầm
+chứng chỉ trung gian đã bị thu hồi), đường gọi `mail.SMTP.Send` →
+`tls.DialWithDialer` → `x509.Certificate.Verify`. Vá ở go1.26.10: `toolchain
+go1.26.10` (dòng `go 1.25.5` giữ nguyên), CI `setup-go` + `golang:1.26.10-alpine`
+theo cùng; govulncheck vẫn v1.9.0. Local với go1.26.10: `govulncheck ./...` →
+**0 được gọi** (18 advisory còn lại nằm trong module require nhưng code không
+gọi); gofmt/vet/`go test ./...` trên Postgres thật sạch. `npm audit` reporter: 0. Frontend (phần của agent frontend):
+`vite` 6.4.3 dính GHSA-698v-4r3x-3vcv / GHSA-r825-w8mm-5pxw / GHSA-587h-7wmj-h5pm
+(launch-editor, high) — job frontend của CI sẽ đỏ ở `npm audit` cho tới khi nâng
+lên vite 6.4.5.
+
 **Đối chiếu CI ngày 15-10:** [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
 trên `76f6df0` đã completed/success. Backend pass govulncheck, test Postgres/S3,
 Docker build, Compose config, promtool và OpenAPI; frontend/reporter/E2E đều
@@ -583,3 +595,244 @@ của `METRICS_ADDR` trước khi kết luận.
 | 6 | Chấp nhận (thiết kế §11.2) | Ai biết email cũng khóa được tài khoản đó 15 phút+ (giới hạn "theo account") | giữ; quên mật khẩu mở khóa | `TestPasswordReset` |
 
 Đã kiểm và **không** có lỗ: CSRF trên mọi route ghi (kể cả ẩn danh: double-submit + Origin), login CSRF qua OAuth (state gắn cookie), phát lại mã TOTP, recovery code dùng một lần, token (mời/reset/challenge) chỉ lưu HMAC và không đi qua URL server thấy, access log chỉ ghi path, liên kết OAuth chỉ khi email verify **cả hai phía**, email đã có tài khoản không bị link chiếm, owner không tắt được MFA, owner mới bị giữ ở bước bật MFA, owner cuối không bị hạ (khóa hàng), gọi ra ngoài chỉ tới host lấy từ cấu hình, header mail không nhận CR/LF.
+
+## Rà soát cuối API + frontend — 21-10-2026
+
+Chạy lại mọi gate chạy được trên laptop (Postgres 17.5 thật, cụm initdb trong scratchpad): gofmt/vet sạch, `go test ./...` 29 package pass, 5 skip đều là test S3 cần SeaweedFS (CI chạy); reporter 20 pass + 1 opt-in (outage, CI chạy); `server/tests/doctor.sh` 11/11; frontend typecheck, 103/103 vitest, build + bundle gate 54,9 KiB gzip (build ra scratchpad, không đụng `frontend/dist`). Sau đó đọc phần backend viết 13–15-10 (testmgmt: lịch sử thực thi, phạm vi plan, audit case, taxonomy, CSV/export, specialized results, migration 0030–0034) và đối chiếu từng decoder của frontend với giới hạn thật của API.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 1 | Cao | Tạo/sửa plan và ghi execution đọc body bằng `decodeSmall` (16 KiB), trong khi hợp đồng cho `caseIds` tới 5000 (~200 KB) và 200 `stepResults` × 4000 byte: plan từ ~420 case, hoặc vài bước ghi "actual" dài (UI cho 4000 ký tự mỗi bước), nhận `400 malformed JSON` | `decodeBounded` theo route: 256 KiB cho plan, 2 MiB cho execution; vượt → `413 PAYLOAD_TOO_LARGE`, ghi trong openapi | `TestPlanAndExecutionBodiesUpToTheContract` (đỏ trước khi sửa: plan 500 case → 400) |
+| 2 | Cao (gate CI) | govulncheck: GO-2026-6809 được gọi qua `mail.SMTP.Send` | toolchain go1.26.10 (dependency review 21-10 ở trên) | govulncheck: 0 được gọi |
+| 3 | Trung bình | `executedAt` của execution do client gửi, không chặn tương lai; verdict của case là execution có `executed_at` mới nhất, nên một bản ghi đề năm 2099 (nhầm đồng hồ hay cố ý qua API) ghim verdict mãi mãi | quá hiện tại > 5 phút → `400` (lệch đồng hồ 5 phút như specialized report); ghi lùi ngày vẫn nhận | `TestExecutionSnapshotRetestAndHistory`: +1 h → `ErrInvalid` (đỏ trước khi sửa), −48 h nhận và không thành verdict |
+| 4 | Trung bình — **sửa 29-10** (server trả `ci.pass`, xem mục 29-10 bên dưới) | `GET /v1/releases/{id}/gate`: openapi bảo CI "dừng khi `gate.verdict == blocked` trừ khi có override", nên CI vẫn qua khi người quyết `blocked` mà gate `approved`, khi chưa evaluate (`gate: null`) và khi `no_evidence`. Đoạn `jq` trên trang release làm đúng như doc | Đề xuất: `status` approved/shipped → qua; `blocked` → dừng; `open` → chỉ qua khi verdict `approved`/`warn` | — |
+| 5 | Thấp | Body case POST/PATCH giữ 512 KiB, dưới mức lý thuyết 200 bước × 4000 byte; openapi ghi `maxLength` (ký tự) nhưng server đếm byte UTF-8, nên chữ tiếng Việt gần ngưỡng bị từ chối dù UI cho nhập | giữ, ghi lại | — |
+
+Giao cho agent frontend (không sửa ở đây): vite 6.4.3 → 6.4.5 (npm audit high, job frontend sẽ đỏ); ô chọn identity để link automation (và merge) chỉ có trang đầu 20 identity, lọc phía client; decoder đặt trần mà API không có (evidence mỗi execution 50, suites 500, link mỗi case 100, requirement mỗi case 500, tokens 500, lỗi import 5000), vượt trần là cả trang báo "unexpected data format"; danh sách test case dừng ở 500 mà không báo.
+
+## QĐ-14 — tester không cần source — 23-10-2026
+
+Environment có địa chỉ site (migration 0036) và plan chọn environment (0037), URL check (`internal/urlcheck`, 0038, service `checker/`), reporter phát từ `/downloads/`, trang hướng dẫn. Đã chạy trên laptop:
+
+| Kiểm | Kết quả |
+|---|---|
+| `go test ./...` trên Postgres 17.5 | 30 package pass; gofmt/vet sạch; test kiến trúc pass (`urlcheck` chỉ import `platform/*`, outbound HTTP chỉ qua `platform/outbound`) |
+| Tenant walk §14.3 | 7 route mới được phân loại và đi: environment, URL check (cả ảnh chụp) của org A không đọc/ghi được từ org B, kể cả khi B dùng project của mình với id của A |
+| `TestEnvironments`, `TestURLChecks` | member thêm/sửa, viewer 403, URL có user:password/`javascript:`/thiếu host → 400, environment của project khác → 400, plan đóng không đổi environment (409), mọi thay đổi có audit; `URLCHECK=off` → 409 mà vẫn đọc check cũ; check thứ 6 đang chờ → 429; ảnh trả `image/jpeg` + CSP `sandbox` |
+| `internal/urlcheck` | job chạy đúng một lần; checker lỗi → queue retry, lần cuối đóng `error` (không kẹt `queued`); chỉ lưu ảnh đúng JPEG; prune 90 ngày, purge theo project (thêm vào `cmd/worker` purge test) |
+| `checker` (`node --test`, Chromium thật) | 8/8: trang sạch pass; trang lỗi bắt lỗi JS, ảnh 404, link 404, axe `image-alt`; fetch tới `10.1.2.3` và link tới `169.254.169.254` **bị chặn và không tính là lỗi trang**; `127.0.0.2` và `localhost` không mở được dù `127.0.0.1` được phép cho fixture |
+| Image `checker` (Docker Desktop) | build 51 s; container `cap_drop ALL` + `no-new-privileges`: example.com → báo cáo 9 mục trong 5,6 s; `http://169.254.169.254/latest/meta-data/` → "Not checked: … link-local" |
+| Stack local không Docker (api + worker + checker + Vite, Playwright lái UI) | tạo environment trong form plan → plan hiện địa chỉ; URL check của environment → báo cáo + 2 ảnh; check `http://10.0.0.1/admin` → mục "Not opened"; 0 lỗi console; rộng 390 px không cuộn ngang |
+| Frontend | typecheck sạch, 107/107 vitest (thêm `environments-url-checks.test.ts`: decoder từ chối địa chỉ không phải http(s)) |
+| `server/tests/doctor.sh`, `caddy validate`, `docker compose config` (có và không `--profile urlcheck`) | 11/11, hợp lệ, hợp lệ |
+
+**Lỗi tìm ra khi chạy thật:** worker chết lúc khởi động khi có hai pool hàng đợi (`metric: "queue_jobs_total" registered twice`) — registry từ chối tên đăng ký hai lần, trước đây worker chỉ có một pool. Sửa: các `queue.Worker` cùng registry dùng chung series (nhãn `kind` đã phân biệt); test `TestWorkersShareMetrics`.
+
+**Chưa kiểm:** `atp.sh up` với `URLCHECK=on` trên Docker (auto mode chặn lệnh deploy; cần chủ dự án chạy), URL check tới site LAN với `URLCHECK_ALLOW_PRIVATE=on`, `npm install` reporter qua `https://<host>/downloads/` với CA nội bộ.
+
+## QĐ-15 — Start testing, case gợi ý (thư viện, bộ mẫu, AI), chạy từng case — 24-10-2026
+
+Plan có loại test (0039), module `aisuggest` (0040), `platform/llm` (anthropic-sdk-go v1.84.0), `platform/secretbox`, checker `/outline`, audit `organization.ai_settings` (0041); frontend Start testing, màn hình chạy, AI settings. Model luôn chọn trên giao diện; key riêng của organization hoặc key server `LLM_API_KEY` (không có `LLM_MODEL`).
+
+| Kiểm | Kết quả |
+|---|---|
+| `go test ./...` (Postgres 17.5) | 33 package pass; gofmt/vet sạch; test kiến trúc mới `TestLLMOnlyThroughPlatform` (SDK chỉ ở `platform/llm`) |
+| `platform/llm` với server Anthropic giả | request đúng: model, `max_tokens` 16000, `output_config.format` json_schema + effort medium, `fallbacks: "default"` + beta `server-side-fallback-2026-07-01` (không gửi cho Haiku), không gửi `thinking`; 401→ErrKey, 404→ErrModel, refusal, max_tokens, answer không phải JSON |
+| `aisuggest` | key riêng niêm phong (không có plaintext trong DB, pepper khác không mở), kiểm key trước khi lưu, chọn key server thì xóa key riêng; job dùng đúng key + model, outline + mô tả vào prompt, bản nháp cắt theo count/độ dài; key sai → error ngay, outage → retry rồi error; 2 chờ/project |
+| API + tenant walk | 6 route mới: admin org lưu/xóa, tester 403 ở settings, viewer 403 khi xin gợi ý, 409 khi không có key, environment của project khác 400; walk phủ cả 6 |
+| checker `/outline` | Chromium thật: tiêu đề/heading/link cùng site/form/nút; 127.0.0.2 bị chặn |
+| govulncheck v1.9.0 (go1.26.10) | 0 được gọi (18 advisory trong module require, không gọi — như trước khi thêm SDK) |
+| Stack local + Playwright | admin lưu key (key sai → thông báo rõ), chọn key server + Haiku; tester: Smoke → environment → bộ mẫu + 3 bản nháp AI (server Anthropic giả nhận outline, schema, fallback) → plan → màn hình chạy mở example.com, ghi passed tự sang case kế, URL check từ màn hình chạy; lần chạy lại: bản nháp trùng thư viện không tích sẵn; 0 lỗi console, 390 px không cuộn ngang |
+| Frontend | typecheck sạch, 111/111 vitest |
+
+**Chưa kiểm:** một lần gọi Claude thật (cần key của chủ dự án), `atp.sh up` trên Docker với stack mới.
+
+## QĐ-16 — Auto test: case server tự chạy, AI soạn và sửa bước, quét site, chạy từ CI — 25-10-2026
+
+Module `autotest` (0042: tài khoản test theo environment, spec, bản nháp, run, case của run), quét site trong `urlcheck` (0043), checker `/sessions` + `src/steps.mjs` (bước là dữ liệu, diễn giải bằng locator Playwright, trình duyệt giữ trong site), `llm.JSON` chuyển sang streaming (accumulate), quyền token `project:autorun`; frontend trang Auto test, Auto run, Site scan. Kết quả mỗi run vào plan (execution + ảnh) và test run (JUnit import nội bộ, case được link vào test).
+
+| Kiểm | Kết quả |
+|---|---|
+| `go test ./...` (Postgres 17.5) | 34 package pass; gofmt/vet sạch; test kiến trúc giữ nguyên (autotest chỉ dùng platform/* + tenancy) |
+| `autotest` (DB thật, trình duyệt/LLM/bộ ghi giả) | mật khẩu niêm phong và mở đúng, cập nhật không mất mật khẩu; spec từ chối biến không có, `{{username}}` không tài khoản, `javascript:`, bước sai hình; bản nháp: đăng nhập tìm bằng AI trước, đọc trang, bỏ bước/case không chạy được; **mật khẩu không bao giờ có trong prompt nào**; run: case pass, case sửa bước (AI thay "Send" bằng "Gửi"), case fail kiểm tra (ảnh chỗ fail, bước sau skipped), tổng kết, bộ ghi gọi đủ; ApplyHeal một lần; đăng nhập sai → case error, tài khoản failed; giới hạn 2 run; export Playwright không để chữ trong bước thành code |
+| `llm` streaming | server Anthropic giả trả SSE (2 delta): request có `stream: true`; refusal, max_tokens, không phải JSON, 401 vẫn phân loại đúng |
+| `urlcheck` quét site | theo tầng, cùng host, bỏ link đăng xuất/xóa/file, ≤ maxPages, ≤ 3 tầng, đóng khi hết trang chờ, đăng nhập mỗi trang, trang của scan không vào danh sách URL check |
+| Bộ ghi (worker, ingest + testmgmt thật) | execution có bước, trạng thái, người chạy "ATP auto test · …", 2 ảnh bằng chứng; JUnit import → test run `failed` đúng `localRunId`; resolve tầng 2 rồi link case↔test, ghi lại lần hai không trùng link; plan đã đóng → bỏ qua |
+| API + tenant walk | 22 route mới: viewer 403 khi ghi, checker tắt → 409, không key → 409, spec sai không để lại case (cùng transaction), lưu spec viết lại bước chữ của case, run tạo plan, token ingest không khởi động run (403), token autorun 202/200, run thứ ba 429, quét cần tài khoản đã đăng nhập được; walk phủ đủ (router 123 → 145 route) |
+| checker (Chromium thật) | 15/15: site chat cần đăng nhập — đăng nhập, gửi tin, khớp chính xác trước ("Message" thắng "Messages"), lỗi locator/assert/input, rời site → fail và quay về, URL check đăng nhập + link cùng site |
+| Stack local + Playwright | environment trên site chat (IP LAN, `URLCHECK_ALLOW_PRIVATE=on`), tài khoản test → AI tìm bước đăng nhập (model không thấy mật khẩu), AI soạn 3 case chạy được (case có bước `eval` bị bỏ), Keep and run → 3/3 pass, 1 bước AI sửa, giữ bản sửa vào case; plan + test run có đủ 3; export 74 dòng không có mật khẩu; quét site đăng nhập: 7 trang, link hỏng/404/ảnh thiếu đúng chỗ, không mở đăng xuất/xóa tài khoản; CI token autorun → run 3/3 pass, 0 bước phải sửa (bản sửa đã vào case); case viết tay + sửa + chạy; 0 lỗi console, 390 px không cuộn ngang |
+| Frontend | typecheck sạch, 115/115 vitest trên phần commit, bundle gate: JS ban đầu 59,6 KiB gzip |
+
+**Chưa kiểm:** một lần gọi Claude thật (soạn case, tìm đăng nhập, sửa bước), checker trong Docker với phiên trình duyệt, site thật ngoài mạng nội bộ.
+
+## Ghép `main` (PR #8, #9) + rà soát tự đăng ký — 29-10-2026
+
+`main` nhận PR #9 (tự đăng ký có duyệt role, ADR-001) trong khi QĐ-14/15/16 còn trên nhánh `claude/auto-test`; CI của `main` đỏ từ 25-10. Ghép `main` vào nhánh, chạy lại mọi gate chạy được trên laptop (Postgres 17.5 thật): gofmt/vet sạch, `go test ./...` 34 package pass, Redocly lint hợp lệ (7 cảnh báo cũ). Một lần chạy đủ bộ trùng lúc ghi đĩa nặng (checkpoint 103 s) làm 10 package quá hạn chờ advisory lock của migrate (6 phút) — chạy lại với `-p 4` xanh hết; đó là tranh chấp đĩa của laptop, không phải code.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 1 | Cao (chặn khởi động) | Hai nhánh cùng thêm migration **0035** (`access_requests` / `environment_url`): `migrate` từ chối số trùng, api và worker không lên sau merge | Giữ 0035 của `main` (DB có thể đã chạy nó), dời 8 migration của nhánh thành 0036–0043, sửa mọi chỗ nhắc số (SPEC, GATES, comment). DB đã chạy nhánh trước 29-10 dừng ở "version 0035 is recorded as environment_url" — phải tạo lại | `go test ./...` |
+| 2 | Cao | 0041 (cũ 0040) thay **toàn bộ** `authz_audit_action_check` mà thiếu `access_request.*`: sau ghép, duyệt/từ chối đăng ký vi phạm CHECK; DB đã có hàng như thế thì chính migration fail | Danh sách action là hợp của hai bên | `TestSignupAndApprovalAgainstPostgres` (audit approve) |
+| 3 | Cao (bảo mật, khi `SIGNUP=on`) | **N65**: tài khoản tự đăng ký được tạo *đã verify* mà không có mail. Members (thêm theo email), lời mời vào tài khoản đã có và OAuth lần đầu đều tin email đã verify → chiếm trước email người khác để nhận role cấp cho họ; `409 ACCOUNT_EXISTS` cho dò email (§11.2 cấm) | QĐ-17: form luôn `202`, link `/signup#<token>` 24 giờ, tài khoản chỉ được tạo khi mở link (`signup_requests`, 0044); `SIGNUP=on` cần `MAIL=smtp`. 0044 bỏ verify + thu hồi phiên các tài khoản kiểu cũ chưa từng reset mật khẩu | `internal/authz/signup_test.go` (luồng, hết hạn, thay link, chiếm tài khoản, giới hạn, migration trên dữ liệu kiểu cũ), `cmd/api/signup_test.go` (cùng `202`, không chờ mail, không mail cho email đã có, hàng chờ trống tới khi mở link, duyệt → thấy project, tắt → `SIGNUP_OFF`), `config_test` |
+| 4 | Trung bình | `POST /v1/session/signup` chỉ được mount khi `SIGNUP=on`, nên vắng khỏi `openapi.yaml`, `routes.txt` và tenant walk — ba test đối chiếu không thấy nó | Luôn mount, tắt → `404 SIGNUP_OFF` (như forgot password); +2 operation, bootstrap `signup`; inventory 153 route | `TestOpenAPIMatchesMountedRoutes`, `TestRouteInventoryMatchesFile`, walk |
+| 5 | Trung bình (gate CI) | `gofmt` đỏ ở `tenant_walk_test.go` (PR #9); govulncheck GO-2026-6809 trên go1.26.9 của `main` | gofmt; ghép mang toolchain go1.26.10 | CI |
+| 6 | Trung bình | Rà soát 21-10 mục 4: CI qua khi người `blocked`, khi chưa chấm và khi `no_evidence` | Server trả `ci {pass, reason}`; snippet trang release thành `jq -e '.ci.pass'` | `TestCIVerdict` (10 ca), `TestDashboardContractEndToEnd` |
+| 7 | Cao (gate CI frontend) | `npm audit`: vite ≤ 6.4.3 (high: launch-editor, middleware cross-origin), vitest/@vitest/mocker ≤ 4.1.11 (moderate) | vite 6.4.5, vitest 4.1.12 — chỉ `package.json` + lockfile. npm 10.9.2 vấp (`edgesOut` của null, peer set vitest → vite 8 → `@vitejs/devtools-*`) nên cây giải bằng npm 11.6.1 rồi chuẩn hóa bằng 10.9.2; khác lockfile cũ chỉ ở các gói trên và cờ `peer`, `@emnapi` đóng gói giữ nguyên | worktree sạch: `npm ci` bằng npm 10.9.2 (như CI) chạy được; `npm audit` 0 cho frontend, checker, reporter; 115/115 vitest; typecheck + build + bundle gate 59,6 KiB gzip |
+| 8 | Cao (bảo mật, khi `SIGNUP=on`) — **30-10** | Duyệt yêu cầu chỉ áp luật owner khi admin chọn role thay; duyệt **đúng role người xin** thì không kiểm, mà form công khai nhận `org_owner` → một org admin tự đăng ký bằng email khác xin owner rồi tự duyệt là có owner (trái luật 27-09 "chỉ owner cấp owner" và chính commit PR #9) | Handler lấy role sẽ cấp thật (role chọn thay, hoặc role người xin qua `PendingAccessRequest`) rồi mới `ownerOnly`; giao diện không đề nghị role owner trên form, và chỉ owner thấy role owner khi duyệt | `TestAccessRequestOwnerRule`: org admin duyệt yêu cầu owner như xin → `403 OWNER_ONLY`, không cấp gì; duyệt với `org_admin` → 204; với handler cũ test fail và DB có hàng `org_owner` |
+
+**Binary thật + hội thoại SMTP (30-10):**
+- **Dựng:** `migrate.exe` áp 44 migration lên DB mới, `admin.exe` seed tenant và một workspace_admin, `api.exe` chạy với `SIGNUP=on MAIL=smtp SMTP_TLS=none` tới một SMTP sink cục bộ (Node `net`, chỉ 127.0.0.1). Script trong scratchpad gửi cookie, Origin và CSRF như trình duyệt.
+- **Form:** bootstrap báo `signup: true`. Email mới và email đã có tài khoản nhận cùng một `202`, trả sau 26 ms, không chờ SMTP.
+- **Mail:** đúng **một** mail, tới đúng địa chỉ mới, subject đúng, không nêu tên project. Dòng link bị quoted-printable ngắt mềm và giải mã ra đúng `${PUBLIC_URL}/signup#…`, như mail client đọc.
+- **Link:** mật khẩu yếu không tiêu link. Mở link → đăng nhập, chưa thấy project nào. Thiếu CSRF → `403`; dùng lại link → `404 SIGNUP_NOT_FOUND`.
+- **Duyệt:** admin đăng nhập thật, hàng chờ có email đã được chứng minh; duyệt → `204`, tài khoản thấy project.
+- **DB và log:** 0 hàng `signup_requests`, audit có `access_request.create` + `approve`, api không có dòng ERROR nào.
+- **Cấu hình sai:** `SIGNUP=on` với `MAIL=off` → api thoát (exit 2), báo "SIGNUP=on needs MAIL=smtp".
+
+Test của `internal/platform/mail` chỉ phủ hội thoại SMTP chung; lần này thêm phần nối dây ở binary và mail đăng ký đi qua SMTP thật.
+
+**Chưa kiểm** (lúc ghép; SMTP thật và job e2e được kiểm tiếp ở mục "Kiểm phần còn mở" ngay sau): nhà cung cấp SMTP thật (TLS/STARTTLS, AUTH, độ trễ), stack Docker với `SIGNUP=on`. Giao diện đăng ký (30-10) được kiểm bằng vitest và một lượt trình duyệt thật, ghi ở dưới.
+
+**Giao diện đăng ký trên trình duyệt thật (30-10):**
+- **Worktree sạch ở `ca9ae47`:** `npm ci` (npm 10.9.2) chạy được; 123/123 vitest (30 file, gồm 8 ca của `tests/signup.test.ts`); typecheck; build + bundle gate (JS ban đầu 60,0 KiB gzip; trang đăng ký là chunk lazy 4,3 KiB).
+- **Dựng:** `api.exe` (DB mới, `SIGNUP=on`, SMTP sink) + Vite dev từ worktree + Chromium (Playwright 1.63). Kết quả 16/16.
+- **Admin:** trang đăng nhập có "Ask to join"; Members có link `…/signup?project=<id>` và "No requests waiting."
+- **Người xin:** mở link → form đã biết project, không phải gõ id; gửi → "Check your email"; đúng một mail, link trỏ về chính dashboard. Mở link → token rời thanh địa chỉ; đặt mật khẩu → "Your account is ready", chưa thấy project nào.
+- **Duyệt:** admin thấy yêu cầu kèm ghi chú và vai trò đã xin, đổi sang member rồi Approve → yêu cầu biến mất, danh sách thành viên có người mới với vai trò member; người mới thấy project.
+- **Chung:** khổ 390 px không cuộn ngang; 0 lỗi console; api 0 dòng ERROR, 0 phản hồi 5xx. Ảnh sáng và tối đã xem.
+
+## Kiểm phần còn mở: SMTP thật, gọi Claude, job e2e không Docker — 30-10-2026
+
+Ba mục "chưa kiểm" của đợt ghép `main`. Máy này không có Docker và không có key Anthropic; mỗi mục ghi phần đã chạy thật và phần còn thiếu.
+
+**1. Nhà cung cấp SMTP thật: TLS và AUTH.** Một chương trình dò đi đúng đường của `mail.(*SMTP).Send` tới bước AUTH rồi QUIT: cùng cách dial, cùng `tls.Config{ServerName: host, MinVersion: TLS 1.2}`, cùng client `net/smtp` (EHLO `localhost`). Nó không đăng nhập và không gửi mail. Chứng chỉ được kiểm bằng kho CA của Windows; image chạy thật (distroless/static-debian12) có sẵn bộ CA.
+
+| Máy chủ (cổng, chế độ) | TLS | AUTH sau TLS |
+|---|---|---|
+| smtp.gmail.com (587 starttls, 465 tls) | 1.3, chuỗi hợp lệ | LOGIN PLAIN XOAUTH2 PLAIN-CLIENTTOKEN OAUTHBEARER XOAUTH |
+| **smtp.office365.com** (587 starttls) | 1.3, hợp lệ | **LOGIN XOAUTH2**, không có PLAIN |
+| **smtp-mail.outlook.com** (587 starttls) | 1.3, hợp lệ | **LOGIN XOAUTH2** |
+| SES us-east-1 (587 starttls), ap-southeast-1 (465 tls) | 1.3, hợp lệ | PLAIN LOGIN |
+| smtp.resend.com, smtp.mailgun.org, smtp.sendgrid.net (587 starttls) | 1.3, hợp lệ | PLAIN LOGIN |
+| smtp.postmarkapp.com (587 starttls) | 1.2, hợp lệ | PLAIN LOGIN CRAM-MD5 DIGEST-MD5 |
+| smtp.zoho.com, smtp-relay.brevo.com (587 starttls) | 1.3, hợp lệ | LOGIN PLAIN (Brevo thêm CRAM-MD5) |
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 9 | Trung bình (mail không đi qua Microsoft) | Client chỉ nói `AUTH PLAIN`, vì `smtp.PlainAuth` không xem máy chủ đưa ra cơ chế nào. Microsoft 365 và Outlook chỉ có `LOGIN XOAUTH2` nên trả 504 5.7.4: lời mời, quên mật khẩu và link đăng ký không gửi được, mà `SIGNUP=on` lại cần mail | Dùng PLAIN khi máy chủ có (hoặc không liệt kê gì, như trước), không thì LOGIN; không có cả hai thì báo lỗi nêu đúng danh sách máy chủ đưa. LOGIN giữ luật của PlainAuth: mật khẩu chỉ đi qua TLS hoặc tới localhost, và chỉ tới đúng host đã cấu hình. OAuth (XOAUTH2) chưa có | `TestAuthUsesAMechanismTheServerOffers` (chỉ LOGIN → LOGIN; PLAIN LOGIN → PLAIN; không liệt kê → PLAIN), `TestAuthRefusesAMechanismItCannotSpeak`, `TestLoginAuthNeedsTLSAwayFromLocalhost`; hai test đầu fail trên code cũ |
+
+- **Microsoft:** việc bỏ đăng nhập bằng mật khẩu cho SMTP AUTH ở Exchange Online đang hoãn (Message Center MC786329, cập nhật 27-01-2026; ngày bỏ hẳn sẽ được báo trong 2027). Tenant đã tắt cách này thì phải gửi qua relay (SES, Resend, …).
+- **Chưa kiểm:** một lần đăng nhập thật và một mail thật qua nhà cung cấp, vì cần tài khoản. Độ trễ gửi không làm người dùng phải chờ: form đăng ký trả `202` trước khi gửi (26 ms, mục trên).
+
+**2. Gọi Claude.** Máy này không có key: `ANTHROPIC_API_KEY` và `LLM_API_KEY` đều trống, `deploy/.env` không có `LLM_API_KEY`, không có CLI `ant`. Vì vậy **chưa gọi API thật**. Phần kiểm được:
+- **Đối chiếu với API hiện hành:**
+  - SDK Go chính thức v1.84.0, gửi `anthropic-version: 2023-06-01`. Bốn model id đều đang có: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1`.
+  - Không gửi `thinking` (mặc định adaptive; Opus 5.5 và Fable 5.1 luôn bật). `effort: medium` được đặt rõ, vì mặc định của từng model khác nhau.
+  - JSON đi qua structured output (`output_config.format`). Schema của `aisuggest` và `autotest` chỉ dùng kiểu, `enum`, `required` và `additionalProperties: false`; không có ràng buộc API từ chối (`minLength`, `minimum`, schema đệ quy).
+  - `fallbacks: "default"` với beta `server-side-fallback-2026-07-01` chỉ gửi cho Opus 5.5, Sonnet 5.5 và Fable 5.1; Haiku 5.5 không có fallback phía server.
+  - Không prefill, không `tool_choice` ép, không `temperature` hay `budget_tokens`; những thứ đó trả 400 trên các model này.
+- **Fallback giữa chừng:** API giữ phần chữ model đầu đã viết, chèn một block `fallback`, rồi model sau viết tiếp trên cùng stream. Fake cũ chỉ phát một block chữ. `TestMidStreamFallbackKeepsTheWholeAnswer` phát đúng dạng đó: JSON được ghép đủ, `Model` là model viết xong (SDK đổi nhãn khi gặp block `fallback`). Bản ghi draft từng ghép model đã chọn với số token của model viết xong; đã sửa, xem dòng 13 ở mục 4.
+- **Gọi thật khi có key:** từ `backend/`, `LLM_LIVE_KEY=sk-ant-… go test ./internal/platform/llm -run TestLive -v -count=1` (bash). Trên cmd.exe chạy `set LLM_LIVE_KEY=sk-ant-…` trước; trên PowerShell là `$env:LLM_LIVE_KEY = "sk-ant-…"`. Cần `-count=1`, vì một lần pass đã cache sẽ không gọi API. Với từng model, test kiểm key qua Models API rồi lấy một câu trả lời có schema. `LLM_LIVE_MODELS=claude-haiku-5-5` để chạy bớt; đặt `LLM_BASE_URL` nếu đi qua proxy. Tốn vài cent. Không đặt key thì test tự bỏ qua.
+
+**3. Job `e2e` của CI, chạy không Docker.** Job này chưa từng chạy trên nhánh: chưa có PR, và CI của `main` đỏ từ 25-10 nên e2e bị bỏ qua. Lần này từng bước của job được chạy trên máy này:
+- Postgres 17 của máy.
+- `migrate`, `api`, `worker`, `admin` build từ `backend/`.
+- Dashboard và reporter từ worktree sạch ở `HEAD` (`npm ci` bằng npm 10.9.2).
+- Một proxy Node thay Caddy: cùng route `/v1`, `/healthz`, `/_objstore`, `/downloads`, SPA fallback, TLS tự ký trên `localhost:18443`.
+- Shell như GitHub chạy khi `ci.yml` không ghi `shell:`: `bash -e`, không pipefail.
+
+| # | Mức | Phát hiện | Sửa | Kiểm |
+|---|---|---|---|---|
+| 10 | Cao (CI đỏ khi mở PR) | Trang CI tokens đọc `/downloads/index.json` (QĐ-14, 23-10). CI dựng stack không qua `server/atp.sh` nên không có tarball reporter: Caddy trả 404, Chrome ghi lỗi console, và `live-check.mjs` fail dù 20/20 bước đã đạt | Bước mới trong job: đóng gói reporter vào `backend/deploy/downloads` như `atp.sh up` làm (`npm ci`, `npm run build`, `pack-for-server.mjs`) | Lượt (a), đúng như CI hiện tại: FAIL vì lỗi này. Lượt (b), có bước mới: PASS |
+| 11 | Trung bình (gate T0 kiểm hụt từ 17-09) | `.env` của CI giữ `OBJSTORE_ENDPOINT` mẫu R2 (`https://<account>…`), nên URL upload của bucket bộ nhớ không dùng được. Reporter thử lại tới hết 30 giây rồi bỏ, không gửi finish: cả hai run nằm `running`, 24 artifact `pending`. Live check chấp nhận `running` nên job vẫn xanh, mà chưa từng kiểm finish, việc worker resolve, hay gắn artifact | `sed` đặt `OBJSTORE_ENDPOINT=https://localhost/_objstore` (route Caddy có sẵn cho đúng việc này). Bước reporter fail nếu log có "gave up on the platform", "upload failed" hay "could not finish", và đòi đúng 2 dòng run đã kết thúc có artifact | (a): `running` 2, `pending` 24, phép kiểm mới fail. (b): 2 run `failed` (bộ example cố ý fail), 34 artifact `verified`, cả 34 được worker gắn vào attempt; phép kiểm mới đạt |
+
+- **Lượt (b):**
+  - migrate áp 44 migration; seed như CI.
+  - Reporter: 2 run × 7 event, mỗi run 17 artifact ok.
+  - `live-check.mjs` đạt 20/20 bước: 153 lời gọi `/v1` đều 2xx trừ 401/400 cố ý, 0 lỗi trình duyệt. `live-manual-history`, `live-case-bulk` và `live-specialized-results` đều đạt.
+  - api và worker: 0 dòng ERROR, 0 phản hồi 5xx. Non-2xx chỉ có 401, 400 và 6 lần 409 do script cố ý phát lại import.
+- **Thấy thêm:** reporter thử lại URL upload hỏng như lỗi mạng, và chờ mọi upload rồi mới finish. Đã sửa, xem dòng 12 ở mục 4.
+- **Khác CI vì không có Docker:** không build image, không `docker compose`, không Caddy thật (HTTP/2, nén), Postgres không TLS. Script chạy lượt này nằm ngoài repo.
+
+**4. Sửa nốt sau lượt kiểm (30-10).**
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 12 | Trung bình (run mở 6 giờ rồi thành `error`) | Reporter chờ mọi upload rồi mới `finish`, và thử lại URL upload không parse được như lỗi mạng. Object store hỏng hay treo làm hết `flushTimeoutMs`, reporter bỏ finish, và server tự đóng run sau 6 giờ với trạng thái `error`. Như vậy trái §10.4: artifact không bao giờ làm fail run | Upload có hạn trong ngân sách: trừ 5 s để dành cho finish (1/3 nếu ngân sách ngắn hơn 15 s). Quá hạn thì bỏ upload, finish vẫn gửi, và dòng tổng kết ghi `N not uploaded in time`. URL không parse được thì fail ngay, không retry, không in query (grant upload). `ATP_URL` không phải http(s) thì reporter tự tắt với một warning. Reporter lên **0.1.1** (mỗi run gửi `reporter.version`); project đã cài tarball cũ phải chạy lại lệnh cài trên trang CI tokens | `reporter.test.ts`: URL hỏng (đúng ca của CI) và store treo vẫn finish trước khi hết ngân sách; `ATP_URL` sai. `client.test.ts`: URL hỏng không gửi request nào. 4 test mới fail trên code cũ. 24/24 test, cộng outage trên `playwright test` thật (79 s) |
+| 13 | Thấp (số liệu hiển thị) | Sau một refusal fallback, bản ghi draft (`case_suggestions`, `auto_drafts`) lưu model đã *chọn* cùng số token của model *viết xong*, nên cặp model–token lệch nhau | Lưu `res.ServedBy(model)`: model viết xong (SDK đổi nhãn khi gặp block `fallback`), và token là của lượt đó. Lượt bị từ chối chỉ có trong `usage.iterations` và chưa được lưu; lượt đó bị tính tiền khi đã stream ra chữ, hoặc khi loại từ chối thuộc nhóm bị tính. openapi ghi rõ `model` có thể nằm ngoài danh sách model được chọn | `TestDraftRun`, `TestDraft`: fail trên code cũ |
+
+## QĐ-18 — key của mọi nhà cung cấp AI — 31-10-2026
+
+Chủ dự án có key OpenAI, hỏi dùng được không, rồi quyết "sửa đi có thể dùng mọi loại key". Phần AI (soạn case QĐ-15, Auto test QĐ-16) giờ nhận key của 8 provider, cộng endpoint tương thích OpenAI của người vận hành. Thiết kế ở SPEC §1.18; phần dưới là những gì đã chạy.
+
+**Đã chạy, trên laptop, Postgres 17.5:**
+
+- `go test ./...`: 34/34 package xanh, kể cả test kiến trúc. `platform/llm` không tự mở HTTP: Chat Completions đi qua `platform/outbound.Send` (thêm mới, có test riêng: host ngoài allowlist bị chặn, không theo redirect, body cắt ở cap, cancel trả `context.Canceled`).
+- `platform/llm`: 14 test.
+  - Dialect từng provider: tên trường giới hạn, stream hay không, `stream_options`, schema hay JSON mode, `provider.require_parameters` của OpenRouter.
+  - Lùi khi provider từ chối schema hoặc giới hạn output.
+  - Retry: 5xx một lần rồi qua; 429 dừng sau 3 lần; `insufficient_quota` không retry.
+  - Lỗi theo đủ hình dạng của từng bên (OpenAI, list của Google, `{"code","error"}` của xAI, lỗi giữa stream của OpenRouter). Refusal, `content_filter`, `length`, stream đứt, câu trả lời sai schema.
+  - Kiểm key bằng danh sách model: không gọi completion; tiền tố `models/` của Google; `/key` của OpenRouter; lùi về completion 16 token khi không có `/models` hoặc key bị giới hạn quyền.
+  - `llm.Validate`; bảng provider (id, host https, tiền tố key không trùng nhau).
+- `aisuggest` `TestProviders`:
+  - key OpenAI lưu và dùng đúng provider, model ngoài gợi ý vẫn nhận;
+  - key đã lưu không mang sang provider khác;
+  - key `sk-proj-…` dán dưới Anthropic bị từ chối và có tên OpenAI;
+  - key server chỉ cho `LLM_PROVIDER`, lựa chọn cũ chờ lưu lại khi `LLM_PROVIDER` đổi;
+  - OpenRouter ghi provider vào suggestion; endpoint `openai-compatible` nhận key dạng gì cũng được.
+- `cmd/api` `TestAISettingsAnyProvider`: server `LLM_PROVIDER=openai` trỏ vào OpenAI giả. Đủ 8 provider trong `providers`, `AI_KEY_REJECTED` / `AI_KEY_NO_CREDIT` / `AI_MODEL_UNAVAILABLE` (kèm model key dùng được) / `INVALID_PAYLOAD` với đúng `details.field`, audit có `provider` và không có key.
+- Migration 0045, 0046 trên DB trống: 46 migration chạy hết. Test 0044 (`authz`) từng đếm đúng một migration chạy sau nó; giờ kiểm migration đầu tiên.
+- Frontend (worktree sạch, `npm ci`): `vue-tsc` sạch, vitest 124/124, build + bundle gate PASS (60,3 KiB gzip).
+
+**Host thật, key giả** (`LLM_LIVE_HOSTS=1 go test ./internal/platform/llm -run TestLiveHostsRejectAFakeKey -v -count=1`). Không tốn gì, không cần key; chứng minh host, đường dẫn và cách đọc lỗi khớp server thật:
+
+| Provider | Trả lời | Đọc thành |
+|---|---|---|
+| Anthropic | 401 | `ErrKey` |
+| OpenAI | 401 "Incorrect API key provided" | `ErrKey` |
+| Google (Gemini) | **400** "Please pass a valid API key" | `ErrKey` |
+| xAI | **400** "Incorrect API key provided" | `ErrKey` |
+| Mistral | 401 "Invalid API Key" | `ErrKey` |
+| DeepSeek | 401 "Authentication Fails" | `ErrKey` |
+| Groq | 401 "Invalid API Key" | `ErrKey` |
+| OpenRouter | 401 tại `/key` | `ErrKey` |
+
+**Giao diện trên api thật + Chromium** (Playwright; api build từ nhánh, `LLM_PROVIDER=openai` với một server key giả, Vite từ worktree sạch):
+
+- Trang mở với "Drafting uses GPT-6 Astra from OpenAI (GPT) with the server's key".
+- Chọn Anthropic: 4 model Claude; "key của server" bị khóa, ghi "The server's key is for OpenAI (GPT)".
+- Dán `sk-or-v1-…`: tự chuyển sang OpenRouter, ô model id hiện ra. Save → OpenRouter thật trả 401 → "The provider rejected this API key…".
+- OpenAI + key server: api.openai.com thật từ chối key giả → "The provider rejected the server's key…".
+- Màn hình điện thoại, chế độ tối, đều xem bằng ảnh chụp. Log api không có key nào.
+- Ba chỗ sửa sau lần chụp đầu:
+  - tiêu đề bị hai lớp ngoặc;
+  - ghi chú "đã chuyển" và lỗi cũ còn lại khi tự đổi provider;
+  - ô model id lặp lại model đã chọn ở danh sách.
+
+**Chưa kiểm:**
+
+- **Một lần gọi thành công với key thật** của từng provider. Chạy được ngay với key OpenAI. `TestLive` tự đoán provider theo phần đầu key; key `sk-…` không có `proj` thì đặt thêm `LLM_LIVE_PROVIDER=openai`. Trên cmd.exe, từ `backend\`:
+  ```
+  set "LLM_LIVE_KEY=sk-proj-…"
+  go test ./internal/platform/llm -run TestLive -v -count=1
+  set LLM_LIVE_KEY=
+  ```
+  Mỗi model gợi ý được kiểm key rồi lấy một câu trả lời có schema. Tốn vài cent; `set "LLM_LIVE_MODELS=gpt-6-luna"` để chạy bớt.
+- **Chỗ tài liệu provider không nói, mình phải chọn:**
+  - tên trường giới hạn output của Gemini và xAI (`max_tokens`). Nếu sai, 400 → gọi lại không có giới hạn, nên không hỏng, chỉ mất trần chi phí;
+  - xAI, Mistral, OpenRouter có trả usage khi stream không (không có thì số token ghi 0);
+  - tên model `mistral-*-latest` (trang model của Mistral không liệt kê alias). Sai thì lúc lưu báo lỗi kèm model key dùng được.
+- Endpoint `openai-compatible` mới chạy với server giả, chưa chạy với Ollama, vLLM hay LiteLLM thật.
+
+## Ghép nhánh vào `main` — 01-11-2026
+
+Chủ dự án bảo "commit push merge". Trước khi ghép, các gate CI chạy được trên laptop được chạy lại trên đúng cây sẽ vào `main`: QĐ-18 (3933687) cộng phần agent frontend làm xong nhưng chưa commit (21-10 → 30-10, ghi trong `frontend/PLAN.md`, commit 1c9d16f). Tất cả chạy trong worktree sạch; `node_modules` của agent frontend không bị đụng tới.
+
+- Frontend: `npm ci`; vitest 132/132 (33 file); typecheck + build + bundle gate 60,3 KiB gzip (37 module lazy, không có fixture); prettier và `git diff --check` sạch.
+- Backend: govulncheck v1.9.0 trên go1.26.10, như CI — code không gọi tới lỗ hổng nào.
+- `npm audit` của reporter và checker: 0.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 1 | Trung bình (gate CI frontend) | `npm audit` của frontend đỏ vì 4 cảnh báo moderate công bố sau 30-10: glob 9.0.0–14.0.1 (GHSA-3g3m-2fjr-6pw4: hủy bằng AbortSignal mà vẫn duyệt file sau timeout) và minimatch < 11.0.1 (GHSA-g3hv-75wg-m249: DoS khi mở rộng pattern). Hai gói chỉ vào qua `@vue/test-utils` 2.4.6 → js-beautify 1.15.4 → glob 10.5.0 và editorconfig 1.0.7 → minimatch 9.0.9. Bản vá chỉ có ở glob 14.0.2+ và minimatch 11.0.1+ (27-10). Ngay js-beautify mới nhất (2.0.3) vẫn cần glob ^13 và minimatch ~10.2, nên nâng `@vue/test-utils` không đủ; `npm audit fix` không đổi gì | `overrides` trong `frontend/package.json`, chỉ áp trong cây của js-beautify: glob 14.0.3, minimatch 11.0.3. js-beautify chỉ nạp hai gói này trong `cli.js`; phần định dạng HTML mà `@vue/test-utils` dùng không nạp chúng. Lockfile chỉ khác bản cũ ở glob, minimatch, brace-expansion, balanced-match và path-scurry: thêm 2 gói, bớt 34 gói con của glob 10; `@emnapi` giữ nguyên. Bỏ override khi js-beautify nhận bản vá | worktree sạch: `npm ci` bằng npm 10.9.2 (như CI) chạy được; `npm audit` 0; vitest 132/132; typecheck + build + bundle gate 60,3 KiB; `js-beautify.html()` vẫn chạy |

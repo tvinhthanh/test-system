@@ -135,12 +135,14 @@ export interface RunsQuery {
   q: string;
   status: string;
   environment: string;
+  source: string;
   cursor: string;
 }
 export const emptyQuery: RunsQuery = {
   q: "",
   status: "",
   environment: "",
+  source: "",
   cursor: "",
 };
 function project(value: unknown): Project {

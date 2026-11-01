@@ -134,9 +134,31 @@ try {
   await page.getByLabel("Password", { exact: true }).fill("preview-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Projects", exact: true }).waitFor();
+  await page.getByRole("link", { name: "Commerce Web" }).click();
+  await page.getByRole("heading", { name: "Test runs", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Playwright", exact: true }).click();
+  await page.waitForURL(/source=playwright/);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Playwright", exact: true })
+      .getAttribute("aria-pressed"),
+    "true",
+  );
+  await page
+    .getByRole("button", { name: "JUnit imports", exact: true })
+    .click();
+  await page.waitForURL(/source=junit/);
+  await page.getByRole("heading", { name: "No matching runs" }).waitFor();
+  await page.goBack();
+  await page.waitForURL(/source=playwright/);
+  await page.locator("tbody tr").first().waitFor();
+  await page.getByRole("link", { name: "Manual plans", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Test plans", exact: true })
+    .waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    "Browser PASS: project isolation UI, 20-row paging/reload, search/empty/reset, detail, sign-out/in, 1440/768/360 layouts; console clean. Fixture evidence only.",
+    "Browser PASS: project isolation UI, 20-row paging/reload, search/empty/reset, detail, sign-out/in, run source URL/back state, manual plan navigation, 1440/768/360 layouts; console clean. Fixture evidence only.",
   );
 } catch (error) {
   await page.screenshot({

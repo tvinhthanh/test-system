@@ -3,7 +3,10 @@ import * as d from "../../core/api/decode";
 
 // Project API tokens for CI (SPEC §11.3.2 "Tạo/thu hồi ingest token",
 // §11.4). The secret comes back once, from issue(); lists carry a prefix.
-export type TokenPermission = "project:ingest" | "project:read";
+export type TokenPermission =
+  | "project:ingest"
+  | "project:read"
+  | "project:autorun";
 export interface ProjectToken {
   id: string;
   prefix: string;
@@ -21,7 +24,11 @@ export interface IssuedToken {
 
 function permission(value: unknown): TokenPermission {
   const s = d.string(value);
-  return s === "project:ingest" || s === "project:read" ? s : d.invalid();
+  return s === "project:ingest" ||
+    s === "project:read" ||
+    s === "project:autorun"
+    ? s
+    : d.invalid();
 }
 function nullableDate(value: unknown) {
   return value === null ? null : d.date(value);
@@ -32,7 +39,7 @@ function token(value: unknown): ProjectToken {
     id: d.string(x.id),
     prefix: d.string(x.prefix),
     name: d.string(x.name),
-    permissions: d.array(x.permissions, permission, 2),
+    permissions: d.array(x.permissions, permission, 3),
     createdAt: d.date(x.createdAt),
     lastUsedAt: nullableDate(x.lastUsedAt),
     expiresAt: d.date(x.expiresAt),
@@ -66,6 +73,26 @@ export class TokensRepository {
     const secret = d.string(x.secret);
     if (!secret.startsWith("atp_")) return d.invalid();
     return { token: token(x.token), secret };
+  }
+  // The reporter tarball this server hands out (server/atp.sh packs it,
+  // Caddy serves /downloads/, QĐ-14): a static file, not the /v1 API, so it
+  // is read with plain fetch. null when it is not served here — `vite dev`
+  // answers with index.html, a stack started without atp.sh has no index.
+  async reporterPackage(signal: AbortSignal): Promise<string | null> {
+    try {
+      const r = await fetch("/downloads/index.json", {
+        cache: "no-cache",
+        signal,
+      });
+      if (!r.ok) return null;
+      const file = d.record(await r.json()).file;
+      return typeof file === "string" &&
+        /^atp-playwright-reporter-[\w.-]+\.tgz$/.test(file)
+        ? file
+        : null;
+    } catch {
+      return null;
+    }
   }
   async revoke(projectId: string, tokenId: string, signal: AbortSignal) {
     await this.api.request(

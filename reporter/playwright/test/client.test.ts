@@ -93,6 +93,17 @@ test("presigned PUT sends the pinned headers and returns the ETag", async () => 
   assert.equal((s.calls[0].init.headers as Record<string, string>)["Authorization"], undefined);
 });
 
+test("an upload URL that does not parse fails at once: no request, no retry, the grant not echoed", async () => {
+  const s = scripted([]);
+  const sleeps: number[] = [];
+  await assert.rejects(
+    client(s.fetch, sleeps).put("https://<account>.r2.cloudflarestorage.com/upload?token=grant123", new Uint8Array(1), {}),
+    (e: any) => e instanceof ApiError && e.code === "UPLOAD_URL_INVALID" && !e.retryable && !e.message.includes("grant123"),
+  );
+  assert.equal(s.calls.length, 0);
+  assert.deepEqual(sleeps, []);
+});
+
 test("once a request uses up its retries, the platform is down for the run: later calls fail without a request", async () => {
   const s = scripted([...Array(5).fill({ status: 0, fail: true }), { status: 200, body: {} }]);
   const c = client(s.fetch, []);

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -700,12 +701,12 @@ func (s *service) Uncover(ctx context.Context, projectID, requirementID, testCas
 
 // ------------------------------------------------------------------ plans
 
-const planColumns = `id, project_id, name, environment_id, status, created_at, updated_at`
+const planColumns = `id, project_id, name, environment_id, coalesce(test_type, ''), status, created_at, updated_at`
 
 func scanPlan(row interface{ Scan(dest ...any) error }) (Plan, error) {
 	var p Plan
 	var env *string
-	if err := row.Scan(&p.ID, &p.ProjectID, &p.Name, &env, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.ProjectID, &p.Name, &env, &p.TestType, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return Plan{}, err
 	}
 	p.EnvironmentID = deref(env)
@@ -723,11 +724,14 @@ func (s *service) CreatePlan(ctx context.Context, projectID string, in NewPlan) 
 	if in.EnvironmentID != "" && !isUUID(in.EnvironmentID) {
 		return Plan{}, fmt.Errorf("%w: environmentId", ErrInvalid)
 	}
+	if in.TestType != "" && !slices.Contains(PlanTestTypes, in.TestType) {
+		return Plan{}, fmt.Errorf("%w: testType", ErrInvalid)
+	}
 	var p Plan
 	err := s.db.WithTx(ctx, func(ctx context.Context) error {
 		q := s.db.Q(ctx)
 		var err error
-		p, err = scanPlan(q.QueryRow(ctx, `INSERT INTO test_plans (project_id, name, environment_id) VALUES ($1, $2, $3) RETURNING `+planColumns, projectID, in.Name, nullable(in.EnvironmentID)))
+		p, err = scanPlan(q.QueryRow(ctx, `INSERT INTO test_plans (project_id, name, environment_id, test_type) VALUES ($1, $2, $3, $4) RETURNING `+planColumns, projectID, in.Name, nullable(in.EnvironmentID), nullable(in.TestType)))
 		if err != nil {
 			return mapErr(err)
 		}
@@ -893,8 +897,11 @@ func (s *service) UpdatePlan(ctx context.Context, projectID, id string, patch Pl
 	if !isUUID(projectID) || !isUUID(id) {
 		return Plan{}, ErrNotFound
 	}
-	if patch.Status == nil && patch.CaseIDs == nil && patch.CaseUpdate == nil {
+	if patch.Status == nil && patch.CaseIDs == nil && patch.CaseUpdate == nil && patch.EnvironmentID == nil {
 		return Plan{}, fmt.Errorf("%w: empty plan patch", ErrInvalid)
+	}
+	if patch.EnvironmentID != nil && *patch.EnvironmentID != "" && !isUUID(*patch.EnvironmentID) {
+		return Plan{}, fmt.Errorf("%w: environmentId", ErrInvalid)
 	}
 	if patch.Status != nil {
 		switch *patch.Status {
@@ -912,7 +919,7 @@ func (s *service) UpdatePlan(ctx context.Context, projectID, id string, patch Pl
 		if !patch.ExpectedUpdatedAt.IsZero() && !patch.ExpectedUpdatedAt.Equal(p.UpdatedAt) {
 			return fmt.Errorf("%w: plan changed; refresh before saving", ErrConflict)
 		}
-		if (patch.CaseIDs != nil || patch.CaseUpdate != nil) && p.Status == PlanClosed {
+		if (patch.CaseIDs != nil || patch.CaseUpdate != nil || patch.EnvironmentID != nil) && p.Status == PlanClosed {
 			return fmt.Errorf("%w: plan is closed", ErrConflict)
 		}
 		if patch.CaseIDs != nil {
@@ -979,6 +986,14 @@ func (s *service) UpdatePlan(ctx context.Context, projectID, id string, patch Pl
 		}
 		if _, err := q.Exec(ctx, `UPDATE test_plans SET status = $3, updated_at = clock_timestamp() WHERE id = $1 AND project_id = $2`, id, projectID, status); err != nil {
 			return mapErr(err)
+		}
+		if env := patch.EnvironmentID; env != nil && *env != p.EnvironmentID {
+			if _, err := q.Exec(ctx, `UPDATE test_plans SET environment_id = $3 WHERE id = $1 AND project_id = $2`, id, projectID, nullable(*env)); err != nil {
+				return mapErr(err)
+			}
+			if err := s.auditPlan(ctx, projectID, id, actor, "plan.environment", map[string]any{"environmentId": []string{p.EnvironmentID, *env}}); err != nil {
+				return err
+			}
 		}
 		if patch.Status != nil {
 			return s.auditPlan(ctx, projectID, id, actor, "plan.status", map[string]any{"status": status})
@@ -1069,9 +1084,14 @@ func (s *service) RecordExecution(ctx context.Context, projectID, planID string,
 	if in.RetestOf != "" && !isUUID(in.RetestOf) {
 		return Execution{}, ErrNotFound
 	}
+	// Back-dating a paper record is fine; a future executedAt is not: the
+	// newest executed_at is the case's verdict, so it would pin it (5 min of
+	// clock skew allowed, as for specialized reports).
 	at := in.ExecutedAt
 	if at.IsZero() {
 		at = s.now()
+	} else if at.After(s.now().Add(5 * time.Minute)) {
+		return Execution{}, fmt.Errorf("%w: executedAt is in the future", ErrInvalid)
 	}
 	var out Execution
 	err := s.db.WithTx(ctx, func(ctx context.Context) error {

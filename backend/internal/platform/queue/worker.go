@@ -39,6 +39,39 @@ type Worker struct {
 	polled  *metric.Gauge
 }
 
+// workerMetrics are one registry's queue series, shared by every Worker on
+// it: each series carries the kind as a label, and a registry refuses a
+// name registered twice — two pools in one process (run.finished and
+// urlcheck.run since QĐ-14) would otherwise panic at start.
+type workerMetrics struct {
+	jobs               *metric.Counter
+	seconds, latency   *metric.Histogram
+	depth, age, polled *metric.Gauge
+}
+
+var (
+	sharedMu      sync.Mutex
+	sharedMetrics = map[*metric.Registry]*workerMetrics{}
+)
+
+func metricsFor(reg *metric.Registry) *workerMetrics {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if m, ok := sharedMetrics[reg]; ok {
+		return m
+	}
+	m := &workerMetrics{
+		jobs:    reg.Counter("queue_jobs_total", "Jobs finished by kind and result.", "kind", "result"),
+		seconds: reg.Histogram("queue_job_seconds", "Handler duration by kind.", metric.DefaultLatencyBuckets, "kind"),
+		depth:   reg.Gauge("queue_pending", "Runnable jobs waiting, by kind.", "kind"),
+		age:     reg.Gauge("queue_oldest_pending_seconds", "Age of the oldest runnable job, by kind.", "kind"),
+		latency: reg.Histogram("queue_job_latency_seconds", "Enqueue-to-done latency by kind — the §6.4 resolver latency for run.finished.", metric.DefaultLatencyBuckets, "kind"),
+		polled:  reg.Gauge("queue_worker_last_poll_timestamp_seconds", "Unix time this worker last looked at the queue, by kind; stale = stuck.", "kind"),
+	}
+	sharedMetrics[reg] = m
+	return m
+}
+
 func (w *Worker) defaults() {
 	if w.Concurrency <= 0 {
 		w.Concurrency = 1
@@ -53,12 +86,8 @@ func (w *Worker) defaults() {
 		w.Logger = slog.Default()
 	}
 	if w.Metrics != nil && w.jobs == nil {
-		w.jobs = w.Metrics.Counter("queue_jobs_total", "Jobs finished by kind and result.", "kind", "result")
-		w.seconds = w.Metrics.Histogram("queue_job_seconds", "Handler duration by kind.", metric.DefaultLatencyBuckets, "kind")
-		w.depth = w.Metrics.Gauge("queue_pending", "Runnable jobs waiting, by kind.", "kind")
-		w.age = w.Metrics.Gauge("queue_oldest_pending_seconds", "Age of the oldest runnable job, by kind.", "kind")
-		w.latency = w.Metrics.Histogram("queue_job_latency_seconds", "Enqueue-to-done latency by kind — the §6.4 resolver latency for run.finished.", metric.DefaultLatencyBuckets, "kind")
-		w.polled = w.Metrics.Gauge("queue_worker_last_poll_timestamp_seconds", "Unix time this worker last looked at the queue, by kind; stale = stuck.", "kind")
+		m := metricsFor(w.Metrics)
+		w.jobs, w.seconds, w.depth, w.age, w.latency, w.polled = m.jobs, m.seconds, m.depth, m.age, m.latency, m.polled
 	}
 }
 

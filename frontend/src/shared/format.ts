@@ -52,14 +52,21 @@ export function tone(value: string, flaky = 0) {
   )
     return "danger";
   if (
-    ["passed", "stable", "approved", "shipped", "automated", "done"].includes(
+    ["passed", "stable", "approved", "shipped", "automated", "done", "ok"].includes(
       value,
     )
   )
     return "success";
-  if (["warn", "automation_candidate", "inconclusive"].includes(value))
+  if (
+    ["warn", "warning", "automation_candidate", "inconclusive"].includes(value)
+  )
     return "warning";
-  if (["running", "queued", "active", "open"].includes(value)) return "info";
+  if (
+    ["running", "queued", "active", "open", "pending", "finding"].includes(
+      value,
+    )
+  )
+    return "info";
   return "neutral";
 }
 export function bytes(value: number) {

@@ -49,6 +49,9 @@ export class ProjectAccess {
   name(projectId: string) {
     return this.projects.get(projectId)?.name ?? "";
   }
+  workspaceName(projectId: string) {
+    return this.projects.get(projectId)?.workspaceName ?? "";
+  }
   can(projectId: string, action: ProjectAction) {
     return this.projects.get(projectId)?.actions.includes(action) ?? false;
   }

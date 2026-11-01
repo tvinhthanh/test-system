@@ -74,8 +74,11 @@ func (s *service) Runs(ctx context.Context, projectID string, f RunFilter) (Page
 	if f.Status != "" && !validRunStatus[f.Status] {
 		return Page[Run]{}, fmt.Errorf("%w: status %q", ErrInvalid, f.Status)
 	}
+	if f.Source != "" && f.Source != "playwright" && f.Source != "junit" && f.Source != "auto" {
+		return Page[Run]{}, fmt.Errorf("%w: source %q", ErrInvalid, f.Source)
+	}
 	limit := clamp(f.Limit, 20)
-	fh := filterHash("runs", f.Q, f.Status, f.Environment, "-startedAt")
+	fh := filterHash("runs", f.Q, f.Status, f.Environment, f.Source, "-startedAt")
 	var afterTime *time.Time
 	var afterID *string
 	if f.Cursor != "" {
@@ -99,9 +102,14 @@ func (s *service) Runs(ctx context.Context, projectID string, f RunFilter) (Page
 		   AND ($2::text IS NULL OR r.status = $2)
 		   AND ($3::text IS NULL OR e.key = $3)
 		   AND ($4::text IS NULL OR r.branch ILIKE $4 OR r.commit_sha ILIKE $4 OR r.local_run_id::text ILIKE $4)
-		   AND ($5::timestamptz IS NULL OR (r.started_at, r.id) < ($5, $6::uuid))
+		   AND ($5::text IS NULL OR CASE
+		     WHEN r.trigger->>'source' = 'junit-import' AND r.trigger->>'importedBy' LIKE 'autotest:%' THEN 'auto'
+		     WHEN r.trigger->>'source' = 'junit-import' THEN 'junit'
+		     WHEN r.framework->>'name' = 'playwright' THEN 'playwright'
+		     ELSE 'other' END = $5)
+		   AND ($6::timestamptz IS NULL OR (r.started_at, r.id) < ($6, $7::uuid))
 		 ORDER BY r.started_at DESC, r.id DESC
-		 LIMIT $7`, projectID, nullable(f.Status), nullable(f.Environment), q, afterTime, afterID, limit+1)
+		 LIMIT $8`, projectID, nullable(f.Status), nullable(f.Environment), q, nullable(f.Source), afterTime, afterID, limit+1)
 	if err != nil {
 		return Page[Run]{}, err
 	}

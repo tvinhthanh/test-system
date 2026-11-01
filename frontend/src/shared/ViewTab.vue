@@ -6,8 +6,8 @@ withDefaults(defineProps<{ to?: string; selected?: boolean }>(), {
 });
 defineEmits<{ select: [] }>();
 const base =
-  "-mb-px inline-flex h-10 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors [&_svg]:size-4";
-const on = "border-primary text-foreground";
+  "-mb-px inline-flex h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors lg:h-10 [&_svg]:size-4";
+const on = "border-primary text-primary";
 const off =
   "border-transparent text-muted-foreground hover:text-foreground hover:border-border";
 </script>

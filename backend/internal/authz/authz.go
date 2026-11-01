@@ -51,6 +51,9 @@ type Permission string
 const (
 	PermProjectIngest Permission = "project:ingest" // write-only, the default for ingest tokens
 	PermProjectRead   Permission = "project:read"
+	// PermProjectAutorun starts the project's runnable cases and reads how
+	// they went (QĐ-16): a deploy pipeline's "test it now".
+	PermProjectAutorun Permission = "project:autorun"
 )
 
 // Action is a row of the matrix §11.3.2, P1 columns only.
@@ -66,7 +69,8 @@ const (
 	ActionMemberManage     Action = "member.manage"
 	ActionOrgManage        Action = "org.manage" // billing, delete org
 	ActionDataDelete       Action = "data.delete"
-	ActionIngest           Action = "ingest" // tokens only: POST /v1/runs and friends
+	ActionIngest           Action = "ingest"       // tokens only: POST /v1/runs and friends
+	ActionAutoRun          Action = "autotest.run" // tokens only: POST /v1/auto-runs (people start runs with testmgmt.write)
 	// P2 (§6.8, QĐ-12): manual test management is daily work like triage;
 	// the release decision is a named override and sits with maintainers.
 	ActionTestmgmtWrite Action = "testmgmt.write" // cases, requirements, plans, executions, imports
@@ -114,9 +118,9 @@ type Principal struct {
 	MFAEnrollmentRequired bool
 }
 
-// User is a dashboard account (§11.2). P1-min creates users by script and
-// marks them verified there; self-service signup with a verification mail
-// comes with the client.
+// User is a dashboard account (§11.2). Accounts come verified from the admin
+// script, an accepted invitation or a completed sign-up (SIGNUP=on) — each
+// after the address was proved, never before.
 type User struct {
 	ID              string
 	Email           string
@@ -295,7 +299,7 @@ var (
 	// ErrMFAMandatory: an org owner may not turn MFA off (§11.2).
 	ErrMFAMandatory = errors.New("authz: MFA is mandatory for org owners")
 	// ErrNoAccount: an OAuth identity that is not linked and whose verified
-	// email matches no verified account (no self-signup, §11.2).
+	// email matches no verified account (OAuth never creates one, §11.2).
 	ErrNoAccount = errors.New("authz: no account for that identity")
 	// ErrLastSignIn: removing this would leave the account no way to sign
 	// in (no password, no other linked provider).
@@ -415,13 +419,25 @@ type Service interface {
 	// the role and opens a session; ErrAccountExists when the email has an
 	// account by now (role granted, no session).
 	AcceptInvitation(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
-	// Signup (ADR-001, variant A "join_org") creates an account and a pending
-	// access request for a node, then opens a session. No role is granted
-	// until an admin approves, so the session reaches nothing. ErrAccountExists
-	// when the email is taken. Audited access_request.create.
-	Signup(ctx context.Context, email, password string, scope ScopeRef, role Role, note string, meta SessionMeta) (session Session, secret string, err error)
+	// Self-serve sign-up (ADR-001, variant A "join_org"), proved by mail like
+	// forgot password. CountSignupRequest is what the form waits for: its
+	// shape (ErrInvalid) and 5 per 15 minutes per IP and per address, every
+	// request counted (ErrRateLimited). IssueSignup files the request and
+	// returns (address, token) to mail, or ("", "") when the address has an
+	// account; run it after the answer has gone.
+	CountSignupRequest(ctx context.Context, req SignupRequest, ip string) error
+	IssueSignup(ctx context.Context, req SignupRequest) (to, token string, err error)
+	// CompleteSignup spends the mailed token: creates the verified account
+	// with password and the pending access request (audited
+	// access_request.create), then opens a session that reaches nothing until
+	// an admin approves. ErrNotFound for a bad link, ErrAccountExists when the
+	// address got an account since.
+	CompleteSignup(ctx context.Context, token, password string, meta SessionMeta) (session Session, secret string, err error)
 	// AccessRequests lists a node's pending join requests, newest first.
 	AccessRequests(ctx context.Context, scope ScopeRef) ([]AccessRequest, error)
+	// PendingAccessRequest reads one pending request on a node (ErrNotFound
+	// otherwise), so an approval's role is known before deciding.
+	PendingAccessRequest(ctx context.Context, scope ScopeRef, id string) (AccessRequest, error)
 	// DecideAccessRequest approves (granting the requested role, or the
 	// override) or denies a pending request on scope; audited.
 	DecideAccessRequest(ctx context.Context, scope ScopeRef, id, decision string, role Role, actor string) error

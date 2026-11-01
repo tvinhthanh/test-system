@@ -82,8 +82,97 @@ let fixtureInvitations = [
     expiresAt: new Date(Date.UTC(2026, 8, 25, 8)).toISOString(),
   },
 ];
-
+const projectActions = [
+  "view",
+  "triage",
+  "identity.merge",
+  "token.manage",
+  "project.configure",
+  "project.manage",
+  "member.manage",
+  "data.delete",
+  "testmgmt.write",
+  "release.decide",
+];
+let fixtureProjects = [
+  {
+    id: "commerce",
+    name: "Commerce Web",
+    workspaceName: "Acme Engineering",
+    actions: projectActions,
+  },
+  {
+    id: "platform",
+    name: "Platform API",
+    workspaceName: "Acme Engineering",
+    actions: ["view"],
+  },
+];
+let fixtureDeletedProjects = [
+  {
+    id: "retired-storefront",
+    name: "Retired Storefront",
+    deletedAt: "2026-09-20T08:00:00Z",
+    deletedBy: user.email,
+    purgeAfter: "2026-10-20T08:00:00Z",
+  },
+];
+const token = (
+  id: string,
+  name: string,
+  permissions: string[],
+  revokedAt: string | null,
+) => ({
+  id,
+  prefix: "atp_ing_" + id.slice(0, 8),
+  name,
+  permissions,
+  createdAt: "2026-09-01T08:00:00Z",
+  lastUsedAt: revokedAt ? null : "2026-09-28T21:14:00Z",
+  expiresAt: "2027-09-01T08:00:00Z",
+  revokedAt,
+});
+let fixtureTokens = [
+  token(
+    "a1b2c3d4-0000-4000-8000-000000000001",
+    "github-actions main",
+    ["project:ingest", "project:read"],
+    null,
+  ),
+  token(
+    "e5f6a7b8-0000-4000-8000-000000000002",
+    "old jenkins",
+    ["project:ingest"],
+    "2026-09-10T08:00:00Z",
+  ),
+];
+let fixtureDeletedRuns = [
+  {
+    id: "deleted-run-preview",
+    branch: "archive/checkout-v1",
+    commitSha: "1f4c8a0d92be",
+    status: "failed",
+    startedAt: "2026-08-29T08:00:00Z",
+    deletedAt: "2026-09-20T08:00:00Z",
+    deletedBy: user.email,
+    purgeAfter: "2026-10-20T08:00:00Z",
+  },
+];
 export function createFixtureTransport(): Transport {
+  const auto = createAutoFixture();
+  const specialized = createSpecializedFixture();
+  let fixtureAccessRequests = [
+    {
+      id: "request-preview",
+      userId: "preview-requester",
+      email: "new.member@example.test",
+      requestedRole: "member",
+      level: "project",
+      scopeId: "commerce",
+      note: "Joining the checkout testing team.",
+      createdAt: "2026-10-29T08:00:00Z",
+    },
+  ];
   return async (input, init) => {
     await new Promise<void>((resolve, reject) => {
       const signal = init?.signal;
@@ -100,8 +189,18 @@ export function createFixtureTransport(): Transport {
     });
     const url = new URL(String(input), location.origin);
     const path = url.pathname;
-    const signedIn = sessionStorage.getItem(sessionKey) !== "out";
+    const sessionKind = sessionStorage.getItem(sessionKey);
+    const signedIn = sessionKind !== "out";
+    const signupUser = {
+      ...user,
+      id: "preview-signup-user",
+      email:
+        sessionStorage.getItem("atp-fixture-signup-email") ??
+        "new@example.test",
+      name: "New member",
+    };
     function response(value: unknown, status = 200) {
+      if (status === 204) return new Response(null, { status });
       return new Response(JSON.stringify(value), {
         status,
         headers: { "Content-Type": "application/json", "X-Request-Id": marker },
@@ -113,9 +212,81 @@ export function createFixtureTransport(): Transport {
         csrfToken: marker,
         invitations: true,
         passwordReset: true,
+        signup: true,
         providers: ["google", "github"],
-        user: signedIn || init?.method === "POST" ? user : null,
+        user:
+          signedIn || init?.method === "POST"
+            ? sessionKind === "signup"
+              ? signupUser
+              : user
+            : null,
       });
+    }
+    // A preview mail is not sent. The completion path accepts an atp_sgn_
+    // token so both modes of the sign-up page can be exercised explicitly.
+    if (path === "/v1/session/signup") {
+      if (signedIn)
+        return response(
+          { error: { code: "ALREADY_LOGGED_IN", message: "sign out first" } },
+          400,
+        );
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        email?: string;
+        scopeLevel?: string;
+        scopeId?: string;
+        requestedRole?: string;
+        note?: string;
+      };
+      const roles: Record<string, string[]> = {
+        project: ["member", "viewer", "maintainer"],
+        workspace: ["workspace_admin"],
+        organization: ["org_admin"],
+      };
+      if (
+        !body.email?.includes("@") ||
+        !body.scopeId ||
+        !roles[body.scopeLevel ?? ""]?.includes(body.requestedRole ?? "") ||
+        (body.note?.length ?? 0) > 1000
+      )
+        return response(
+          {
+            error: {
+              code: "INVALID_SIGNUP",
+              message: "invalid sign-up request",
+            },
+          },
+          400,
+        );
+      sessionStorage.setItem("atp-fixture-signup-email", body.email);
+      return response(
+        {
+          message: "if that email can sign up, a link to finish is on its way",
+        },
+        202,
+      );
+    }
+    if (path === "/v1/session/signup/complete") {
+      if (signedIn)
+        return response(
+          { error: { code: "ALREADY_LOGGED_IN", message: "sign out first" } },
+          400,
+        );
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        token?: string;
+        password?: string;
+      };
+      if (!body.token?.startsWith("atp_sgn_"))
+        return response(
+          { error: { code: "SIGNUP_NOT_FOUND", message: "link unavailable" } },
+          404,
+        );
+      if ((body.password?.length ?? 0) < 12)
+        return response(
+          { error: { code: "INVALID_PASSWORD", message: "too short" } },
+          400,
+        );
+      sessionStorage.setItem(sessionKey, "signup");
+      return response({ csrfToken: marker, user: signupUser });
     }
     if (path === "/v1/session/password/forgot")
       return response(
@@ -239,27 +410,7 @@ export function createFixtureTransport(): Transport {
     }
     if (path === "/v1/projects")
       return response({
-        items: [
-          {
-            id: "commerce",
-            name: "Commerce Web",
-            workspaceName: "Acme Engineering",
-            actions: [
-              "view",
-              "triage",
-              "identity.merge",
-              "member.manage",
-              "testmgmt.write",
-              "release.decide",
-            ],
-          },
-          {
-            id: "platform",
-            name: "Platform API",
-            workspaceName: "Acme Engineering",
-            actions: ["view"],
-          },
-        ],
+        items: sessionKind === "signup" ? [] : fixtureProjects,
         nextCursor: null,
       });
     // ROI (§6.8.3): one measured baseline, so the page shows hours offline;
@@ -288,52 +439,97 @@ export function createFixtureTransport(): Transport {
         fewTriaged: false,
         minTriaged: 10,
       });
-    // Create project: lands on the first fixture project.
-    if (/^\/v1\/workspaces\/[^/]+\/projects$/.test(path))
-      return response(
-        { id: "commerce", name: "Commerce Web", workspaceName: "Web" },
-        201,
-      );
-    // CI tokens: one live, one revoked; issuing echoes a fake secret.
-    if (/^\/v1\/projects\/[^/]+\/tokens(?:\/[^/]+)?$/.test(path)) {
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
-      const t = (id: string, name: string, revoked: string | null) => ({
-        id,
-        prefix: "atp_ing_" + id.slice(0, 8),
-        name,
-        permissions: ["project:ingest"],
-        createdAt: "2026-09-01T08:00:00Z",
-        lastUsedAt: revoked ? null : "2026-09-28T21:14:00Z",
-        expiresAt: "2027-09-01T08:00:00Z",
-        revokedAt: revoked,
-      });
-      if (init?.method === "POST")
-        return response(
+    const workspaceProjects = path.match(
+      /^\/v1\/workspaces\/([^/]+)\/projects(?:\/([^/]+))?(?:\/(restore|deleted))?$/,
+    );
+    if (workspaceProjects) {
+      const [, , projectId, action] = workspaceProjects;
+      if (projectId === "deleted" && !action)
+        return response({ items: fixtureDeletedProjects, nextCursor: null });
+      if (projectId && action === "restore") {
+        const restored = fixtureDeletedProjects.find((p) => p.id === projectId);
+        if (!restored)
+          return response(
+            { error: { code: "NOT_FOUND", message: "not found" } },
+            404,
+          );
+        fixtureDeletedProjects = fixtureDeletedProjects.filter(
+          (p) => p.id !== projectId,
+        );
+        fixtureProjects = [
+          ...fixtureProjects,
           {
-            token: t(
-              "c0ffee00-0000-4000-8000-000000000003",
-              "new pipeline",
-              null,
-            ),
-            secret: "atp_ing_c0ffee00" + "x".repeat(40),
+            id: restored.id,
+            name: restored.name,
+            workspaceName: "Acme Engineering",
+            actions: projectActions,
           },
+        ];
+        return response({ id: restored.id, name: restored.name });
+      }
+      if (!projectId && init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
+        const created = {
+          id: `fixture-project-${fixtureProjects.length + 1}`,
+          name: String(body.name ?? ""),
+          workspaceName: "Acme Engineering",
+          actions: projectActions,
+        };
+        fixtureProjects = [...fixtureProjects, created];
+        return response(created, 201);
+      }
+    }
+    const projectLifecycle = path.match(/^\/v1\/projects\/([^/]+)$/);
+    if (projectLifecycle && init?.method === "DELETE") {
+      const projectId = decodeURIComponent(projectLifecycle[1]!);
+      const existing = fixtureProjects.find((p) => p.id === projectId);
+      if (!existing)
+        return response(
+          { error: { code: "NOT_FOUND", message: "not found" } },
+          404,
+        );
+      const deleted = {
+        id: existing.id,
+        name: existing.name,
+        deletedAt: new Date().toISOString(),
+        deletedBy: user.email,
+        purgeAfter: new Date(Date.now() + 30 * 86400000).toISOString(),
+      };
+      fixtureProjects = fixtureProjects.filter((p) => p.id !== projectId);
+      fixtureDeletedProjects = [deleted, ...fixtureDeletedProjects];
+      return response(deleted);
+    }
+    // CI tokens: state changes remain visible after issuing or revoking.
+    const tokenPath = path.match(
+      /^\/v1\/projects\/[^/]+\/tokens(?:\/([^/]+))?$/,
+    );
+    if (tokenPath) {
+      if (init?.method === "DELETE") {
+        fixtureTokens = fixtureTokens.map((t) =>
+          t.id === tokenPath[1]
+            ? { ...t, revokedAt: new Date().toISOString() }
+            : t,
+        );
+        return new Response(null, { status: 204 });
+      }
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as {
+          name?: string;
+          permissions?: string[];
+        };
+        const issued = token(
+          `c0ffee00-0000-4000-8000-${String(fixtureTokens.length + 1).padStart(12, "0")}`,
+          String(body.name ?? "new pipeline"),
+          body.permissions ?? ["project:ingest"],
+          null,
+        );
+        fixtureTokens = [issued, ...fixtureTokens];
+        return response(
+          { token: issued, secret: "atp_ing_c0ffee00" + "x".repeat(40) },
           201,
         );
-      return response({
-        items: [
-          t(
-            "a1b2c3d4-0000-4000-8000-000000000001",
-            "github-actions main",
-            null,
-          ),
-          t(
-            "e5f6a7b8-0000-4000-8000-000000000002",
-            "old jenkins",
-            "2026-09-10T08:00:00Z",
-          ),
-        ],
-        nextCursor: null,
-      });
+      }
+      return response({ items: fixtureTokens, nextCursor: null });
     }
     // JUnit upload: always "imported" into the first fixture run, so the
     // sheet's result and its link can be seen offline.
@@ -353,6 +549,19 @@ export function createFixtureTransport(): Transport {
         },
         201,
       );
+    const deletedRunsPath = path.match(
+      /^\/v1\/projects\/(commerce|platform)\/runs\/deleted$/,
+    );
+    if (deletedRunsPath)
+      return response({ items: fixtureDeletedRuns, nextCursor: null });
+    const restoreRunPath = path.match(
+      /^\/v1\/projects\/(commerce|platform)\/runs\/([^/]+)\/restore$/,
+    );
+    if (restoreRunPath) {
+      const runId = decodeURIComponent(restoreRunPath[2]!);
+      fixtureDeletedRuns = fixtureDeletedRuns.filter((r) => r.id !== runId);
+      return response({ id: runId });
+    }
     const match = path.match(
       /^\/v1\/projects\/(commerce|platform)\/runs(?:\/([^/]+))?(\/results)?$/,
     );
@@ -386,6 +595,19 @@ export function createFixtureTransport(): Transport {
           })),
           nextCursor: null,
         });
+      if (id && init?.method === "DELETE") {
+        const active = run(index);
+        const deleted = {
+          ...active,
+          id,
+          commitSha: String(active.commitSha),
+          deletedAt: new Date().toISOString(),
+          deletedBy: user.email,
+          purgeAfter: new Date(Date.now() + 30 * 86400000).toISOString(),
+        };
+        fixtureDeletedRuns = [deleted, ...fixtureDeletedRuns];
+        return response(deleted);
+      }
     }
     const resultMatch = path.match(
       /^\/v1\/projects\/(commerce|platform)\/results\/(result-\d+)$/,
@@ -460,17 +682,25 @@ export function createFixtureTransport(): Transport {
     // Test Management (§6.8): a small, coherent set — two suites, three
     // requirements, five cases (two critical, one linked), one plan with
     // executions, two releases (one blocked, one shipped by override).
+    const autoResult = auto(url, init);
+    if (autoResult) return response(autoResult.body, autoResult.status);
+    const specializedResult = specialized(url, init);
+    if (specializedResult)
+      return response(specializedResult.body, specializedResult.status);
     const tm = fixtureTestmgmt(url, init);
     if (tm) return response(tm.body, tm.status);
     // Team screens: the preview user owns one organization with two
     // workspaces. Read-only here — writes answer as the project list does.
     if (path === "/v1/member-scopes")
       return response({
-        items: [
-          ["organization", "acme", "Acme Engineering"],
-          ["workspace", "web", "Web"],
-          ["workspace", "platform-ws", "Platform"],
-        ].map(([level, id, name]) => ({
+        items: (sessionKind === "signup"
+          ? []
+          : [
+              ["organization", "acme", "Acme Engineering"],
+              ["workspace", "web", "Web"],
+              ["workspace", "platform-ws", "Platform"],
+            ]
+        ).map(([level, id, name]) => ({
           level,
           id,
           name,
@@ -546,6 +776,52 @@ export function createFixtureTransport(): Transport {
         return new Response(null, { status: 204 });
       }
       return response({ items: fixtureInvitations, nextCursor: null });
+    }
+    const access = path.match(
+      /^\/v1\/(projects|organizations|workspaces)\/([^/]+)\/access-requests(?:\/([^/]+)\/decide)?$/,
+    );
+    if (access) {
+      const level = access[1]!.slice(0, -1);
+      const scopeId = decodeURIComponent(access[2]!);
+      if (init?.method === "POST") {
+        const pending = fixtureAccessRequests.find(
+          (item) => item.id === access[3],
+        );
+        if (!pending || pending.level !== level || pending.scopeId !== scopeId)
+          return response(
+            { error: { code: "NOT_FOUND", message: "not found" } },
+            404,
+          );
+        const body = JSON.parse(String(init.body ?? "{}")) as {
+          decision?: string;
+          role?: string;
+        };
+        if (body.decision !== "approved" && body.decision !== "denied")
+          return response(
+            { error: { code: "INVALID_PAYLOAD", message: "invalid decision" } },
+            400,
+          );
+        fixtureAccessRequests = fixtureAccessRequests.filter(
+          (item) => item.id !== pending.id,
+        );
+        if (body.decision === "approved" && pending.level === "project")
+          fixtureMembers = [
+            ...fixtureMembers,
+            {
+              userId: pending.userId,
+              email: pending.email,
+              role: body.role || pending.requestedRole,
+              level: "project",
+              createdAt: iso(0),
+            },
+          ];
+        return response({ id: pending.id, decision: body.decision });
+      }
+      return response({
+        items: fixtureAccessRequests
+          .filter((item) => item.level === level && item.scopeId === scopeId)
+          .map(({ scopeId: _scopeId, ...item }) => item),
+      });
     }
     // §11.3 members: the preview user is a workspace admin, so the list
     // shows one inherited row next to the project's own.
@@ -742,12 +1018,15 @@ export function createFixtureTransport(): Transport {
     if (id) return response(run(index));
     const status = url.searchParams.get("status"),
       q = url.searchParams.get("q")?.toLowerCase() ?? "",
-      env = url.searchParams.get("environment")?.toLowerCase() ?? "";
+      env = url.searchParams.get("environment")?.toLowerCase() ?? "",
+      source = url.searchParams.get("source") ?? "";
     const items =
       project === "platform"
         ? []
         : runIds
             .map((_, i) => run(i))
+            .filter((r) => !fixtureDeletedRuns.some((d) => d.id === r.id))
+            .filter(() => !source || source === "playwright")
             .filter(
               (r) =>
                 (!status || r.status === status) &&
@@ -1226,4 +1505,710 @@ function fixtureTestmgmt(
     }
   }
   return null;
+}
+
+// QĐ-14/QĐ-16 preview. These answers mirror cmd/api/environments.go,
+// ai.go, autotest.go and urlchecks.go; they never enter a production build.
+// State belongs to one transport, so a fresh preview/test starts clean.
+function createAutoFixture() {
+  type Answer = { body: unknown; status?: number };
+  type Step = {
+    do: string;
+    by: string;
+    role: string;
+    name: string;
+    value: string;
+    say: string;
+    expected: string;
+  };
+  type Account = {
+    key: string;
+    username: string;
+    loginUrl: string;
+    loginSteps: Step[] | null;
+    loginStatus: string;
+    loginError: string;
+    loginCheckedAt: string | null;
+    updatedBy: string;
+    updatedAt: string;
+  };
+  const stamp = iso(0);
+  const missing: Answer = {
+    body: { error: { code: "NOT_FOUND", message: "not found" } },
+    status: 404,
+  };
+  const denied: Answer = {
+    body: { error: { code: "FORBIDDEN", message: "permission denied" } },
+    status: 403,
+  };
+  const invalid = (field: string): Answer => ({
+    body: {
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: `check ${field}`,
+        details: { field },
+      },
+    },
+    status: 400,
+  });
+  const read = (init?: RequestInit): Record<string, unknown> =>
+    typeof init?.body === "string"
+      ? (JSON.parse(init.body) as Record<string, unknown>)
+      : {};
+  const strings = (value: unknown): Record<string, string> =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(
+          Object.entries(value).filter(([, v]) => typeof v === "string"),
+        )
+      : {};
+  const steps = (value: unknown): Step[] =>
+    Array.isArray(value) ? (value.slice(0, 40) as Step[]) : [];
+  const titleStep: Step = {
+    do: "expect_title",
+    by: "",
+    role: "",
+    name: "",
+    value: "Example Domain",
+    say: "The example page opens",
+    expected: "The page has its title",
+  };
+  let environments = [
+    {
+      id: "env-preview",
+      key: "preview",
+      baseUrl: "https://example.com",
+      createdAt: iso(4000),
+      updatedAt: stamp,
+    },
+    {
+      id: "env-staging",
+      key: "staging",
+      baseUrl: "",
+      createdAt: iso(3000),
+      updatedAt: stamp,
+    },
+  ];
+  let accounts: Account[] = [
+    {
+      key: "shopper",
+      username: "shopper@example.test",
+      loginUrl: "https://example.com/login",
+      loginSteps: null,
+      loginStatus: "unknown",
+      loginError: "",
+      loginCheckedAt: null,
+      updatedBy: user.email,
+      updatedAt: stamp,
+    },
+  ];
+  let specs = [
+    {
+      caseId: "case-0",
+      title: "Pay with saved card",
+      priority: "p0",
+      target: "/",
+      account: "",
+      inputs: {} as Record<string, string>,
+      steps: [titleStep],
+      source: "manual",
+      updatedBy: user.email,
+      updatedAt: stamp,
+      last: {
+        runId: "auto-run-preview",
+        status: "passed",
+        finishedAt: iso(40),
+      } as { runId: string; status: string; finishedAt: string } | null,
+    },
+  ];
+  const seedCase = {
+    caseId: "case-0",
+    position: 0,
+    title: specs[0]!.title,
+    target: "/",
+    account: "",
+    inputs: {},
+    steps: [titleStep],
+    status: "passed",
+    results: [
+      {
+        status: "passed",
+        kind: "",
+        error: "",
+        ms: 420,
+        healed: null as { steps: Step[]; reason: string } | null,
+      },
+    ],
+    console: [] as string[],
+    healed: 0,
+    durationMs: 420,
+    error: "",
+    screenshots: [] as string[],
+    executionId: "",
+    finishedAt: iso(40) as string | null,
+  };
+  let runs = [
+    {
+      id: "auto-run-preview",
+      environmentId: "env-preview",
+      planId: "",
+      status: "done",
+      trigger: "dashboard",
+      requestedBy: user.email,
+      heal: true,
+      total: 1,
+      passed: 1,
+      failed: 0,
+      errored: 0,
+      healed: 0,
+      testRunId: "",
+      error: "",
+      createdAt: iso(41),
+      startedAt: iso(41),
+      finishedAt: iso(40) as string | null,
+      cases: [seedCase],
+    },
+  ];
+  const check = {
+    id: "url-check-preview",
+    environmentId: "env-preview",
+    url: "https://example.com",
+    status: "done",
+    verdict: "warning",
+    title: "Example Domain",
+    finalUrl: "https://example.com",
+    requestedBy: user.email,
+    checkStatuses: ["passed", "warning"],
+    report: {
+      url: "https://example.com",
+      finalUrl: "https://example.com",
+      status: 200,
+      title: "Example Domain",
+      durationMs: 820,
+      blocked: [] as string[],
+      metrics: {
+        ttfbMs: 120,
+        lcpMs: 720,
+        loadMs: 820,
+        cls: 0,
+        requests: 1,
+        transferBytes: 1256,
+      },
+      checks: [
+        {
+          key: "http",
+          title: "HTTP response",
+          status: "passed",
+          summary: "The page responded",
+          details: [] as string[],
+        },
+        {
+          key: "mobile",
+          title: "Mobile layout",
+          status: "warning",
+          summary: "Review this page at a narrow width",
+          details: [] as string[],
+        },
+      ],
+    },
+    error: "",
+    screenshots: [] as string[],
+    createdAt: iso(80),
+    finishedAt: iso(79) as string | null,
+    depth: 0,
+  };
+  let checks = [check];
+  let scans = [
+    {
+      id: "scan-preview",
+      environmentId: "env-preview",
+      startUrl: "https://example.com",
+      maxPages: 10,
+      account: "",
+      status: "done",
+      requestedBy: user.email,
+      error: "",
+      pages: 1,
+      checked: 1,
+      passed: 0,
+      warnings: 1,
+      failed: 0,
+      createdAt: iso(80),
+      finishedAt: iso(79) as string | null,
+      checks: [check],
+    },
+  ];
+  const drafts = new Map<string, Record<string, unknown>>();
+  const caseSuggestions = new Map<string, Record<string, unknown>>();
+  const listed = (items: unknown[], enabled = true): Answer => ({
+    body: { items, nextCursor: null, enabled },
+  });
+  return (url: URL, init?: RequestInit): Answer | null => {
+    const match = url.pathname.match(
+      /^\/v1\/projects\/(commerce|platform)\/(.+)$/,
+    );
+    if (!match) return null;
+    const project = match[1]!;
+    const path = match[2]!;
+    const method = init?.method ?? "GET";
+    const body = read(init);
+    const empty = project === "platform";
+    const write = method !== "GET";
+    if (
+      write &&
+      empty &&
+      /^(environments|auto-specs|auto-drafts|auto-runs|site-scans|url-checks|test-cases\/[^/]+\/auto-spec)/.test(
+        path,
+      )
+    )
+      return denied;
+
+    if (path === "ai-status" && !write)
+      return {
+        body: {
+          available: true,
+          source: "server",
+          model: "claude-opus-5-5",
+          readsPages: true,
+        },
+      };
+
+    if (path === "case-suggestions" && method === "POST") {
+      if (empty) return denied;
+      const count = Math.min(15, Math.max(1, Number(body.count) || 1));
+      const environmentId = String(body.environmentId ?? "");
+      const environment = environments.find(
+        (item) => item.id === environmentId,
+      );
+      const id = crypto.randomUUID();
+      const made: Record<string, unknown> = {
+        id,
+        environmentId,
+        testType: String(body.testType ?? "functional"),
+        url: String(body.url || environment?.baseUrl || ""),
+        context: String(body.context ?? ""),
+        count,
+        status: "done",
+        drafts: Array.from({ length: count }, (_, index) => ({
+          title: `Check the page ${index + 1}`,
+          priority: "p2",
+          preconditions: "Open the selected site.",
+          steps: [{ action: "Open the page", expected: "The page loads" }],
+          why: "Preview draft for the selected testing type.",
+        })),
+        pageRead: !!environment?.baseUrl,
+        model: "claude-opus-5-5",
+        keySource: "server",
+        error: "",
+        createdAt: stamp,
+        finishedAt: stamp,
+      };
+      caseSuggestions.set(id, made);
+      return { body: made, status: 202 };
+    }
+    const caseSuggestion = path.match(/^case-suggestions\/([^/]+)$/);
+    if (caseSuggestion && !write) {
+      const found = caseSuggestions.get(caseSuggestion[1]!);
+      return found ? { body: found } : missing;
+    }
+
+    if (path === "environments") {
+      if (!write)
+        return { body: { items: empty ? [] : environments, nextCursor: null } };
+      const key = String(body.key ?? "").trim();
+      if (!key) return invalid("key");
+      if (environments.some((e) => e.key === key))
+        return {
+          body: { error: { code: "CONFLICT", message: "environment exists" } },
+          status: 409,
+        };
+      const made = {
+        id: crypto.randomUUID(),
+        key,
+        baseUrl: String(body.baseUrl ?? ""),
+        createdAt: stamp,
+        updatedAt: stamp,
+      };
+      environments = [...environments, made];
+      return { body: made, status: 201 };
+    }
+    const env = path.match(/^environments\/([^/]+)$/);
+    if (env && method === "PATCH") {
+      const current = environments.find((e) => e.id === env[1]);
+      if (!current) return missing;
+      const updated = {
+        ...current,
+        baseUrl: String(body.baseUrl ?? ""),
+        updatedAt: stamp,
+      };
+      environments = environments.map((e) =>
+        e.id === current.id ? updated : e,
+      );
+      return { body: updated };
+    }
+    const account = path.match(
+      /^environments\/([^/]+)\/accounts(?:\/([^/]+))?(?:\/(find-login))?$/,
+    );
+    if (account) {
+      if (!environments.some((e) => e.id === account[1])) return missing;
+      const key = account[2];
+      if (!key && !write) return listed(empty ? [] : accounts);
+      if (!key && method === "POST") {
+        const accountKey = String(body.key ?? "").trim();
+        const username = String(body.username ?? "").trim();
+        if (!accountKey || !username)
+          return invalid(!accountKey ? "key" : "username");
+        const before = accounts.find((a) => a.key === accountKey);
+        const saved: Account = {
+          key: accountKey,
+          username,
+          loginUrl: String(body.loginUrl ?? ""),
+          loginSteps:
+            body.loginSteps === undefined
+              ? (before?.loginSteps ?? null)
+              : steps(body.loginSteps),
+          loginStatus: before?.loginStatus ?? "unknown",
+          loginError: "",
+          loginCheckedAt: before?.loginCheckedAt ?? null,
+          updatedBy: user.email,
+          updatedAt: stamp,
+        };
+        accounts = [...accounts.filter((a) => a.key !== accountKey), saved];
+        return { body: saved };
+      }
+      const found = accounts.find((a) => a.key === key);
+      if (!found) return missing;
+      if (method === "DELETE") {
+        accounts = accounts.filter((a) => a.key !== key);
+        return { body: {}, status: 204 };
+      }
+      if (method === "POST" && account[3] === "find-login") {
+        const foundLogin = {
+          ...found,
+          loginStatus: "ok",
+          loginError: "",
+          loginCheckedAt: stamp,
+          loginSteps: [
+            {
+              do: "fill",
+              by: "label",
+              role: "",
+              name: "Email",
+              value: "{{username}}",
+              say: "",
+              expected: "",
+            },
+            {
+              do: "fill",
+              by: "label",
+              role: "",
+              name: "Password",
+              value: "{{password}}",
+              say: "",
+              expected: "",
+            },
+            {
+              do: "click",
+              by: "role",
+              role: "button",
+              name: "Sign in",
+              value: "",
+              say: "",
+              expected: "",
+            },
+          ],
+        };
+        accounts = accounts.map((a) => (a.key === key ? foundLogin : a));
+        return { body: foundLogin, status: 202 };
+      }
+    }
+
+    if (path === "auto-specs/export" && !write)
+      return {
+        body: {
+          filename: "atp-auto.spec.ts",
+          content: "// Preview export. Connect a server to run these cases.\n",
+        },
+      };
+    if (path === "auto-specs") {
+      if (!write) return listed(empty ? [] : specs);
+      const title = String(body.title ?? "").trim();
+      if (!title || !Array.isArray(body.steps) || !body.steps.length)
+        return invalid(!title ? "title" : "steps");
+      const made = {
+        caseId: crypto.randomUUID(),
+        title,
+        priority: String(body.priority ?? "p2"),
+        target: String(body.target ?? "/"),
+        account: String(body.account ?? ""),
+        inputs: strings(body.inputs),
+        steps: steps(body.steps),
+        source: String(body.source ?? "manual"),
+        updatedBy: user.email,
+        updatedAt: stamp,
+        last: null,
+      };
+      specs = [...specs, made];
+      return { body: made, status: 201 };
+    }
+    const spec = path.match(/^test-cases\/([^/]+)\/auto-spec$/);
+    if (spec) {
+      const old = specs.find((s) => s.caseId === spec[1]);
+      if (!old) return missing;
+      if (!write) return { body: old };
+      if (method === "DELETE") {
+        specs = specs.filter((s) => s.caseId !== old.caseId);
+        return { body: {}, status: 204 };
+      }
+      const saved = {
+        ...old,
+        target: String(body.target ?? old.target),
+        account: String(body.account ?? old.account),
+        inputs: strings(body.inputs),
+        steps: steps(body.steps),
+        updatedAt: stamp,
+      };
+      specs = specs.map((s) => (s.caseId === old.caseId ? saved : s));
+      return { body: saved };
+    }
+    if (path === "auto-drafts" && method === "POST") {
+      if (!environments.some((e) => e.id === body.environmentId))
+        return invalid("environmentId");
+      const id = crypto.randomUUID();
+      const made: Record<string, unknown> = {
+        id,
+        environmentId: body.environmentId,
+        target: String(body.target ?? "/"),
+        account: String(body.account ?? ""),
+        inputs: strings(body.inputs),
+        context: String(body.context ?? ""),
+        count: 1,
+        testType: String(body.testType ?? "functional"),
+        status: "done",
+        drafts: [
+          {
+            title: "Example page opens",
+            priority: "p2",
+            why: "The page title confirms the destination loaded.",
+            steps: [titleStep],
+          },
+        ],
+        pageRead: true,
+        model: "claude-opus-5-5",
+        keySource: "server",
+        error: "",
+        requestedBy: user.email,
+        createdAt: stamp,
+        finishedAt: stamp,
+      };
+      drafts.set(id, made);
+      return { body: made, status: 202 };
+    }
+    const draft = path.match(/^auto-drafts\/([^/]+)$/);
+    if (draft && !write)
+      return {
+        body: drafts.get(draft[1]!) ?? missing.body,
+        status: drafts.has(draft[1]!) ? 200 : 404,
+      };
+
+    if (path === "auto-runs") {
+      if (!write) return listed(empty ? [] : runs);
+      if (!environments.some((e) => e.id === body.environmentId))
+        return invalid("environmentId");
+      const ids =
+        Array.isArray(body.caseIds) && body.caseIds.length
+          ? body.caseIds
+          : specs.map((s) => s.caseId);
+      const selected = specs.filter((s) => ids.includes(s.caseId));
+      if (!selected.length) return invalid("caseIds");
+      const id = crypto.randomUUID();
+      const cases = selected.map((s, position) => ({
+        ...seedCase,
+        caseId: s.caseId,
+        position,
+        title: s.title,
+        target: s.target,
+        account: s.account,
+        inputs: s.inputs,
+        steps: s.steps,
+        results: s.steps.map(() => ({
+          status: "passed",
+          kind: "",
+          error: "",
+          ms: 420,
+          healed: null,
+        })),
+      }));
+      const made = {
+        ...runs[0]!,
+        id,
+        environmentId: String(body.environmentId),
+        planId: "",
+        heal: body.heal !== false,
+        total: cases.length,
+        passed: cases.length,
+        failed: 0,
+        errored: 0,
+        testRunId: "",
+        createdAt: stamp,
+        startedAt: stamp,
+        finishedAt: stamp,
+        cases,
+      };
+      runs = [made, ...runs].slice(0, 50);
+      specs = specs.map((s) =>
+        selected.some((c) => c.caseId === s.caseId)
+          ? { ...s, last: { runId: id, status: "passed", finishedAt: stamp } }
+          : s,
+      );
+      return { body: made, status: 202 };
+    }
+    const run = path.match(/^auto-runs\/([^/]+)$/);
+    if (run && !write) {
+      const found = runs.find((r) => r.id === run[1]);
+      return found ? { body: found } : missing;
+    }
+    const heal = path.match(/^auto-runs\/[^/]+\/cases\/([^/]+)\/apply-heal$/);
+    if (heal && method === "POST") {
+      const found = specs.find((s) => s.caseId === heal[1]);
+      return found ? { body: found } : missing;
+    }
+
+    if (path === "site-scans") {
+      if (!write) return listed(empty ? [] : scans);
+      const environmentId = String(body.environmentId ?? "");
+      const environment = environments.find((e) => e.id === environmentId);
+      const startUrl = String(body.url || environment?.baseUrl || "");
+      if (!startUrl) return invalid("url");
+      const id = crypto.randomUUID();
+      const page = {
+        ...check,
+        id: crypto.randomUUID(),
+        environmentId,
+        url: startUrl,
+        finalUrl: startUrl,
+        report: { ...check.report, url: startUrl, finalUrl: startUrl },
+        createdAt: stamp,
+        finishedAt: stamp,
+      };
+      checks = [page, ...checks].slice(0, 50);
+      const made = {
+        ...scans[0]!,
+        id,
+        environmentId,
+        startUrl,
+        maxPages: Number(body.maxPages) || 10,
+        account: String(body.account ?? ""),
+        createdAt: stamp,
+        finishedAt: stamp,
+        checks: [page],
+      };
+      scans = [made, ...scans].slice(0, 30);
+      return { body: made, status: 202 };
+    }
+    const scan = path.match(/^site-scans\/([^/]+)$/);
+    if (scan && !write) {
+      const found = scans.find((s) => s.id === scan[1]);
+      return found ? { body: found } : missing;
+    }
+    if (path === "url-checks") {
+      if (!write) return listed(empty ? [] : checks);
+      const id = crypto.randomUUID();
+      const made = {
+        ...check,
+        id,
+        environmentId: String(body.environmentId ?? ""),
+        url: String(body.url ?? check.url),
+        createdAt: stamp,
+        finishedAt: stamp,
+      };
+      checks = [made, ...checks].slice(0, 50);
+      return { body: made, status: 202 };
+    }
+    const urlCheck = path.match(/^url-checks\/([^/]+)$/);
+    if (urlCheck && !write) {
+      const found = checks.find((c) => c.id === urlCheck[1]);
+      return found ? { body: found } : missing;
+    }
+    return null;
+  };
+}
+
+// The specialized-results preview starts empty, like a new project. Records
+// entered here stay visible for this transport's lifetime and use the same
+// DTO shape as the Go API; the server remains responsible for real assessment.
+function createSpecializedFixture() {
+  type Result = {
+    id: string;
+    kind: string;
+    title: string;
+    outcome: string;
+    reasons: string[];
+    input: Record<string, unknown>;
+    createdBy: string;
+    createdAt: string;
+  };
+  let records: Result[] = [];
+  return (
+    url: URL,
+    init?: RequestInit,
+  ): { body: unknown; status?: number } | null => {
+    const match = url.pathname.match(
+      /^\/v1\/projects\/(commerce|platform)\/specialized-results(?:\/([^/]+))?$/,
+    );
+    if (!match) return null;
+    if (init?.method === "POST") {
+      if (match[1] === "platform")
+        return {
+          body: { error: { code: "FORBIDDEN", message: "permission denied" } },
+          status: 403,
+        };
+      const input = JSON.parse(String(init.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      const existing = records.find(
+        (item) => item.input.idempotencyKey === input.idempotencyKey,
+      );
+      if (existing) return { body: existing };
+      const state = String(input.state ?? "");
+      const record: Result = {
+        id: crypto.randomUUID(),
+        kind: String(input.kind ?? ""),
+        title: String(input.title ?? ""),
+        outcome: ["not_run", "not_applicable", "import_error"].includes(state)
+          ? state
+          : "inconclusive",
+        reasons:
+          state === "completed"
+            ? ["Preview only; assessment needs the server."]
+            : [],
+        input,
+        createdBy: user.email,
+        createdAt: iso(0),
+      };
+      records = [record, ...records].slice(0, 50);
+      return { body: record, status: 201 };
+    }
+    if (match[2]) {
+      const found = records.find((item) => item.id === match[2]);
+      return found
+        ? { body: found }
+        : {
+            body: { error: { code: "NOT_FOUND", message: "not found" } },
+            status: 404,
+          };
+    }
+    const kind = url.searchParams.get("kind");
+    const outcome = url.searchParams.get("outcome");
+    return {
+      body: {
+        items: records.filter(
+          (item) =>
+            (!kind || item.kind === kind) &&
+            (!outcome || item.outcome === outcome),
+        ),
+        nextCursor: "",
+      },
+    };
+  };
 }

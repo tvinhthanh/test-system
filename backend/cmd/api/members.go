@@ -23,8 +23,8 @@ import (
 // Roles held higher up show in each list as inherited and are changed at
 // their own level.
 //
-// There is no mailer and no self-signup yet (§11.2), so a person is added by
-// the email of an existing verified account. The answer tells the manager
+// A person is added by the email of an existing verified account (an email
+// with none is invited instead when MAIL=smtp). The answer tells the manager
 // whether that account exists — an enumeration only an admin of some tenant
 // can run, through the per-user rate limit; recorded in §11.6 API6. The
 // actor recorded is the session user's email.

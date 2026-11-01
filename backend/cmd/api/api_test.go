@@ -49,9 +49,10 @@ type client struct {
 }
 
 type resp struct {
-	code int
-	body map[string]any
-	raw  string
+	code   int
+	body   map[string]any
+	raw    string
+	header http.Header
 }
 
 func (c *client) do(method, path string, body any, headers map[string]string) resp {
@@ -84,7 +85,7 @@ func (c *client) do(method, path string, body any, headers map[string]string) re
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)
-	out := resp{code: res.StatusCode, raw: string(raw)}
+	out := resp{code: res.StatusCode, raw: string(raw), header: res.Header}
 	_ = json.Unmarshal(raw, &out.body)
 	return out
 }
@@ -827,7 +828,8 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	// token, a foreign token and no token are all refused.
 	readTok, _ := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, Permissions: []authz.Permission{authz.PermProjectRead}, Name: "deploy"})
 	ci := newClient(t, srv)
-	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" {
+	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" ||
+		r.body["ci"].(map[string]any)["pass"] != true || r.body["ci"].(map[string]any)["reason"] != "release approved by carol@example.com" {
 		t.Errorf("CI gate: %d %s", r.code, r.raw)
 	}
 	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + tok.Plaintext}); r.code != 404 {

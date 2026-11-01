@@ -25,6 +25,10 @@ export function makeRouter(
         component: () => import("../../features/auth/PasswordPage.vue"),
       },
       {
+        path: "/signup",
+        component: () => import("../../features/auth/SignupPage.vue"),
+      },
+      {
         path: "/",
         component: () => import("../AppShell.vue"),
         meta: { protected: true },
@@ -98,6 +102,15 @@ export function makeRouter(
             component: () => import("../../features/testmgmt/PlansPage.vue"),
           },
           {
+            path: "p/:project/start",
+            component: () =>
+              import("../../features/testmgmt/StartTestingPage.vue"),
+          },
+          {
+            path: "p/:project/plans/:plan/run",
+            component: () => import("../../features/testmgmt/RunPlanPage.vue"),
+          },
+          {
             path: "p/:project/plans/:plan",
             component: () =>
               import("../../features/testmgmt/PlanDetailPage.vue"),
@@ -112,12 +125,44 @@ export function makeRouter(
               import("../../features/testmgmt/ReleaseDetailPage.vue"),
           },
           {
+            path: "p/:project/url-checks",
+            component: () =>
+              import("../../features/testmgmt/UrlChecksPage.vue"),
+          },
+          {
+            path: "p/:project/url-checks/:check",
+            component: () =>
+              import("../../features/testmgmt/UrlCheckDetailPage.vue"),
+          },
+          {
+            path: "p/:project/auto",
+            component: () => import("../../features/autotest/AutoTestPage.vue"),
+          },
+          {
+            path: "p/:project/auto/runs/:run",
+            component: () => import("../../features/autotest/AutoRunPage.vue"),
+          },
+          {
+            path: "p/:project/auto/scans/:scan",
+            component: () =>
+              import("../../features/autotest/SiteScanPage.vue"),
+          },
+          {
+            path: "p/:project/guide",
+            component: () => import("../../features/guide/TesterGuidePage.vue"),
+          },
+          {
             path: "team",
             component: () => import("../../features/members/TeamPage.vue"),
           },
           {
             path: "team/organizations/:organization",
             component: () => import("../../features/members/MembersPage.vue"),
+          },
+          {
+            path: "team/organizations/:organization/ai",
+            component: () =>
+              import("../../features/members/AiSettingsPage.vue"),
           },
           {
             path: "team/organizations/:organization/usage",

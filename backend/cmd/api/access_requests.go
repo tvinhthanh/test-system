@@ -94,10 +94,12 @@ func (d *dashboard) accessRequestDecide(resolve nodeResolver) http.HandlerFunc {
 			return
 		}
 		// An approval that grants a role must pick a role valid at this node,
-		// and the owner role stays the owner's alone.
+		// and the owner role stays the owner's alone — also when the role is
+		// the one the visitor asked for (the form accepts org_owner), so the
+		// role checked is the one the approval would grant.
 		grant := authz.Role(req.Role)
-		if req.Decision == "approved" && grant != "" {
-			if !slices.Contains(n.roles, grant) {
+		if req.Decision == "approved" {
+			if grant != "" && !slices.Contains(n.roles, grant) {
 				names := make([]string, len(n.roles))
 				for i, x := range n.roles {
 					names[i] = string(x)
@@ -105,7 +107,20 @@ func (d *dashboard) accessRequestDecide(resolve nodeResolver) http.HandlerFunc {
 				httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "role must be one of "+strings.Join(names, ", ")+" here", map[string]any{"field": "role"})
 				return
 			}
-			if !d.ownerOnly(w, r, n, "", grant) {
+			granted := grant
+			if granted == "" {
+				pending, err := d.authz.PendingAccessRequest(r.Context(), n.scope, r.PathValue("requestId"))
+				switch {
+				case errors.Is(err, authz.ErrNotFound):
+					httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "no pending request with that id here", nil)
+					return
+				case err != nil:
+					d.internal(w, r, err)
+					return
+				}
+				granted = pending.RequestedRole
+			}
+			if !d.ownerOnly(w, r, n, "", granted) {
 				return
 			}
 		}

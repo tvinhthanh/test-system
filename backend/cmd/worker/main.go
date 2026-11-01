@@ -17,13 +17,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/autotest"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/llm"
 	platlog "github.com/vinh/automation-testing-platform/backend/internal/platform/log"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
@@ -36,11 +39,23 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 const (
 	resolveConcurrency = 4
 	sweepEvery         = time.Minute
+	// URL checks (QĐ-14) run as many at once as the checker service takes
+	// (CHECKER_CONCURRENCY, default 2); more would only meet its 503.
+	urlCheckConcurrency = 2
+	// AI drafts: each is one model call of up to a few minutes.
+	aiConcurrency = 2
+	// Auto test (QĐ-16): each case holds one checker session
+	// (CHECKER_SESSIONS, default 4) for up to a few minutes; drafting and
+	// finding a sign-in hold one more each.
+	autoCaseConcurrency  = 2
+	autoDraftConcurrency = 1
+	autoLoginConcurrency = 1
 )
 
 func main() {
@@ -67,10 +82,11 @@ func main() {
 	ten, az, res := tenancy.New(db), authz.New(db, []byte(cfg.TokenPepper)), results.New(db)
 	q := queue.New(db)
 	pruned := reg.Counter("queue_jobs_pruned_total", "Finished jobs deleted after JOB_RETENTION.")
-	jobs := ingest.NewJobs(ingest.Deps{
+	ingestDeps := ingest.Deps{
 		DB: db, Queue: q, Tenancy: ten, Authz: az,
 		Results: res, Identity: identity.New(db), Metrics: reg, Logger: logger,
-	})
+	}
+	jobs := ingest.NewJobs(ingestDeps)
 	store, err := objstore.Open(cfg)
 	if err != nil {
 		logger.Error("boot", "err", err)
@@ -88,8 +104,53 @@ func main() {
 	artJobs := artifact.NewJobs(artifact.Deps{DB: db, Tenancy: ten, Authz: az, Results: res, Artifact: art, Metrics: reg, Logger: logger})
 	// Deleted projects past their restore window (§11.3.2), a few per sweep.
 	idn := identity.New(db)
+	// AI-drafted test cases (QĐ-15): the pool always runs — an organization
+	// may bring its own key even when the server has none. Pages are read
+	// through the URL checker only when it runs (URLCHECK=on).
+	var pages aisuggest.PageReader
+	if cfg.URLCheck {
+		outliner, err := urlcheck.NewHTTPOutliner(cfg.URLCheckURL)
+		if err != nil {
+			logger.Error("boot", "err", err)
+			os.Exit(2)
+		}
+		pages = outliner
+	}
+	model, serverModel, err := llm.Server(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
+	if err != nil {
+		logger.Error("boot", "err", err)
+		os.Exit(2)
+	}
+	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model, Pages: pages,
+		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
+	tm := testmgmt.New(db, idn, nil, testmgmt.Policy{})
+	// Auto test (QĐ-16): cases run in the checker service's browser
+	// sessions, so the pools run with URLCHECK=on; the key and model are the
+	// organization's AI settings; results go to plans and test runs.
+	var browser autotest.Browser
+	if cfg.URLCheck {
+		if browser, err = autotest.NewHTTPBrowser(cfg.URLCheckURL); err != nil {
+			logger.Error("boot", "err", err)
+			os.Exit(2)
+		}
+	}
+	auto := autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Browser: browser, LLM: model, Keys: ai,
+		Recorder: recorder{tm: tm, art: art, tenancy: ten, ingest: ingestDeps, jobs: jobs, results: res, logger: logger}})
+	// URL checks (QĐ-14) and site scans (QĐ-16): the pool only with
+	// URLCHECK=on; pruning and purging old checks always, so turning checks
+	// off keeps nothing forever. A scan as a test account signs in with
+	// the account autotest keeps.
+	urlChecks := urlcheck.New(db, nil)
+	if cfg.URLCheck {
+		checker, err := urlcheck.NewHTTPChecker(cfg.URLCheckURL)
+		if err != nil {
+			logger.Error("boot", "err", err)
+			os.Exit(2)
+		}
+		urlChecks = urlcheck.New(db, checker, scanLogins{auto})
+	}
 	purge := purger{tenancy: ten, authz: az, artifact: art, triage: triage.New(db, res), flaky: flk, identity: idn,
-		testmgmt: testmgmt.New(db, idn, nil, testmgmt.Policy{}), results: res}
+		testmgmt: tm, results: res, urlcheck: urlChecks, ai: ai, auto: auto}
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", reg.Handler())
@@ -108,6 +169,35 @@ func main() {
 	}()
 
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w := ai.Worker(aiConcurrency)
+		w.Logger, w.Metrics = logger, reg
+		logger.Info("worker pool started", "kind", aisuggest.JobDraft, "concurrency", aiConcurrency, "server_key", cfg.LLMAPIKey != "",
+			"server_provider", ai.ServerProvider(), "reads_pages", pages != nil)
+		w.Run(ctx)
+	}()
+	if cfg.URLCheck {
+		pools := []struct {
+			w *queue.Worker
+			n int
+		}{
+			{urlChecks.Worker(urlCheckConcurrency), urlCheckConcurrency},
+			{auto.CaseWorker(autoCaseConcurrency), autoCaseConcurrency},
+			{auto.DraftWorker(autoDraftConcurrency), autoDraftConcurrency},
+			{auto.LoginWorker(autoLoginConcurrency), autoLoginConcurrency},
+		}
+		for _, p := range pools {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				p.w.Logger, p.w.Metrics = logger, reg
+				logger.Info("worker pool started", "kind", p.w.Kind, "concurrency", p.n, "checker", cfg.URLCheckURL)
+				p.w.Run(ctx)
+			}()
+		}
+	}
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -154,6 +244,21 @@ func main() {
 				logger.Error("organization purge", "err", err)
 			} else if n > 0 {
 				logger.Info("organizations purged", "n", n)
+			}
+			if n, err := ai.Prune(ctx, time.Now().Add(-aisuggest.Retention), 500); err != nil {
+				logger.Error("suggestion prune", "err", err)
+			} else if n > 0 {
+				logger.Info("suggestions pruned", "n", n)
+			}
+			if n, err := auto.Prune(ctx, time.Now().Add(-autotest.Retention), 500); err != nil {
+				logger.Error("auto test prune", "err", err)
+			} else if n > 0 {
+				logger.Info("auto test drafts and runs pruned", "n", n)
+			}
+			if n, err := urlChecks.Prune(ctx, time.Now().Add(-urlcheck.Retention), 500); err != nil {
+				logger.Error("url check prune", "err", err)
+			} else if n > 0 {
+				logger.Info("url checks pruned", "n", n)
 			}
 			// Finished jobs older than JOB_RETENTION go, a bounded batch per sweep
 			// (§14.1 T5: the queue table must not grow with history).

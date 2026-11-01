@@ -245,6 +245,17 @@ func TestExecutionSnapshotRetestAndHistory(t *testing.T) {
 			t.Fatalf("accepted invalid input %+v: %v", input, err)
 		}
 	}
+	// A paper record may be back-dated, never future-dated: the newest
+	// executed_at is the case's verdict, so a future one would pin it there.
+	if _, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: c.ID, Status: ExecFailed, ExecutedAt: time.Now().Add(time.Hour)}, "alice"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("future executedAt accepted: %v", err)
+	}
+	if old, err := svc.RecordExecution(ctx, projectA, p.ID, NewExecution{TestCaseID: c.ID, Status: ExecFailed, ExecutedAt: time.Now().Add(-48 * time.Hour)}, "alice"); err != nil || !old.ExecutedAt.Before(second.ExecutedAt) {
+		t.Fatalf("back-dated execution: %+v %v", old, err)
+	}
+	if latest, err := svc.GetPlan(ctx, projectA, p.ID); err != nil || latest.Executions[0].ID != second.ID {
+		t.Fatalf("back-dated execution became the verdict: %+v %v", latest.Executions, err)
+	}
 	otherPlan, err := svc.CreatePlan(ctx, projectA, NewPlan{Name: "Other"})
 	if err != nil {
 		t.Fatal(err)

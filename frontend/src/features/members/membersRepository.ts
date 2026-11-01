@@ -37,6 +37,17 @@ export interface Invitation {
   createdAt: string;
   expiresAt: string;
 }
+// A request to join a node (self-serve sign-up, QĐ-17). Listed only after
+// the person opened the mailed link, so the email is proven.
+export interface AccessRequest {
+  id: string;
+  userId: string;
+  email: string;
+  requestedRole: Role;
+  level: Level;
+  note: string;
+  createdAt: string;
+}
 // What adding an email did: a member now, or an invitation mailed.
 export type AddResult =
   | { kind: "member"; member: Member }
@@ -76,6 +87,18 @@ function parseInvitation(value: unknown): Invitation {
     expiresAt: d.date(x.expiresAt),
   };
 }
+function parseAccessRequest(value: unknown): AccessRequest {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    userId: d.string(x.userId),
+    email: d.string(x.email),
+    requestedRole: oneOf(roles, x.requestedRole),
+    level: oneOf(levels, x.level),
+    note: d.string(x.note),
+    createdAt: d.date(x.createdAt),
+  };
+}
 function parseScope(value: unknown): MemberScope {
   const x = d.record(value);
   return {
@@ -100,6 +123,8 @@ const members = (n: MemberNode) =>
   `/v1/${collection[n.level]}/${encodeURIComponent(n.id)}/members`;
 const invitations = (n: MemberNode) =>
   `/v1/${collection[n.level]}/${encodeURIComponent(n.id)}/invitations`;
+const accessRequests = (n: MemberNode) =>
+  `/v1/${collection[n.level]}/${encodeURIComponent(n.id)}/access-requests`;
 
 // The api answers these by code; the client's status messages are too
 // generic for a form about one person.
@@ -176,6 +201,42 @@ export class MembersRepository {
       method: "DELETE",
       signal,
     });
+  }
+  // Self-serve sign-up (QĐ-17): the node's pending requests (newest first,
+  // at most 200) and the decision. Approving grants the requested role, or
+  // `role` when given; the owner role stays the owners' to grant.
+  async accessRequests(node: MemberNode, signal: AbortSignal) {
+    return d.array(
+      d.record(await this.api.request(accessRequests(node), { signal })).items,
+      parseAccessRequest,
+      200,
+    );
+  }
+  async decideAccessRequest(
+    node: MemberNode,
+    id: string,
+    decision: "approved" | "denied",
+    role: Role | "",
+    signal: AbortSignal,
+  ) {
+    try {
+      await explained(
+        this.api.request(
+          `${accessRequests(node)}/${encodeURIComponent(id)}/decide`,
+          { body: role ? { decision, role } : { decision }, signal },
+        ),
+      );
+    } catch (e) {
+      // Here 404 means another admin decided it first (or it moved away).
+      if (e instanceof ApiError && e.code === "NOT_FOUND")
+        throw new ApiError(
+          e.status,
+          e.code,
+          "That request was already decided, or it is not on this team any more. Refresh the list.",
+          e.requestId,
+        );
+      throw e;
+    }
   }
   async revoke(node: MemberNode, userId: string, signal: AbortSignal) {
     await explained(

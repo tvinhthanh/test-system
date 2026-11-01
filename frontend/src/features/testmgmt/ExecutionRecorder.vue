@@ -10,6 +10,7 @@ const props = defineProps<{
   testCase: TestCase;
   latest?: Execution;
   disabled: boolean;
+  open?: boolean; // the run screen (QĐ-15) shows it unfolded
 }>();
 const emit = defineEmits<{
   record: [
@@ -91,7 +92,7 @@ function record(status: ExecutionStatus) {
 </script>
 
 <template>
-  <details class="mt-3 border-t pt-2">
+  <details class="mt-3 border-t pt-2" :open="open">
     <summary class="cursor-pointer text-sm font-medium">
       Record execution
     </summary>

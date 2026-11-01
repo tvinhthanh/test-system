@@ -14,8 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/autotest"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
@@ -23,11 +25,13 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 // The dashboard's HTTP surface is frontend/API_CONTRACT.md, implemented
@@ -73,6 +77,18 @@ type dashboard struct {
 	flaky    flaky.Service
 	// meter reads the §10.6 shadow meter (meter.go).
 	meter billing.Service
+	// urlcheck queues URL checks (urlchecks.go, QĐ-14); urlChecksOn is
+	// URLCHECK — off, old checks stay readable but no new one is queued.
+	urlcheck    urlcheck.Service
+	urlChecksOn bool
+	// ai drafts test cases (ai.go, QĐ-15); the server's own key is never
+	// shown, only whether there is one.
+	ai           aisuggest.Service
+	llmServerKey bool
+	// auto runs test cases by itself (autotest.go, QĐ-16); db spans a case
+	// and its spec, or a plan and its run, in one transaction.
+	auto autotest.Service
+	db   *pg.DB
 }
 
 // routes mounts the dashboard behind a per-user rate limit (§11.6 API4):
@@ -114,10 +130,16 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.projectCreateRoutes(handle)
 	d.projectDeleteRoutes(handle)
 	d.projectSettingsRoutes(handle)
+	d.environmentRoutes(handle)
+	d.urlCheckRoutes(handle)
+	d.aiRoutes(handle)
+	d.autotestRoutes(handle)
 	d.orgDeleteRoutes(handle)
 	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
+	// A deploy pipeline starts the runnable cases with a project:autorun token.
+	d.autotestCIRoutes(mux)
 }
 
 type page struct {
@@ -282,7 +304,7 @@ func (d *dashboard) runs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pg, err := d.query.Runs(r.Context(), string(scope.ProjectID), query.RunFilter{
-		Q: qs.Get("q"), Status: qs.Get("status"), Environment: qs.Get("environment"), Limit: limitParam(r, 20), Cursor: qs.Get("cursor"),
+		Q: qs.Get("q"), Status: qs.Get("status"), Environment: qs.Get("environment"), Source: qs.Get("source"), Limit: limitParam(r, 20), Cursor: qs.Get("cursor"),
 	})
 	if err != nil {
 		d.queryErr(w, r, err)

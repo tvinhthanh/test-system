@@ -65,6 +65,64 @@ secrets recoverable through an approved secure backup; TOKEN_PEPPER is needed
 for existing tokens and MFA enrollment. Never run `reset` on retained demo or
 pilot data: it deletes the Compose data and backup volumes.
 
+## For Testers Without The Source (QĐ-14)
+
+- `bash server/atp.sh up` also packs the Playwright reporter into
+  `backend/deploy/downloads/`; Caddy serves it at `https://<host>/downloads/`
+  and the dashboard's CI tokens page prints the `npm install` line.
+  `bash server/atp.sh reporter` re-packs it alone. Tarball names carry the
+  version and a content hash; old ones are kept because lockfiles pin them.
+- URL checks are off by default. Set `URLCHECK=on` in `backend/deploy/.env`
+  and run `bash server/atp.sh up`: the script adds the compose profile
+  `urlcheck`, which builds and starts the `checker` service (headless
+  Chromium, about 1 GB of image). It runs on its own Docker network with the
+  worker only and never opens loopback or link-local (cloud metadata)
+  addresses. Private ranges stay closed unless `URLCHECK_ALLOW_PRIVATE=on`,
+  which lets anyone who may run a check make this host open pages on those
+  networks — turn it on only for a staging site on the office LAN.
+
+## Self-Serve Sign-Up (QĐ-17)
+
+Off by default. With `SIGNUP=on` (which needs `MAIL=smtp`; the api refuses
+to start otherwise), anyone can ask to join an organization, workspace or
+project by its id with a role. The form answers the same for every address
+and mails a link (`https://<host>/signup#…`, one use, 24 hours); the account
+exists only once that link is opened, and it sees nothing until an admin of
+that node approves the request. Run `bash server/atp.sh restart` after
+changing it.
+
+## AI-Drafted Test Cases (QĐ-15)
+
+Optional. `LLM_API_KEY` in `backend/deploy/.env` is the operator's Anthropic
+API key, offered to every organization; leave it empty and only
+organizations that save their own key can draft. The model, and whether an
+organization uses its own key or the server's, are chosen in the dashboard
+(Team → organization → AI settings) — there is no model setting in `.env`.
+Run `bash server/atp.sh restart` after changing the key. The worker sends
+the test type, the tester's description and, with URL checks on, the page's
+structure to Anthropic; nothing is sent until a tester asks for drafts.
+
+## Auto Test, Site Scans And Runs From CI (QĐ-16)
+
+Needs `URLCHECK=on`: cases run in browser sessions of the `checker`
+service (`CHECKER_SESSIONS`, default 4, about 150 MB each). Testers keep
+test accounts per environment in the dashboard; their passwords are sealed
+with a key derived from `TOKEN_PEPPER` (changing the pepper means saving
+them again) and never reach a model. AI drafting, step repairs and finding
+sign-in steps use the organization's AI settings (see above); without a
+key, cases written by hand still run. Steps really happen on the site — a
+message is really sent — so point environments at staging. A deploy
+pipeline starts runs with a token issued with **Start auto runs**
+(`project:autorun`); the dashboard's Auto test page has the step.
+
+## Local Dev Stack Without Owner MFA
+
+On a throwaway local stack (`APP_ENV=dev`), `bash server/dev-owner-mfa.sh off`
+turns org owners who have no MFA into `org_admin`, so the dashboard opens
+without the TOTP enrolment screen; `on <email>` restores the owner role and
+`status` lists organization roles. It edits the database directly (no audit
+row) and refuses any other `APP_ENV`. Never use it on a pilot or shared host.
+
 ## Regression Tests
 
 ```bash

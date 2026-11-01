@@ -18,6 +18,8 @@ class FakeServer {
   readonly requests: { method: string; path: string; body: any; headers: Record<string, string> }[] = [];
   readonly objects = new Map<string, Buffer>();
   down = false;
+  /** Where declared artifacts are told to upload; default this server. */
+  uploadBase = "";
   private srv!: Server;
   url = "";
 
@@ -57,7 +59,7 @@ class FakeServer {
         if (path === "/v1/artifacts") {
           if (body.sizeBytes > (body.kind === "log" ? 100 : 5 << 20)) return json(413, { error: { code: "ARTIFACT_TOO_LARGE", message: "cap", details: {} } });
           const id = "art-" + this.requests.length;
-          return json(201, { artifactId: id, status: "pending", expiresAt: "", linked: false, upload: { method: "PUT", url: this.url + "/upload/" + id, headers: { "Content-Type": body.contentType }, expiresAt: "" } });
+          return json(201, { artifactId: id, status: "pending", expiresAt: "", linked: false, upload: { method: "PUT", url: (this.uploadBase || this.url) + "/upload/" + id, headers: { "Content-Type": body.contentType }, expiresAt: "" } });
         }
         if (path.endsWith("/complete")) return json(200, { artifactId: path.split("/")[3], status: "verified", sizeBytes: 1 });
         json(404, { error: { code: "NOT_FOUND", message: path } });
@@ -121,6 +123,8 @@ test("a run streams begin → events → artifacts → finish, and never throws"
     assert.equal(run.environmentKey, "staging");
     assert.equal(run.framework.name, "playwright");
     assert.equal(run.reporter.protocolVersion, "1.1");
+    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf8"));
+    assert.equal(run.reporter.version, pkg.version, "the run names the version package.json ships");
     assert.match(run.localRunId, /^[0-9a-f-]{36}$/);
     assert.equal(srv.requests[0].headers["x-protocol-version"], "1.1");
 
@@ -233,6 +237,86 @@ test("a platform that never answers: onEnd gives up after flushTimeoutMs and spo
     const lines = readFileSync(join(spool, files[0]), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     assert.deepEqual(lines.map((e) => e.sequence), [1, 2]);
     assert.ok(warnings.some((w) => w.includes("gave up on the platform")), warnings.join("\n"));
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+// §10.4: an artifact never fails the run. Before 30-10-2026 onEnd waited for
+// every upload before finish, so a store that refused or hung left the run
+// open until the server's 6 h auto-close marked it `error`.
+test("an upload URL that does not parse fails once and the run still finishes", async () => {
+  const srv = new FakeServer();
+  await srv.start();
+  srv.uploadBase = "https://<account>.r2.cloudflarestorage.com"; // CI's .env placeholder
+  const logs: string[] = [];
+  const origWarn = console.warn;
+  const origLog = console.log;
+  console.warn = (m: string) => logs.push(m);
+  console.log = (m: string) => logs.push(m);
+  try {
+    const client = new Client({ url: srv.url, token: "atp_ing_t", sleep: async () => {} });
+    const r = new AtpReporter({ url: srv.url, token: "atp_ing_t", spoolDir: mkdtempSync(join(tmpdir(), "atp-spool-")), _client: client });
+    r.onBegin(fakeConfig(), {} as any);
+    r.onTestEnd(fakeTest(join(REPO, "a.spec.ts"), ["a"]), fakeResult("failed", 0, [{ name: "screenshot", contentType: "image/png", body: Buffer.from("png") }]));
+    const started = Date.now();
+    await r.onEnd({ status: "failed" } as any);
+    assert.ok(Date.now() - started < 2000, "no retries of a URL that cannot parse");
+    assert.ok(srv.requests.some((q) => q.path.endsWith("/finish")), "finish sent");
+    assert.ok(logs.some((l) => l.includes("upload failed: upload URL does not parse")), logs.join("\n"));
+    assert.ok(logs.some((l) => l.includes("run run-1: failed") && l.includes("artifacts 0 ok / 0 over cap / 1 failed")), logs.join("\n"));
+    assert.ok(!logs.some((l) => l.includes("gave up on the platform")), logs.join("\n"));
+  } finally {
+    console.warn = origWarn;
+    console.log = origLog;
+    await srv.stop();
+  }
+});
+
+test("an object store that never answers: uploads stop at the deadline and the run still finishes", async () => {
+  const srv = new FakeServer();
+  await srv.start();
+  const logs: string[] = [];
+  const origWarn = console.warn;
+  const origLog = console.log;
+  console.warn = (m: string) => logs.push(m);
+  console.log = (m: string) => logs.push(m);
+  try {
+    // The platform answers; every PUT to the store hangs until aborted.
+    const hangUploads = ((url: string | URL | Request, init?: RequestInit) =>
+      String(url).includes("/upload/")
+        ? new Promise((_r, reject) => init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))))
+        : fetch(url, init)) as unknown as typeof fetch;
+    // One try that hangs 1 s: longer than the uploads' share of the 600 ms budget (400 ms).
+    const client = new Client({ url: srv.url, token: "atp_ing_t", fetch: hangUploads, timeoutMs: 1000, maxAttempts: 1, sleep: async () => {} });
+    const r = new AtpReporter({ url: srv.url, token: "atp_ing_t", spoolDir: mkdtempSync(join(tmpdir(), "atp-spool-")), _client: client, flushTimeoutMs: 600 });
+    r.onBegin(fakeConfig(), {} as any);
+    r.onTestEnd(fakeTest(join(REPO, "a.spec.ts"), ["a"]), fakeResult("failed", 0, [{ name: "screenshot", contentType: "image/png", body: Buffer.from("png") }]));
+    const started = Date.now();
+    await r.onEnd({ status: "failed" } as any);
+    assert.ok(Date.now() - started < 600, `finish came before the budget ran out (${Date.now() - started} ms)`);
+    assert.ok(srv.requests.some((q) => q.path.endsWith("/finish")), "finish sent");
+    assert.ok(logs.some((l) => l.includes("run run-1: failed") && l.includes("1 not uploaded in time")), logs.join("\n"));
+    assert.ok(!logs.some((l) => l.includes("gave up on the platform")), logs.join("\n"));
+    await new Promise((res) => setTimeout(res, 700)); // the hung PUT times out while its log line is still captured
+  } finally {
+    console.warn = origWarn;
+    console.log = origLog;
+    await srv.stop();
+  }
+});
+
+test("an ATP_URL that is not an http(s) URL disables the reporter with one warning", async () => {
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (m: string) => warnings.push(m);
+  try {
+    const r = new AtpReporter({ url: "localhost:8080", token: "atp_ing_t" });
+    r.onBegin(fakeConfig(), {} as any);
+    r.onTestEnd(fakeTest("a.spec.ts", ["a"]), fakeResult("passed"));
+    await r.onEnd({ status: "passed" } as any);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /not an http\(s\) URL/);
   } finally {
     console.warn = origWarn;
   }

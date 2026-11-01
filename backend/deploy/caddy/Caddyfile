@@ -23,6 +23,16 @@
 		uri strip_prefix /_objstore
 		reverse_proxy api:9100
 	}
+	# The Playwright reporter tarball server/atp.sh packs (QĐ-14), so a test
+	# project installs it from here. Public like the dashboard's JS: it holds
+	# no secret. A tarball's name changes with its content, so it is cached
+	# for good; index.json names the current one and is never cached.
+	handle /downloads/* {
+		root * /srv
+		file_server
+		header /downloads/*.tgz Cache-Control "public, max-age=31536000, immutable"
+		header /downloads/index.json Cache-Control "no-cache"
+	}
 	handle {
 		root * /srv/frontend
 		try_files {path} /index.html

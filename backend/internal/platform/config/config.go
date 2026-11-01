@@ -78,8 +78,30 @@ type Config struct {
 	// SMTP_PASSWORD, SMTP_FROM and SMTP_TLS=starttls|tls (none: dev only,
 	// for a local catcher like Mailpit). Needs PUBLIC_URL for the links.
 	Mail Mail
-	// Signup turns on self-serve sign-up with role approval (SIGNUP=on;
-	// default off keeps §11.2 "no self-signup"). ADR-001, variant A.
+	// URL checks (QĐ-14): URLCHECK=on|off (default off) lets testers have a
+	// page opened and checked by the checker service at URLCHECK_URL
+	// (default http://checker:8090, the compose service). The address is
+	// configuration, never a request's — the URL to check travels in the
+	// body to that one fixed host.
+	URLCheck    bool
+	URLCheckURL string
+	// AI-drafted test cases (QĐ-15, QĐ-18): the server's own API key
+	// (LLM_API_KEY, "" = none — organizations may still bring theirs) for
+	// LLM_PROVIDER (default anthropic; any provider platform/llm lists, or
+	// openai-compatible for the operator's own endpoint). Each organization
+	// picks its provider and model in the dashboard; LLM_MODEL is only what
+	// the server's key uses when it picked none ("" = the provider's
+	// default; required for openai-compatible). LLM_BASE_URL points
+	// LLM_PROVIDER's calls elsewhere (tests, an egress proxy) — for
+	// openai-compatible it is the endpoint. platform/llm checks the names.
+	LLMAPIKey   string
+	LLMBaseURL  string
+	LLMProvider string
+	LLMModel    string
+	// Signup turns on self-serve sign-up with role approval (SIGNUP=on|off,
+	// default off: accounts only by seed, invitation or OAuth into an
+	// existing one). ADR-001 variant A, QĐ-17. Needs MAIL=smtp: the link
+	// mailed to the address is what proves it before an account exists.
 	Signup bool
 }
 
@@ -124,7 +146,6 @@ func Load() (Config, error) {
 		ObjStoreMemoryAddr: os.Getenv("OBJSTORE_MEMORY_ADDR"),
 		DashboardOrigins:   splitList(getenv("DASHBOARD_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080")),
 		CookieSecure:       getenv("COOKIE_SECURE", "true") != "false",
-		Signup:             getenv("SIGNUP", "off") == "on",
 	}
 	if v, err := strconv.Atoi(getenv("DASHBOARD_RATE_PER_MINUTE", "600")); err != nil || v < 0 {
 		return c, fmt.Errorf("DASHBOARD_RATE_PER_MINUTE: want a non-negative integer")
@@ -152,12 +173,34 @@ func Load() (Config, error) {
 	}
 	c.PublicURL = strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/")
 	c.TrustedProxies = os.Getenv("TRUSTED_PROXIES")
+	switch v := strings.ToLower(getenv("URLCHECK", "off")); v {
+	case "on", "true", "1":
+		c.URLCheck = true
+	case "off", "false", "0":
+	default:
+		return c, fmt.Errorf("URLCHECK=%q: want on|off", v)
+	}
+	c.LLMAPIKey = strings.TrimSpace(os.Getenv("LLM_API_KEY"))
+	c.LLMBaseURL = strings.TrimSuffix(strings.TrimSpace(os.Getenv("LLM_BASE_URL")), "/")
+	c.LLMProvider = strings.ToLower(strings.TrimSpace(getenv("LLM_PROVIDER", "anthropic")))
+	c.LLMModel = strings.TrimSpace(os.Getenv("LLM_MODEL"))
+	c.URLCheckURL = strings.TrimSuffix(getenv("URLCHECK_URL", "http://checker:8090"), "/")
+	if u, err := url.Parse(c.URLCheckURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return c, fmt.Errorf("URLCHECK_URL=%q: want http(s)://host[:port]", c.URLCheckURL)
+	}
 	switch v := strings.ToLower(getenv("MAIL", "off")); v {
 	case "smtp":
 		c.Mail.Enabled = true
 	case "off":
 	default:
 		return c, fmt.Errorf("MAIL=%q: want off|smtp", v)
+	}
+	switch v := strings.ToLower(getenv("SIGNUP", "off")); v {
+	case "on", "true", "1":
+		c.Signup = true
+	case "off", "false", "0":
+	default:
+		return c, fmt.Errorf("SIGNUP=%q: want on|off", v)
 	}
 	c.Mail.Host, c.Mail.Username, c.Mail.Password = os.Getenv("SMTP_HOST"), os.Getenv("SMTP_USERNAME"), os.Getenv("SMTP_PASSWORD")
 	c.Mail.From, c.Mail.TLS = os.Getenv("SMTP_FROM"), strings.ToLower(getenv("SMTP_TLS", "starttls"))
@@ -240,6 +283,9 @@ func (c Config) validate() error {
 		if c.PublicURL == "" {
 			errs = append(errs, "PUBLIC_URL is required when MAIL=smtp (invitation links are built from it)")
 		}
+	}
+	if c.Signup && !c.Mail.Enabled {
+		errs = append(errs, "SIGNUP=on needs MAIL=smtp: the mailed link proves the address before an account exists")
 	}
 	if c.OAuthGoogle.Enabled || c.OAuthGitHub.Enabled {
 		switch {

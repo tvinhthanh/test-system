@@ -15,7 +15,13 @@ it("encodes scope, forwards opaque cursor, and requests bounded server filtering
   const repository = new ReportsRepository(new ApiClient(transport));
   await repository.runs(
     "project/a",
-    { ...emptyQuery, cursor: "opaque+/=", status: "failed", q: "checkout" },
+    {
+      ...emptyQuery,
+      cursor: "opaque+/=",
+      status: "failed",
+      q: "checkout",
+      source: "playwright",
+    },
     new AbortController().signal,
   );
   const url = new URL(String(transport.mock.calls[0]?.[0]), "http://localhost");
@@ -23,6 +29,7 @@ it("encodes scope, forwards opaque cursor, and requests bounded server filtering
   expect(url.searchParams.get("cursor")).toBe("opaque+/=");
   expect(url.searchParams.get("limit")).toBe("20");
   expect(url.searchParams.get("status")).toBe("failed");
+  expect(url.searchParams.get("source")).toBe("playwright");
 });
 
 it("decodes server-owned project actions and caches them for deep links", async () => {

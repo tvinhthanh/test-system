@@ -17,14 +17,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/autotest"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
 	"github.com/vinh/automation-testing-platform/backend/internal/ingest"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/config"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/llm"
 	platlog "github.com/vinh/automation-testing-platform/backend/internal/platform/log"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/metric"
@@ -39,6 +42,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 func main() {
@@ -65,6 +69,10 @@ func main() {
 
 	store, err := objstore.Open(cfg)
 	if err != nil {
+		logger.Error("boot", "err", err)
+		os.Exit(2)
+	}
+	if _, _, err := llm.Server(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel); err != nil {
 		logger.Error("boot", "err", err)
 		os.Exit(2)
 	}
@@ -146,11 +154,17 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	mailer := newMailer(cfg)
 	web.Invitations = mailer != nil
 	web.Logger = logger
-	web.Signup = cfg.Signup
 	web.DescribeScope = func(ctx context.Context, s authz.ScopeRef) string { return scopeName(ctx, ten, s) }
 	if mailer != nil {
 		web.SendReset = func(ctx context.Context, to, token string) error {
 			return sendReset(ctx, mailer, cfg.PublicURL, to, token)
+		}
+		// Self-serve sign-up (QĐ-17) only with mail: config refuses
+		// SIGNUP=on without it, since the mail is what proves the address.
+		if cfg.Signup {
+			web.SendSignup = func(ctx context.Context, to, token string) error {
+				return sendSignup(ctx, mailer, cfg.PublicURL, to, token)
+			}
 		}
 	}
 	if client, err := outbound.New(10*time.Second, endpoints...); err != nil {
@@ -168,7 +182,17 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	// testmgmt from importing a fourth domain (§6.9.3 rule 3).
 	qry := query.New(db)
 	tm := testmgmt.New(db, idn, gateEvidence{qry}, testmgmt.DefaultPolicy)
-	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res)}).routes(mux)
+	model, serverModel, err := llm.Server(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
+	if err != nil {
+		panic(err) // main refused this configuration before building anything
+	}
+	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model,
+		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck,
+		ai:           ai,
+		llmServerKey: cfg.LLMAPIKey != "",
+		auto:         autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Keys: ai}),
+		db:           db}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,
 	// CORS, preflight) → session → metrics (must wrap the mux directly: it
