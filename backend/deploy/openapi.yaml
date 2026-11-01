@@ -238,10 +238,13 @@ paths:
         Surefire `<flakyFailure>` → earlier failed attempts of a flaky pass,
         `<rerunFailure>` → more failed attempts. Times come from the
         testsuite timestamp (UTC when zoneless) plus case durations.
+        Node's test runner (`--test-reporter=junit`) writes top-level tests
+        straight under `<testsuites>` and no file: they are read too, and
+        the suites around a case are its describes.
       security: [{ ingestToken: [] }]
       parameters:
         - { name: environment, in: query, schema: { type: string, default: ci }, description: "Environment key (a slug); created if new." }
-        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest… Keep one per suite so its history stays one set of tests." }
+        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest, node… Keep one per suite so its history stays one set of tests." }
         - { name: branch, in: query, schema: { type: string } }
         - { name: commit, in: query, schema: { type: string, maxLength: 64 } }
         - { name: startedAt, in: query, schema: { type: string, format: date-time }, description: "Required only when no testsuite has a timestamp — history must not be dated today." }
@@ -3369,11 +3372,14 @@ paths:
         Surefire `<flakyFailure>` → earlier failed attempts of a flaky pass,
         `<rerunFailure>` → more failed attempts. Times come from the
         testsuite timestamp (UTC when zoneless) plus case durations.
+        Node's test runner (`--test-reporter=junit`) writes top-level tests
+        straight under `<testsuites>` and no file: they are read too, and
+        the suites around a case are its describes.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
         - { name: environment, in: query, schema: { type: string, default: ci }, description: "Environment key (a slug); created if new." }
-        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest… Keep one per suite so its history stays one set of tests." }
+        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest, node… Keep one per suite so its history stays one set of tests." }
         - { name: branch, in: query, schema: { type: string } }
         - { name: commit, in: query, schema: { type: string, maxLength: 64 } }
         - { name: startedAt, in: query, schema: { type: string, format: date-time }, description: "Required only when no testsuite has a timestamp — history must not be dated today." }

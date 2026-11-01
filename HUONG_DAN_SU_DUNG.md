@@ -387,7 +387,7 @@ Cách 2, chạy trong repo của bạn:
 
 Mỗi pipeline dùng một token riêng, để thu hồi một token (**Revoke**) mà không làm dừng các pipeline khác.
 
-Có báo cáo JUnit XML (ví dụ từ Cypress, Jest, pytest)? Dùng **Import JUnit** trên trang Test runs để đưa vào.
+Có báo cáo JUnit XML (ví dụ từ Cypress, Jest, pytest, hay test runner của Node với `node --test --test-reporter=junit`)? Dùng **Import JUnit** trên trang Test runs để đưa vào.
 
 ### 7.2 Xem kết quả và triage
 

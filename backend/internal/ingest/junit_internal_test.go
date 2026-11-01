@@ -164,6 +164,88 @@ func TestJestMapping(t *testing.T) {
 	}
 }
 
+// Node's test runner (node --test --test-reporter=junit, Node 22), trimmed
+// from a real run: a top-level test straight under <testsuites>, each
+// describe() a <testsuite>, no file, classname "test" on every case, no
+// timestamp. Before 01-11 the top-level test was dropped without a word, and
+// a report of top-level tests only was refused.
+const nodeReport = `<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="totals an empty cart" time="0.000581" classname="test"/>
+	<testsuite name="Cart" time="0.001861" disabled="0" errors="0" tests="3" failures="1" skipped="2" hostname="ci-runner">
+		<testcase name="adds an item" time="0.000706" classname="test"/>
+		<testsuite name="coupons" time="0.000686" disabled="0" errors="0" tests="1" failures="1" skipped="0" hostname="ci-runner">
+			<testcase name="applies a coupon" time="0.000559" classname="test" failure="coupon not applied">
+				<failure type="testCodeFailure" message="coupon not applied">
+Error [ERR_TEST_FAILURE]: coupon not applied
+  cause: AssertionError [ERR_ASSERTION]: coupon not applied
+      at TestContext.&lt;anonymous> (file:///work/test/cart.test.mjs:7:41)
+				</failure>
+			</testcase>
+		</testsuite>
+		<testcase name="ships abroad" time="0.000075" classname="test">
+			<skipped type="skipped" message="carrier sandbox down"/>
+		</testcase>
+	</testsuite>
+	<testsuite name="Checkout" time="0.000207" disabled="0" errors="0" tests="1" failures="0" skipped="0" hostname="ci-runner">
+		<testcase name="adds an item" time="0.000143" classname="test"/>
+	</testsuite>
+	<!-- tests 5 -->
+	<!-- duration_ms 76.9534 -->
+</testsuites>`
+
+func TestNodeTestRunnerMapping(t *testing.T) {
+	at := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
+	rep, err := parseJUnit([]byte(nodeReport), "node", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Tests != 5 || len(rep.Attempts) != 5 {
+		t.Fatalf("tests %d attempts %d, want 5 and 5 (the top-level test too)", rep.Tests, len(rep.Attempts))
+	}
+	byTitle := map[string]results.AttemptEvent{}
+	for _, a := range rep.Attempts {
+		id := sig(t, a)
+		if id.Framework != "node" || id.FilePath != "test" {
+			t.Errorf("%s: identity %+v", a.DisplayName, id)
+		}
+		byTitle[strings.Join(id.TitlePath, " › ")] = a
+	}
+	for title, want := range map[string]results.AttemptStatus{
+		"totals an empty cart":              results.AttemptPassed,
+		"Cart › adds an item":               results.AttemptPassed,
+		"Cart › coupons › applies a coupon": results.AttemptFailed,
+		"Cart › ships abroad":               results.AttemptSkipped,
+		"Checkout › adds an item":           results.AttemptPassed,
+	} {
+		a, ok := byTitle[title]
+		if !ok {
+			t.Errorf("no test %q among %d", title, len(byTitle))
+			continue
+		}
+		if a.Status != want {
+			t.Errorf("%q is %s, want %s", title, a.Status, want)
+		}
+	}
+	// The describes are what the UI shows as the suite.
+	if a := byTitle["Cart › coupons › applies a coupon"]; a.SuiteName != "Cart › coupons" || a.DisplayName != "applies a coupon" {
+		t.Errorf("suite %q display %q", a.SuiteName, a.DisplayName)
+	}
+	// One name in two describes is two tests, not one test seen twice.
+	if byTitle["Cart › adds an item"].ClientTestID == byTitle["Checkout › adds an item"].ClientTestID {
+		t.Error("Cart › adds an item and Checkout › adds an item share a clientTestId")
+	}
+	var e errorRaw
+	_ = json.Unmarshal(byTitle["Cart › coupons › applies a coupon"].Error, &e)
+	if e.Message != "testCodeFailure: coupon not applied" || !strings.Contains(e.Stack, "cart.test.mjs:7:41") {
+		t.Errorf("failure error = %+v", e)
+	}
+	// Node writes no timestamp: the caller dates the run.
+	if !rep.StartedAt.Equal(at) {
+		t.Errorf("started %v, want %v", rep.StartedAt, at)
+	}
+}
+
 func TestJUnitRefusals(t *testing.T) {
 	for name, tc := range map[string]struct {
 		doc  string
@@ -173,6 +255,7 @@ func TestJUnitRefusals(t *testing.T) {
 		"other root":       {`<html><body/></html>`, "root element <html>"},
 		"no cases":         {`<testsuites><testsuite name="x" timestamp="2026-01-01T00:00:00"/></testsuites>`, "no <testcase>"},
 		"no date anywhere": {`<testsuite name="x"><testcase name="a" classname="A"/></testsuite>`, "pass startedAt"},
+		"node, no date":    {`<testsuites><testcase name="a" classname="test"/></testsuites>`, "no timestamp in the report — pass startedAt"},
 		"bad timestamp":    {`<testsuite name="x" timestamp="yesterday"><testcase name="a" classname="A"/></testsuite>`, "want ISO 8601"},
 		"nameless case":    {`<testsuite name="x" timestamp="2026-01-01T00:00:00"><testcase classname="A"/></testsuite>`, "has no name"},
 		"external entity":  {`<?xml version="1.0"?><!DOCTYPE t [<!ENTITY x SYSTEM "file:///etc/passwd">]><testsuite name="&x;" timestamp="2026-01-01T00:00:00"><testcase name="a" classname="A"/></testsuite>`, "junit"},
