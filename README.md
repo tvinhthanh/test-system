@@ -18,7 +18,7 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 | Bạn muốn | Mở |
 |---|---|
 | Hiểu toàn bộ quyết định và thiết kế | [`SPEC.md`](SPEC.md) — **nguồn sự thật duy nhất** |
-| Dùng app (tester, admin, người viết automation) | [`HUONG_DAN_SU_DUNG.md`](HUONG_DAN_SU_DUNG.md) — đăng nhập, Start testing, chạy test, plan, release, CI token, AI |
+| Dùng app (tester, admin, người viết automation) | [`HUONG_DAN_SU_DUNG.md`](HUONG_DAN_SU_DUNG.md) — đăng nhập, Start testing, Auto test, chạy test, plan, release, Test runs, import JUnit, CI token, AI |
 | Vẽ hoặc chỉnh giao diện bằng Stitch | [`PROJECT.md`](PROJECT.md) + [`DESIGN.md`](DESIGN.md) + [`.stitch/rules.md`](.stitch/rules.md) — brief sản phẩm, hệ màu/light/dark và quy tắc dựng màn hình |
 | Biết Phase 0 đang ở đâu, phải làm gì | [`phase0/README.md`](phase0/README.md) |
 | Xem thuật toán test identity chạy thật | [`prototype/identity/README.md`](prototype/identity/README.md) |
