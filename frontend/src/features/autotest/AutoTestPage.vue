@@ -65,17 +65,20 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "scan", label: "Site scan" },
   { id: "ci", label: "Run from CI" },
 ];
-const tab = ref<Tab>(
+const tab = computed<Tab>(() =>
   (["cases", "runs", "scan", "ci"] as Tab[]).includes(route.query.tab as Tab)
     ? (route.query.tab as Tab)
     : "cases",
 );
-watch(tab, (t) => void router.replace({ query: { ...route.query, tab: t } }));
+function selectTab(next: Tab) {
+  if (next !== tab.value)
+    void router.push({ query: { ...route.query, tab: next } });
+}
 
 const specs = useResource<Listing<AutoSpec>>();
 const runs = useResource<Listing<AutoRun>>();
 const scans = useResource<Listing<SiteScan>>();
-const envs = useResource<Environment[]>();
+const environments = shallowRef<Environment[]>([]);
 const ai = useResource<AiStatus>();
 const enabled = computed(() => specs.data.value?.enabled !== false);
 function refresh() {
@@ -87,7 +90,6 @@ watch(
   project,
   () => {
     refresh();
-    void envs.load((signal) => testmgmt.environments(project.value, signal));
     void ai.load((signal) => testmgmt.aiStatus(project.value, signal));
   },
   { immediate: true },
@@ -95,22 +97,20 @@ watch(
 
 // The site: the first environment with an address, unless one is chosen.
 const environmentId = ref("");
-watch(
-  () => envs.data.value,
-  (list) => {
-    if (!environmentId.value)
-      environmentId.value = list?.find((e) => e.baseUrl)?.id ?? "";
-  },
-);
+function onEnvironments(list: Environment[]) {
+  environments.value = list;
+  if (!environmentId.value)
+    environmentId.value = list.find((e) => e.baseUrl)?.id ?? "";
+}
 const env = computed(() =>
-  (envs.data.value ?? []).find((e) => e.id === environmentId.value),
+  environments.value.find((e) => e.id === environmentId.value),
 );
 const accounts = useResource<TestAccount[]>();
 watch(environmentId, (id) => {
-  if (!id) return;
-  // One just added in the picker: read the list again for its address.
-  if (!(envs.data.value ?? []).some((e) => e.id === id))
-    void envs.load((signal) => testmgmt.environments(project.value, signal));
+  if (!id) {
+    accountKeys.value = [];
+    return;
+  }
   void accounts.load((signal) => autotest.accounts(project.value, id, signal));
 });
 const accountKeys = ref<string[]>([]);
@@ -119,7 +119,7 @@ watch(
   (list) => (accountKeys.value = (list ?? []).map((a) => a.key)),
 );
 const signedInKeys = computed(() =>
-  (accounts.data.value ?? [])
+  (environmentId.value ? (accounts.data.value ?? []) : [])
     .filter((a) => a.loginStatus === "ok" && a.loginSteps?.length)
     .map((a) => a.key),
 );
@@ -131,8 +131,9 @@ watch(
   () => {
     clearTimeout(timer);
     const busy =
-      runs.data.value?.items.some((r) => r.status === "queued" || r.status === "running") ||
-      scans.data.value?.items.some((s) => s.status === "running");
+      runs.data.value?.items.some(
+        (r) => r.status === "queued" || r.status === "running",
+      ) || scans.data.value?.items.some((s) => s.status === "running");
     if (busy)
       timer = setTimeout(() => {
         void runs.load((signal) => autotest.runs(project.value, signal));
@@ -154,7 +155,9 @@ const toggle = (id: string) => {
   picked.value = next;
 };
 const allPicked = computed(
-  () => !!specs.data.value?.items.length && specs.data.value.items.every((s) => picked.value.has(s.caseId)),
+  () =>
+    !!specs.data.value?.items.length &&
+    specs.data.value.items.every((s) => picked.value.has(s.caseId)),
 );
 function toggleAll() {
   picked.value = allPicked.value
@@ -194,7 +197,12 @@ async function saveEdit() {
     autotest.saveSpec(
       project.value,
       id,
-      { target: f.target, account: f.account, inputs: f.inputs, steps: f.steps },
+      {
+        target: f.target,
+        account: f.account,
+        inputs: f.inputs,
+        steps: f.steps,
+      },
       signal,
     ),
   );
@@ -205,7 +213,11 @@ async function saveEdit() {
 }
 async function createCase() {
   const made = await mutation.run("new", (signal) =>
-    autotest.createCase(project.value, { ...newCase.value, source: "manual" }, signal),
+    autotest.createCase(
+      project.value,
+      { ...newCase.value, source: "manual" },
+      signal,
+    ),
   );
   if (made) {
     panel.value = "";
@@ -232,10 +244,17 @@ async function onGenerated(ids: string[], andRun: boolean) {
 }
 async function download() {
   const file = await mutation.run("export", (signal) =>
-    autotest.exportSpecs(project.value, environmentId.value, [...picked.value], signal),
+    autotest.exportSpecs(
+      project.value,
+      environmentId.value,
+      [...picked.value],
+      signal,
+    ),
   );
   if (!file) return;
-  const url = URL.createObjectURL(new Blob([file.content], { type: "text/plain" }));
+  const url = URL.createObjectURL(
+    new Blob([file.content], { type: "text/plain" }),
+  );
   const a = document.createElement("a");
   a.href = url;
   a.download = file.filename;
@@ -245,10 +264,27 @@ async function download() {
 
 // Site scan.
 const scanUrl = ref("");
-watch(env, (e) => {
-  if (e?.baseUrl && !scanUrl.value) scanUrl.value = e.baseUrl;
+watch(env, (next, previous) => {
+  // Follow the selected site while the URL is still the suggested default.
+  // A URL entered by the tester remains theirs when switching environments.
+  if (!scanUrl.value || scanUrl.value === (previous?.baseUrl ?? ""))
+    scanUrl.value = next?.baseUrl ?? "";
 });
 const scanAccount = ref("");
+watch(environmentId, () => (scanAccount.value = ""));
+watch(
+  project,
+  (_next, previous) => {
+    if (!previous) return;
+    environmentId.value = "";
+    environments.value = [];
+    accountKeys.value = [];
+    scanUrl.value = "";
+    scanAccount.value = "";
+    panel.value = "";
+  },
+  { flush: "sync" },
+);
 const scanPages = ref("20");
 async function startScan() {
   const sc = await mutation.run("scan", (signal) =>
@@ -263,7 +299,8 @@ async function startScan() {
       signal,
     ),
   );
-  if (sc) await router.push(`${base()}/auto/scans/${encodeURIComponent(sc.id)}`);
+  if (sc)
+    await router.push(`${base()}/auto/scans/${encodeURIComponent(sc.id)}`);
 }
 
 const ciSnippet = computed(() => {
@@ -315,13 +352,16 @@ const counts = (r: AutoRun) =>
     </AlertDescription>
   </Alert>
 
-  <div class="auto-site bg-card mb-5 flex flex-wrap items-end gap-3 rounded-lg border p-4">
+  <div
+    class="auto-site bg-card mb-5 flex flex-wrap items-end gap-3 rounded-lg border p-4"
+  >
     <EnvironmentPicker
       id="auto-environment"
       v-model="environmentId"
       class="min-w-64 flex-1"
       :project="project"
       :can-write="canWrite"
+      @loaded="onEnvironments"
     />
     <Button
       variant="outline"
@@ -330,7 +370,11 @@ const counts = (r: AutoRun) =>
       ><KeyRound />Test accounts ({{ accountKeys.length }})</Button
     >
   </div>
-  <p v-if="environmentId && env && !env.baseUrl" class="text-warning mb-4 text-sm" role="status">
+  <p
+    v-if="environmentId && env && !env.baseUrl"
+    class="text-warning mb-4 text-sm"
+    role="status"
+  >
     This environment has no address yet — add one above to run cases on it.
   </p>
   <AccountsPanel
@@ -340,10 +384,17 @@ const counts = (r: AutoRun) =>
     :environment-id="environmentId"
     :can-write="canWrite"
     :ai-available="!!ai.data.value?.available && enabled"
-    @changed="accountKeys = $event; accounts.load((s) => autotest.accounts(project, environmentId, s))"
+    @changed="
+      accountKeys = $event;
+      accounts.load((s) => autotest.accounts(project, environmentId, s));
+    "
   />
 
-  <div role="tablist" aria-label="Auto test views" class="mb-4 flex gap-1 border-b">
+  <div
+    role="tablist"
+    aria-label="Auto test views"
+    class="mb-4 flex gap-1 border-b"
+  >
     <button
       v-for="t in tabs"
       :key="t.id"
@@ -351,15 +402,24 @@ const counts = (r: AutoRun) =>
       role="tab"
       :aria-selected="tab === t.id"
       class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors"
-      :class="tab === t.id ? 'border-primary text-foreground' : 'text-muted-foreground hover:text-foreground border-transparent'"
-      @click="tab = t.id"
+      :class="
+        tab === t.id
+          ? 'border-primary text-foreground'
+          : 'text-muted-foreground hover:text-foreground border-transparent'
+      "
+      @click="selectTab(t.id)"
     >
       {{ t.label }}
     </button>
   </div>
 
   <!-- Cases -->
-  <section v-if="tab === 'cases'" role="tabpanel" aria-label="Cases" class="space-y-4">
+  <section
+    v-if="tab === 'cases'"
+    role="tabpanel"
+    aria-label="Cases"
+    class="space-y-4"
+  >
     <div v-if="canWrite && enabled" class="flex flex-wrap items-center gap-2">
       <Button
         v-if="ai.data.value?.available"
@@ -375,22 +435,38 @@ const counts = (r: AutoRun) =>
         ><Plus />New case</Button
       >
       <span class="ml-auto flex flex-wrap items-center gap-2">
-        <label class="text-muted-foreground flex items-center gap-1.5 text-xs" title="When a button or field moved or was renamed, AI may find it again for that one step. Checks are never repaired.">
-          <input v-model="heal" type="checkbox" />AI repairs a step whose element moved
+        <label
+          class="text-muted-foreground flex items-center gap-1.5 text-xs"
+          title="When a button or field moved or was renamed, AI may find it again for that one step. Checks are never repaired."
+        >
+          <input v-model="heal" type="checkbox" />AI repairs a step whose
+          element moved
         </label>
         <Button
-          :disabled="mutation.busy.value !== null || !env?.baseUrl || !specs.data.value?.items.length"
+          :disabled="
+            mutation.busy.value !== null ||
+            !env?.baseUrl ||
+            !specs.data.value?.items.length
+          "
           @click="run(picked.size ? [...picked] : undefined)"
-          ><Play />{{ picked.size ? `Run ${picked.size} selected` : "Run all" }}</Button
+          ><Play />{{
+            picked.size ? `Run ${picked.size} selected` : "Run all"
+          }}</Button
         >
       </span>
     </div>
-    <p v-if="!ai.data.value?.available && canWrite && enabled" class="text-muted-foreground text-xs">
+    <p
+      v-if="!ai.data.value?.available && canWrite && enabled"
+      class="text-muted-foreground text-xs"
+    >
       AI drafting and repairs are off: an organization admin adds an API key
       under Team → organization → AI settings. Cases you write still run.
     </p>
     <ErrorNote
-      v-if="mutation.error.value && ['run', 'export'].includes(mutation.error.value.key)"
+      v-if="
+        mutation.error.value &&
+        ['run', 'export'].includes(mutation.error.value.key)
+      "
       :error="explain(mutation.error.value.error)"
     />
 
@@ -405,7 +481,11 @@ const counts = (r: AutoRun) =>
       @saved="onGenerated"
       @close="panel = ''"
     />
-    <section v-if="panel === 'new' && env" class="bg-card rounded-lg border p-4" aria-label="New case">
+    <section
+      v-if="panel === 'new' && env"
+      class="bg-card rounded-lg border p-4"
+      aria-label="New case"
+    >
       <CaseEditor
         id="new-case"
         v-model="newCase"
@@ -424,7 +504,11 @@ const counts = (r: AutoRun) =>
       />
     </section>
 
-    <AsyncState :loading="specs.loading.value && !specs.data.value" :error="specs.error.value" @retry="refresh">
+    <AsyncState
+      :loading="specs.loading.value && !specs.data.value"
+      :error="specs.error.value"
+      @retry="refresh"
+    >
       <EmptyState
         v-if="!specs.data.value?.items.length"
         :icon="Bot"
@@ -432,15 +516,36 @@ const counts = (r: AutoRun) =>
         description="Generate them with AI from your site, or write one: where it starts, the inputs, then steps such as “Type into Message”, “Click Send”, “Check: text is there”."
       />
       <div v-else class="bg-card overflow-hidden rounded-lg border">
-        <div class="text-muted-foreground flex items-center gap-3 border-b px-4 py-2 text-xs">
-          <input type="checkbox" :checked="allPicked" aria-label="Select every case" @change="toggleAll" />
-          <span class="flex-1">{{ specs.data.value.items.length }} runnable case{{ specs.data.value.items.length === 1 ? "" : "s" }}</span>
-          <Button size="xs" variant="ghost" :disabled="mutation.busy.value !== null" @click="download"
-            ><Download />Playwright file{{ picked.size ? ` (${picked.size})` : "" }}</Button
+        <div
+          class="text-muted-foreground flex items-center gap-3 border-b px-4 py-2 text-xs"
+        >
+          <input
+            type="checkbox"
+            :checked="allPicked"
+            aria-label="Select every case"
+            @change="toggleAll"
+          />
+          <span class="flex-1"
+            >{{ specs.data.value.items.length }} runnable case{{
+              specs.data.value.items.length === 1 ? "" : "s"
+            }}</span
+          >
+          <Button
+            size="xs"
+            variant="ghost"
+            :disabled="mutation.busy.value !== null"
+            @click="download"
+            ><Download />Playwright file{{
+              picked.size ? ` (${picked.size})` : ""
+            }}</Button
           >
         </div>
         <ul class="divide-y">
-          <li v-for="s in specs.data.value.items" :key="s.caseId" class="auto-case px-4 py-3">
+          <li
+            v-for="s in specs.data.value.items"
+            :key="s.caseId"
+            class="auto-case px-4 py-3"
+          >
             <div class="flex flex-wrap items-center gap-3">
               <input
                 type="checkbox"
@@ -455,23 +560,39 @@ const counts = (r: AutoRun) =>
                   >{{ s.title }}</RouterLink
                 >
                 <span class="text-muted-foreground block truncate text-xs"
-                  >{{ s.target }}<template v-if="s.account"> · signed in as {{ s.account }}</template>
-                  · {{ s.steps.length }} step{{ s.steps.length === 1 ? "" : "s" }}</span
+                  >{{ s.target
+                  }}<template v-if="s.account">
+                    · signed in as {{ s.account }}</template
+                  >
+                  · {{ s.steps.length }} step{{
+                    s.steps.length === 1 ? "" : "s"
+                  }}</span
                 >
               </span>
-              <Badge v-if="s.source === 'ai'" variant="outline"><Sparkles class="size-3" />AI</Badge>
+              <Badge v-if="s.source === 'ai'" variant="outline"
+                ><Sparkles class="size-3" />AI</Badge
+              >
               <RouterLink
                 v-if="s.last"
                 :to="`${base()}/auto/runs/${encodeURIComponent(s.last.runId)}`"
                 :title="`Last run ${time(s.last.finishedAt)}`"
                 ><StatusBadge :status="s.last.status"
               /></RouterLink>
-              <span v-else class="text-muted-foreground text-xs">not run yet</span>
-              <Button v-if="canWrite" size="sm" variant="ghost" @click="editing === s.caseId ? (editing = null) : edit(s)"
+              <span v-else class="text-muted-foreground text-xs"
+                >not run yet</span
+              >
+              <Button
+                v-if="canWrite"
+                size="sm"
+                variant="ghost"
+                @click="editing === s.caseId ? (editing = null) : edit(s)"
                 ><Pencil />Edit</Button
               >
             </div>
-            <div v-if="editing === s.caseId && editForm && env" class="mt-3 border-t pt-3">
+            <div
+              v-if="editing === s.caseId && editForm && env"
+              class="mt-3 border-t pt-3"
+            >
               <CaseEditor
                 :id="`edit-${s.caseId}`"
                 v-model="editForm"
@@ -496,7 +617,11 @@ const counts = (r: AutoRun) =>
 
   <!-- Runs -->
   <section v-else-if="tab === 'runs'" role="tabpanel" aria-label="Runs">
-    <AsyncState :loading="runs.loading.value && !runs.data.value" :error="runs.error.value" @retry="refresh">
+    <AsyncState
+      :loading="runs.loading.value && !runs.data.value"
+      :error="runs.error.value"
+      @retry="refresh"
+    >
       <EmptyState
         v-if="!runs.data.value?.items.length"
         :icon="Play"
@@ -509,11 +634,22 @@ const counts = (r: AutoRun) =>
             :to="`${base()}/auto/runs/${encodeURIComponent(r.id)}`"
             class="hover:bg-accent flex items-center gap-3 px-4 py-3 transition-colors"
           >
-            <StatusBadge :status="r.status === 'done' ? (r.failed || r.errored ? 'failed' : 'passed') : r.status" />
+            <StatusBadge
+              :status="
+                r.status === 'done'
+                  ? r.failed || r.errored
+                    ? 'failed'
+                    : 'passed'
+                  : r.status
+              "
+            />
             <span class="min-w-0 flex-1">
-              <strong class="block truncate text-sm font-medium">{{ counts(r) }}</strong>
+              <strong class="block truncate text-sm font-medium">{{
+                counts(r)
+              }}</strong>
               <span class="text-muted-foreground block truncate text-xs"
-                >{{ time(r.createdAt) }} · {{ r.trigger === "ci" ? "from CI" : r.requestedBy }}</span
+                >{{ time(r.createdAt) }} ·
+                {{ r.trigger === "ci" ? "from CI" : r.requestedBy }}</span
               >
             </span>
             <ChevronRight class="text-muted-foreground size-4" />
@@ -524,7 +660,12 @@ const counts = (r: AutoRun) =>
   </section>
 
   <!-- Site scan -->
-  <section v-else-if="tab === 'scan'" role="tabpanel" aria-label="Site scan" class="space-y-4">
+  <section
+    v-else-if="tab === 'scan'"
+    role="tabpanel"
+    aria-label="Site scan"
+    class="space-y-4"
+  >
     <form
       v-if="canWrite && enabled"
       class="site-scan-new bg-card grid gap-3 rounded-lg border p-4 md:grid-cols-[minmax(0,1fr)_12rem_7rem_auto] md:items-end"
@@ -532,7 +673,14 @@ const counts = (r: AutoRun) =>
     >
       <div class="space-y-1.5">
         <Label for="scan-url">Start page</Label>
-        <Input id="scan-url" v-model="scanUrl" type="url" required maxlength="2048" placeholder="https://staging.example.com" />
+        <Input
+          id="scan-url"
+          v-model="scanUrl"
+          type="url"
+          required
+          maxlength="2048"
+          placeholder="https://staging.example.com"
+        />
       </div>
       <div class="space-y-1.5">
         <Label for="scan-account">Signed in as</Label>
@@ -544,13 +692,17 @@ const counts = (r: AutoRun) =>
       <div class="space-y-1.5">
         <Label for="scan-pages">Pages</Label>
         <NativeSelect id="scan-pages" v-model="scanPages" class="w-full">
-          <option v-for="n in ['10', '20', '30', '50']" :key="n" :value="n">{{ n }}</option>
+          <option v-for="n in ['10', '20', '30', '50']" :key="n" :value="n">
+            {{ n }}
+          </option>
         </NativeSelect>
       </div>
-      <Button type="submit" :disabled="mutation.busy.value !== null"><Radar />Scan site</Button>
+      <Button type="submit" :disabled="mutation.busy.value !== null"
+        ><Radar />Scan site</Button
+      >
       <p class="text-muted-foreground text-xs md:col-span-4">
-        A URL check of the start page and every page its links reach on the
-        same site, up to three links deep — load, script errors, broken links,
+        A URL check of the start page and every page its links reach on the same
+        site, up to three links deep — load, script errors, broken links,
         accessibility, speed, phone fit. Sign-out and delete links are never
         followed. Only accounts whose sign-in works are offered.
       </p>
@@ -560,7 +712,11 @@ const counts = (r: AutoRun) =>
         :error="explain(mutation.error.value.error)"
       />
     </form>
-    <AsyncState :loading="scans.loading.value && !scans.data.value" :error="scans.error.value" @retry="refresh">
+    <AsyncState
+      :loading="scans.loading.value && !scans.data.value"
+      :error="scans.error.value"
+      @retry="refresh"
+    >
       <EmptyState
         v-if="!scans.data.value?.items.length"
         :icon="Radar"
@@ -573,12 +729,28 @@ const counts = (r: AutoRun) =>
             :to="`${base()}/auto/scans/${encodeURIComponent(s.id)}`"
             class="hover:bg-accent flex items-center gap-3 px-4 py-3 transition-colors"
           >
-            <StatusBadge :status="s.status === 'done' ? (s.failed ? 'failed' : s.warnings ? 'warning' : 'passed') : s.status" />
+            <StatusBadge
+              :status="
+                s.status === 'done'
+                  ? s.failed
+                    ? 'failed'
+                    : s.warnings
+                      ? 'warning'
+                      : 'passed'
+                  : s.status
+              "
+            />
             <span class="min-w-0 flex-1">
-              <strong class="block truncate text-sm font-medium">{{ s.startUrl }}</strong>
+              <strong class="block truncate text-sm font-medium">{{
+                s.startUrl
+              }}</strong>
               <span class="text-muted-foreground block truncate text-xs"
-                >{{ s.checked }} of {{ s.pages }} pages checked · {{ s.failed }} failed · {{ s.warnings }} with warnings ·
-                {{ time(s.createdAt) }}<template v-if="s.account"> · as {{ s.account }}</template></span
+                >{{ s.checked }} of {{ s.pages }} pages checked ·
+                {{ s.failed }} failed · {{ s.warnings }} with warnings ·
+                {{ time(s.createdAt)
+                }}<template v-if="s.account">
+                  · as {{ s.account }}</template
+                ></span
               >
             </span>
             <ChevronRight class="text-muted-foreground size-4" />
@@ -589,21 +761,30 @@ const counts = (r: AutoRun) =>
   </section>
 
   <!-- CI -->
-  <section v-else role="tabpanel" aria-label="Run from CI" class="bg-card space-y-3 rounded-lg border p-4 text-sm">
+  <section
+    v-else
+    role="tabpanel"
+    aria-label="Run from CI"
+    class="bg-card space-y-3 rounded-lg border p-4 text-sm"
+  >
     <p>
       Run every case after each deploy: issue a token with
       <strong>Start auto runs</strong> on the
-      <RouterLink :to="`${base()}/tokens`" class="text-primary underline underline-offset-2">CI tokens</RouterLink>
+      <RouterLink
+        :to="`${base()}/tokens`"
+        class="text-primary underline underline-offset-2"
+        >CI tokens</RouterLink
+      >
       page, then add this step after the deploy. It starts a run, waits, prints
       each case and fails the job when one failed.
     </p>
     <TechnicalBlock title="Deploy step (bash, curl, jq)" :text="ciSnippet" />
     <p class="text-muted-foreground">
-      Prefer to keep the tests in your own repository? Select cases on the
-      Cases tab and download the <strong>Playwright file</strong>: the same
-      steps as Playwright code, signing in with
-      <code>ATP_USER_&lt;KEY&gt;</code> / <code>ATP_PASS_&lt;KEY&gt;</code>. With
-      the ATP reporter, its runs land in Test runs too.
+      Prefer to keep the tests in your own repository? Select cases on the Cases
+      tab and download the <strong>Playwright file</strong>: the same steps as
+      Playwright code, signing in with <code>ATP_USER_&lt;KEY&gt;</code> /
+      <code>ATP_PASS_&lt;KEY&gt;</code>. With the ATP reporter, its runs land in
+      Test runs too.
     </p>
   </section>
 </template>

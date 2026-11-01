@@ -4,7 +4,7 @@
 // fixes an address. Lives inside other forms (new plan), so it has no
 // <form> of its own: its buttons are type="button" and Enter in its fields
 // runs its own action instead of submitting the outer form.
-import { ExternalLink, Pencil, Plus } from "@lucide/vue";
+import { ExternalLink, Pencil, Plus, RefreshCw } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
@@ -24,18 +24,30 @@ const props = defineProps<{
   disabled?: boolean;
   id?: string;
 }>();
-const emit = defineEmits<{ "update:modelValue": [value: string] }>();
+const emit = defineEmits<{
+  "update:modelValue": [value: string];
+  loaded: [items: Environment[]];
+}>();
 const { testmgmt } = useServices();
 const envs = useResource<Environment[]>();
 const refresh = () =>
   envs.load((signal) => testmgmt.environments(props.project, signal));
 watch(() => props.project, refresh, { immediate: true });
+watch(
+  () => envs.data.value,
+  (items) => {
+    if (items) emit("loaded", items);
+  },
+);
 
 const NEW = "__new";
 const choice = ref(props.modelValue);
 watch(
   () => props.modelValue,
-  (v) => (choice.value = v),
+  (v) => {
+    // Selecting New clears the parent selection, but keeps the add fields open.
+    if (choice.value !== NEW || v !== "") choice.value = v;
+  },
 );
 const selected = computed(
   () => envs.data.value?.find((e) => e.id === choice.value) ?? null,
@@ -43,7 +55,7 @@ const selected = computed(
 function pick(value: string) {
   choice.value = value;
   editing.value = false;
-  if (value !== NEW) emit("update:modelValue", value);
+  emit("update:modelValue", value === NEW ? "" : value);
 }
 const host = (url: string) => {
   try {
@@ -67,8 +79,8 @@ async function add() {
   );
   if (!created) return;
   key.value = address.value = "";
-  await refresh();
   pick(created.id);
+  await refresh();
 }
 function edit() {
   address.value = selected.value?.baseUrl ?? "";
@@ -97,7 +109,7 @@ async function saveAddress() {
       :id="id ?? 'plan-environment'"
       :model-value="choice"
       class="w-full"
-      :disabled="disabled"
+      :disabled="disabled || envs.loading.value"
       @update:model-value="pick"
     >
       <option value="">None</option>
@@ -106,7 +118,19 @@ async function saveAddress() {
       </option>
       <option v-if="canWrite" :value="NEW">+ New environment…</option>
     </NativeSelect>
-    <ErrorNote v-if="envs.error.value" :error="envs.error.value" />
+    <p
+      v-if="envs.loading.value"
+      class="text-muted-foreground text-xs"
+      role="status"
+    >
+      Loading environments…
+    </p>
+    <div v-if="envs.error.value" class="space-y-2">
+      <ErrorNote :error="envs.error.value" />
+      <Button type="button" size="sm" variant="outline" @click="refresh">
+        <RefreshCw />Try again
+      </Button>
+    </div>
 
     <div
       v-if="choice === NEW && canWrite"

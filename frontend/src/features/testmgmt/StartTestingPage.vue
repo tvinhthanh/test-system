@@ -11,7 +11,14 @@ import {
   Sparkles,
   TriangleAlert,
 } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
@@ -39,6 +46,19 @@ const base = () => `/p/${encodeURIComponent(project.value)}`;
 
 // 1. Kind of testing
 const type = shallowRef<TestType | null>(null);
+const changingType = ref(true);
+const siteHeading = ref<HTMLElement | null>(null);
+async function chooseType(selected: TestType) {
+  type.value = selected;
+  changingType.value = false;
+  await nextTick();
+  siteHeading.value?.focus();
+}
+async function changeType() {
+  changingType.value = true;
+  await nextTick();
+  document.getElementById(`test-type-${type.value?.id}`)?.focus();
+}
 // 2. Site
 const environmentId = ref("");
 // 3. Cases
@@ -232,21 +252,38 @@ const tabClass = (on: boolean) =>
     <section aria-labelledby="start-type" class="space-y-3">
       <h2 id="start-type" class="font-semibold">1. What are you testing?</h2>
       <div
-        class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5"
-        role="radiogroup"
+        v-if="type && !changingType"
+        class="bg-card flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3"
+      >
+        <div class="min-w-0">
+          <strong class="text-sm">{{ type.label }}</strong>
+          <p class="text-muted-foreground text-xs">{{ type.summary }}</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          class="min-h-11"
+          @click="changeType"
+          >Change type</Button
+        >
+      </div>
+      <div
+        v-else
+        class="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-2 xl:gap-x-6 xl:gap-y-0 xl:border-t"
+        role="group"
         aria-labelledby="start-type"
       >
         <button
           v-for="t in testTypes"
           :key="t.id"
+          :id="`test-type-${t.id}`"
           type="button"
-          role="radio"
-          :aria-checked="type?.id === t.id"
+          :aria-pressed="type?.id === t.id"
           :class="[
-            'bg-card hover:border-primary/60 rounded-lg border p-3 text-left transition-colors',
+            'bg-card hover:border-primary/60 focus-visible:ring-ring/50 min-h-24 rounded-lg border p-3 text-left transition-colors focus-visible:ring-3 focus-visible:outline-none xl:min-h-0 xl:rounded-none xl:border-x-0 xl:border-t-0 xl:border-b xl:bg-transparent xl:px-2 xl:py-3 xl:hover:bg-accent/50',
             type?.id === t.id ? 'border-primary ring-primary/30 ring-2' : '',
           ]"
-          @click="type = t"
+          @click="chooseType(t)"
         >
           <strong class="block text-sm font-semibold">{{ t.label }}</strong>
           <span class="text-muted-foreground mt-1 block text-xs leading-snug">{{
@@ -258,7 +295,14 @@ const tabClass = (on: boolean) =>
 
     <template v-if="type">
       <section aria-labelledby="start-site" class="space-y-3">
-        <h2 id="start-site" class="font-semibold">2. Which site?</h2>
+        <h2
+          id="start-site"
+          ref="siteHeading"
+          tabindex="-1"
+          class="font-semibold"
+        >
+          2. Which site?
+        </h2>
         <div class="bg-card max-w-3xl rounded-lg border p-4">
           <EnvironmentPicker
             v-model="environmentId"

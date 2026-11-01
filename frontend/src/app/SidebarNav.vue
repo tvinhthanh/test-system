@@ -39,6 +39,9 @@ watch(
 );
 const team = computed(() => teamAccess.scopes.length > 0);
 const p = computed(() => encodeURIComponent(props.project));
+const projectName = computed(
+  () => projectAccess.name(props.project) || props.project,
+);
 const items = computed(() =>
   props.project
     ? [
@@ -46,6 +49,7 @@ const items = computed(() =>
           to: `/p/${p.value}/overview`,
           label: "Overview",
           icon: Gauge,
+          section: "Results",
           active: route.path.endsWith("/overview"),
         },
         // QĐ-15: the start of a round of testing, for those who can test.
@@ -55,6 +59,7 @@ const items = computed(() =>
                 to: `/p/${p.value}/start`,
                 label: "Start testing",
                 icon: Play,
+                section: "Work",
                 active: route.path.endsWith("/start"),
               },
             ]
@@ -64,24 +69,29 @@ const items = computed(() =>
           to: `/p/${p.value}/auto`,
           label: "Auto test",
           icon: Bot,
+          section: "Work",
           active: route.path.includes("/auto"),
         },
         {
           to: `/p/${p.value}/roi`,
           label: "ROI",
           icon: Scale,
+          section: "Results",
           active: route.path.endsWith("/roi"),
         },
         {
           to: `/p/${p.value}/runs`,
           label: "Test runs",
           icon: GitBranch,
-          active: route.path.includes("/runs") && !route.path.includes("/auto/"),
+          section: "Results",
+          active:
+            route.path.includes("/runs") && !route.path.includes("/auto/"),
         },
         {
           to: `/p/${p.value}/tests`,
           label: "Test intelligence",
           icon: Activity,
+          section: "Results",
           active:
             route.path.includes("/tests") ||
             route.path.includes("/flaky") ||
@@ -91,6 +101,7 @@ const items = computed(() =>
           to: `/p/${p.value}/cases`,
           label: "Test management",
           icon: ClipboardList,
+          section: "Work",
           active:
             route.path.includes("/cases") ||
             route.path.includes("/requirements") ||
@@ -103,6 +114,7 @@ const items = computed(() =>
           to: `/p/${p.value}/guide`,
           label: "How to test",
           icon: BookOpen,
+          section: "Work",
           active: route.path.endsWith("/guide"),
         },
         // CI tokens: maintainers and up (§11.3.2 token.manage).
@@ -112,6 +124,7 @@ const items = computed(() =>
                 to: `/p/${p.value}/tokens`,
                 label: "CI tokens",
                 icon: KeyRound,
+                section: "Manage",
                 active: route.path.endsWith("/tokens"),
               },
             ]
@@ -124,6 +137,7 @@ const items = computed(() =>
                 to: `/p/${p.value}/members`,
                 label: "Members",
                 icon: Users,
+                section: "Manage",
                 active: route.path.endsWith("/members"),
               },
             ]
@@ -131,17 +145,25 @@ const items = computed(() =>
       ]
     : [],
 );
+const groups = computed(() =>
+  ["Work", "Results", "Manage"]
+    .map((title) => ({
+      title,
+      links: items.value.filter((item) => item.section === title),
+    }))
+    .filter((group) => group.links.length),
+);
 const link =
-  "flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-colors [&_svg]:size-4 [&_svg]:shrink-0";
+  "flex h-11 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-colors lg:h-9 [&_svg]:size-4 [&_svg]:shrink-0";
 const idle =
   "text-muted-foreground hover:bg-accent hover:text-accent-foreground";
 const active = "bg-accent text-accent-foreground";
 </script>
 <template>
-  <div class="flex h-full flex-col gap-5 p-3">
+  <div class="flex h-full min-h-0 flex-col gap-4 p-3 lg:gap-5">
     <RouterLink
       to="/"
-      class="flex h-10 items-center gap-2.5 rounded-md px-1.5"
+      class="flex h-11 shrink-0 items-center gap-2.5 rounded-md px-1.5 lg:h-10"
       aria-label="ATP projects"
       @click="emit('navigate')"
     >
@@ -155,7 +177,7 @@ const active = "bg-accent text-accent-foreground";
       </span>
     </RouterLink>
 
-    <div class="space-y-1">
+    <div class="shrink-0 space-y-1">
       <p
         class="text-muted-foreground px-2.5 text-[11px] font-semibold tracking-[0.12em] uppercase"
       >
@@ -165,47 +187,70 @@ const active = "bg-accent text-accent-foreground";
         to="/"
         :class="
           cn(
-            'bg-card hover:bg-accent flex h-9 items-center gap-2 rounded-md border px-2.5 text-sm shadow-xs transition-colors',
+            'bg-card hover:bg-accent flex h-11 items-center gap-2 rounded-md border px-2.5 text-sm shadow-xs transition-colors lg:h-9',
           )
         "
         @click="emit('navigate')"
       >
         <FolderGit2 :size="15" class="text-muted-foreground" />
-        <span class="min-w-0 flex-1 truncate font-medium">{{
-          project || "Choose a project"
-        }}</span>
+        <span
+          class="min-w-0 flex-1 truncate font-medium"
+          :title="projectName"
+          >{{ projectName || "Choose a project" }}</span
+        >
         <ChevronsUpDown :size="14" class="text-muted-foreground" />
       </RouterLink>
     </div>
 
-    <nav aria-label="Main navigation" class="flex flex-col gap-0.5">
-      <RouterLink
-        to="/"
-        :class="cn(link, project ? idle : active)"
-        :aria-current="!project ? 'page' : undefined"
-        @click="emit('navigate')"
-        ><FolderGit2 />Projects</RouterLink
+    <nav
+      aria-label="Main navigation"
+      class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1"
+    >
+      <div class="shrink-0 space-y-0.5">
+        <p
+          class="text-muted-foreground px-2.5 pb-1 text-[10px] font-semibold tracking-[0.12em] uppercase"
+        >
+          Workspace
+        </p>
+        <RouterLink
+          to="/"
+          :class="cn(link, project ? idle : active)"
+          :aria-current="!project ? 'page' : undefined"
+          @click="emit('navigate')"
+          ><FolderGit2 />Projects</RouterLink
+        >
+        <RouterLink
+          v-if="team"
+          to="/team"
+          :class="cn(link, route.path.startsWith('/team') ? active : idle)"
+          :aria-current="route.path.startsWith('/team') ? 'page' : undefined"
+          @click="emit('navigate')"
+          ><UserCog />Team</RouterLink
+        >
+      </div>
+      <div
+        v-for="group in groups"
+        :key="group.title"
+        class="shrink-0 space-y-0.5"
       >
-      <RouterLink
-        v-if="team"
-        to="/team"
-        :class="cn(link, route.path.startsWith('/team') ? active : idle)"
-        :aria-current="route.path.startsWith('/team') ? 'page' : undefined"
-        @click="emit('navigate')"
-        ><UserCog />Team</RouterLink
-      >
-      <RouterLink
-        v-for="item in items"
-        :key="item.to"
-        :to="item.to"
-        :class="cn(link, item.active ? active : idle)"
-        :aria-current="item.active ? 'page' : undefined"
-        @click="emit('navigate')"
-        ><component :is="item.icon" />{{ item.label }}</RouterLink
-      >
+        <p
+          class="text-muted-foreground px-2.5 pb-1 text-[10px] font-semibold tracking-[0.12em] uppercase"
+        >
+          {{ group.title }}
+        </p>
+        <RouterLink
+          v-for="item in group.links"
+          :key="item.to"
+          :to="item.to"
+          :class="cn(link, item.active ? active : idle)"
+          :aria-current="item.active ? 'page' : undefined"
+          @click="emit('navigate')"
+          ><component :is="item.icon" />{{ item.label }}</RouterLink
+        >
+      </div>
     </nav>
 
-    <div class="mt-auto flex items-center gap-2.5 border-t pt-3">
+    <div class="flex shrink-0 items-center gap-2.5 border-t pt-3">
       <span
         class="bg-card inline-flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold"
         aria-hidden="true"

@@ -44,9 +44,18 @@ await page.route("**/v1/**", async (route) => {
         : null,
       csrfToken: "test-csrf",
     };
-  } else if (url.pathname === "/v1/projects")
+  } else if (url.pathname === "/v1/member-scopes")
+    data = { items: [], nextCursor: null };
+  else if (url.pathname === "/v1/projects")
     data = {
-      items: [{ id: "one", name: "Project One", workspaceName: "Workspace" }],
+      items: [
+        {
+          id: "one",
+          name: "Project One",
+          workspaceName: "Workspace",
+          actions: ["view"],
+        },
+      ],
       nextCursor: null,
     };
   else if (denial) {
@@ -72,23 +81,27 @@ await page.route("**/v1/**", async (route) => {
 try {
   await page.goto("http://127.0.0.1:5174");
   await page.getByRole("link", { name: "Project One" }).waitFor();
-  assert.equal(requests.length, 2, "one session plus one projects request");
+  assert.equal(
+    requests.length,
+    3,
+    "one session, one member-scopes, and one projects request",
+  );
   await page.getByRole("link", { name: "Project One" }).click();
   await page.locator("tbody tr").waitFor();
-  assert.equal(requests.length, 3, "one runs request, no N+1");
+  assert.equal(requests.length, 4, "one runs request, no N+1");
   await page.getByLabel("Search branch, commit or run").fill("c");
   await page.getByLabel("Search branch, commit or run").fill("ch");
   await page.getByLabel("Search branch, commit or run").fill("checkout");
   await page.waitForURL(/q=checkout/);
   await page.locator("tbody tr").waitFor();
-  assert.equal(requests.length, 4, "one debounced filter request");
+  assert.equal(requests.length, 5, "one debounced filter request");
   await page.waitForTimeout(500);
-  assert.equal(requests.length, 4, "no idle request loop");
+  assert.equal(requests.length, 5, "no idle request loop");
   await page.locator(".run-link").click();
   await page
     .getByRole("heading", { name: "No results received yet" })
     .waitFor();
-  assert.equal(requests.length, 6, "one summary and one results request");
+  assert.equal(requests.length, 7, "one summary and one results request");
   await page.goBack();
   await page.locator("tbody tr").waitFor();
   assert.match(page.url(), /q=checkout/);
@@ -119,7 +132,7 @@ try {
   );
   assert.deepEqual(crashes, []);
   console.log(
-    "API browser PASS: 1 bootstrap, 1 projects, 1 runs; 1 debounced filter; 2 detail requests; no idle loop; URL back restoration; 403 clears rows; 401 redirects; CSRF and generic login error verified. Mocked HTTP contracts, not Go integration.",
+    "API browser PASS: 1 bootstrap, 1 member-scopes, 1 projects, 1 runs; 1 debounced filter; 2 detail requests; no idle loop; URL back restoration; 403 clears rows; 401 redirects; CSRF and generic login error verified. Mocked HTTP contracts, not Go integration.",
   );
 } catch (e) {
   console.error(requests, await page.locator("body").innerText());

@@ -15,6 +15,7 @@ export function useRuns() {
     q: scalar(route.query.q),
     status: scalar(route.query.status),
     environment: scalar(route.query.environment),
+    source: scalar(route.query.source),
     cursor: scalar(route.query.cursor),
   }));
   const resource = useResource<Page<Run>>();
@@ -62,7 +63,7 @@ export function useRuns() {
   }
   function clear() {
     clearTimeout(debounce);
-    void router.push({ query: {} });
+    void router.push({ query: { source: query.value.source || undefined } });
   }
   return {
     ...resource,

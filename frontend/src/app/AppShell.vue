@@ -15,8 +15,8 @@ const route = useRoute(),
 const project = computed(() =>
   typeof route.params.project === "string" ? route.params.project : "",
 );
-// Workspace › its name › the project's name › the screen. Names come from
-// the project list (ProjectAccess); until it answers, the id stands in.
+// Workspace name › project name › screen. Names come from ProjectAccess;
+// until it answers, the project id stands in.
 const projectName = computed(
   () => projectAccess.name(project.value) || project.value,
 );
@@ -104,22 +104,24 @@ async function logout() {
           aria-label="Breadcrumb"
           class="text-muted-foreground flex min-w-0 items-center gap-1 text-sm"
         >
-          <RouterLink to="/" class="hover:text-foreground transition-colors"
+          <RouterLink
+            v-if="!project"
+            to="/"
+            class="hover:text-foreground transition-colors"
             >Workspace</RouterLink
           >
           <template v-if="project">
             <template v-if="workspaceName">
+              <span class="hidden truncate sm:inline">{{ workspaceName }}</span>
               <ChevronRight
                 :size="14"
                 aria-hidden="true"
                 class="hidden shrink-0 sm:block"
               />
-              <span class="hidden truncate sm:inline">{{ workspaceName }}</span>
             </template>
-            <ChevronRight :size="14" aria-hidden="true" class="shrink-0" />
             <RouterLink
               :to="`/p/${encodeURIComponent(project)}/overview`"
-              class="text-foreground truncate font-medium"
+              class="text-foreground min-w-0 truncate font-medium"
               :title="projectName"
               >{{ projectName }}</RouterLink
             >
@@ -166,12 +168,6 @@ async function logout() {
           :key="`${session.user.id}:${project}`"
         />
       </main>
-
-      <footer
-        class="text-muted-foreground flex items-center justify-between border-t px-4 py-3 text-xs lg:px-8"
-      >
-        <span>ATP / Report Center</span><span>P1-min</span>
-      </footer>
     </div>
   </div>
 </template>

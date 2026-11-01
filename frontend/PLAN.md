@@ -90,6 +90,93 @@ draft was removed on 2026-09-18.
   decisions. Built by Claude at the owner's request on 2026-10-30, outside the
   backend-only split.
 
+### Frontend completion and fixture coverage (2026-10-30)
+
+- [x] Auto test now uses the EnvironmentPicker as the sole owner of its site
+  list request. Choosing “New environment” clears the parent selection; a
+  failed list offers retry. The scan URL follows a newly selected site while
+  preserving a URL typed by the tester. Switching projects clears the old
+  site's accounts and selection. Auto test tabs follow the route query, so
+  Back/Forward restores the selected tab.
+- [x] Completed the explicit development fixture for environments, AI status,
+  test accounts, runnable cases, drafts, auto runs, site scans, URL checks,
+  manual case suggestions, self-serve sign-up, access requests, and specialized
+  results. The production bundle still excludes fixture data; real assessment,
+  mail, AI, checker execution, and report downloads remain server-owned.
+- [x] Browser checks against fixture mode: `browser-check.mjs` passes the runs
+  and source-tab flow; `fixture-workflow-check.mjs` passes site creation, Auto
+  run, manual plan start, and both sign-up modes; `fixture-route-check.mjs`
+  opens 28 routes at 1440px and 360px (56 combinations) without page errors,
+  resource errors or page overflow. Auto test desktop/mobile screenshots were
+  inspected. `browser-api-check.mjs` passes its mocked HTTP request and auth
+  checks; it is not a live Go integration test.
+- [x] Full unit suite: 33 files, 131 tests passed. Production build passed
+  typecheck and bundle gate: 60.0 KiB initial JS gzip, 37 lazy modules, no
+  fixture payload. Prettier and `git diff --check` passed.
+- Next: verify the new sign-up/approval and environment/Auto test interactions
+  against a live deployment. The prior 2026-10-25 live check covered manually
+  authored Auto test and site scan; optional AI drafting/repair still needs a
+  test key or safe fake LLM endpoint.
+
+### Run source selected state (2026-10-28)
+
+- [x] Keep the source tabs compact without count badges. The selected tab now uses the primary colour for both its text and underline, while preserving `aria-pressed` and the URL-owned source filter.
+- [x] Re-ran the component/navigation tests, production build and fixture browser flow after the visual correction (see 2026-10-30 verification above).
+- Next: verify the same selected-state contrast in the live deployment when the local Docker engine is available.
+
+### Run source navigation (2026-10-27)
+
+- [x] Replace the inert Playwright label on Test runs with working source filters for Playwright, JUnit imports and Auto runs. The Go API applies each filter before cursor pagination and binds the cursor to the source. Manual plans and Specialized results link to their existing screens; Start testing exposes the ten case/plan types to project writers. The shared tab bar hides an accidental vertical scrollbar caused by the tab border overlap.
+- [x] Frontend build/bundle gate, focused Vitest (8 tests), and Go query/API tests pass. Browser click check confirms the Playwright and JUnit URL states and Manual plans navigation in fixture mode.
+- Next: switch the preview from fixture to the live deployment and verify real project data. Docker Desktop 4.52.0 aborts while removing the stale `dockerInference` AF_UNIX reparse point (Windows error 1920); a targeted rename failed. The existing data/volumes have not been reset. Do not report fixture rows as live results.
+
+### Desktop information hierarchy pass (2026-10-27)
+
+- [x] Grouped sidebar links by Workspace, Work, Results, and Manage, with permission-gated groups omitted when empty. Shortened the top context trail and removed the redundant footer. Mobile drawer and direct navigation remain intact.
+- [x] Overview and ROI now use a compact desktop metric strip; the individual mobile cards and all metric text/empty semantics remain.
+- [x] Overview's weekly chart now uses the adjacent desktop space for counts by the same server-provided categories. The chart/table toggle, keyboard tooltip, and category vocabulary remain. Removed an aggregate count because fixture trend totals and KPI denominators differ.
+- [x] Start testing's ten type choices are a two-column desktop text list; mobile retains its touch-sized choice grid and selection flow.
+- [x] Visually inspected 1440px light/dark Overview and desktop Start testing/ROI. The 72-combination route audit (12 routes × 360/768/1440px × light/dark) found no page overflow or JavaScript errors and no undersized visible mobile buttons/tabs. Chrome desktop interaction passed metric dividers, chart hover/table toggle, and type selection; 360×480 mobile drawer/navigation/theme persistence passed. Fixture browser flow, 116 unit tests, typecheck, build/bundle gate (59.6 KiB initial JS gzip, 36 lazy modules), Prettier, and `git diff --check` passed. No API contract changed.
+- The fixture Auto test resource gap was resolved on 2026-10-30; see the frontend completion slice above.
+
+### Frontend-wide usability pass (2026-10-26)
+
+- [x] Audited 12 primary project routes at 360px, 768px, and 1440px in light/dark (72 route/viewport/theme combinations): no page-wide overflow or JavaScript errors. A second 360px audit found zero undersized visible buttons or tabs in all 24 mobile combinations.
+- [x] The sidebar project selector now uses the loaded project name, and the mobile breadcrumb leaves room for the project and current screen. The short-screen drawer scrolls its nav while preserving 44px links and visible account actions. Shared button/tab touch targets are at least 44px on mobile/coarse pointers; desktop stays compact. Removed the internal `P1-min` footer marker.
+- [x] Chrome at 360x480 verified breadcrumb, project name, drawer scrolling, 44px links, Member navigation, account actions, and dark-mode persistence after reload. Fixture `browser-check.mjs` and mocked-API `browser-api-check.mjs` passed. Full unit suite passed (30 files, 116 tests); production build passed typecheck and bundle gate (59.7 KiB initial JS gzip, 36 lazy modules, no fixture data). Prettier for changed components and `git diff --check` passed.
+- API dependency: project names already come from `projectAccess`; no new backend endpoint or DTO is needed. The Auto test fixture currently returns a resource error; preserve the concurrent fixture work while checking the live product path separately.
+- The fixture Auto test resource gap was resolved on 2026-10-30. The isolated real Compose E2E on 2026-10-25 completed an Auto test browser run and site scan against the real API/checker.
+
+
+### Isolated live integration verification (2026-10-25)
+
+- [x] Built current API and checker images and brought up API, worker, Postgres, checker, and Caddy in a separate `atp-frontend-check` Compose project on port 8443. All long-running services were healthy; migrations through 0042 applied. The existing `atp` stack was untouched.
+- [x] A disposable maintainer tenant ingested a real Playwright reporter run: two intentional failures, one intentional flaky test, one pass, and 17 artifacts uploaded. `live-check.mjs` passed 19 UI steps and 153 real `/v1` calls; only its deliberate wrong-password 401 and 400 occurred, with no browser errors. `live-manual-history.mjs`, `live-case-bulk.mjs`, and `live-specialized-results.mjs` passed against the real API.
+- [x] Start testing in Chrome created a real environment and plan and opened its run screen. Auto test created a browser case for `https://example.com`, the checker passed it, and the resulting page linked both the test plan and Test run. Site scan checked one page successfully. These checks used the isolated stack and did not rely on mocked HTTP.
+- [x] Removed the disposable stack, test database volumes, temporary credentials, and test-only Compose config after verification.
+- Next: if AI drafting and step repair need acceptance, supply a test organization key or a safe fake LLM endpoint and verify those optional paths separately. The real checker run above covered manually authored auto cases without AI.
+
+### Frontend-wide verification (2026-10-25)
+
+- [x] Full `npm run test:unit`: 30 files, 116 tests passed. Production `npm run build` passed typecheck and bundle gate (59.6 KiB initial JS gzip, 36 lazy modules, no fixture data).
+- [x] `scripts/browser-check.mjs` passed in Chrome against fixture data: project isolation, paging/reload, search/empty/reset, run detail, sign-out/in, and 1440/768/360px layouts; no console errors.
+- [x] Updated the stale `scripts/browser-api-check.mjs` mock to include the current `/v1/member-scopes` request and project actions. It passed in Chrome with mocked HTTP: request counts, debounced filter, history restoration, 401/403 handling, CSRF, and login error.
+- Live-stack API/checker E2E was completed in the isolated integration verification above.
+
+### Start testing selection flow (2026-10-25)
+
+- [x] Replaced the ten-card mobile stack with a two-column choice grid and a selected-type summary. The explicit Change type action restores the choices and focus; choosing moves focus to the site step. Choice cards use native button/pressed semantics rather than incomplete radio behavior.
+- [x] Fixture Chrome at 360px, 768px, and 1440px in light/dark: all ten choices present, Enter selects Smoke, focus reaches the site heading, Change type restores the selected choice and its focus, Regression can be selected, and no page overflow or JavaScript errors. The selected mobile screen showed five library cases loaded. The fixture's environment endpoint remains unavailable, so environment persistence and plan creation were not exercised here.
+- [x] `tests/start-testing.test.ts`: 4 passed; typecheck and production build/bundle gate passed. Prettier and `git diff --check` passed.
+- Next: verify environment selection and plan creation against a live backend, then check the Auto test page's setup and run states in both themes when its fixture or backend data is available.
+
+### Stitch design guidance (2026-10-21)
+
+- [x] Added root `PROJECT.md`, `DESIGN.md`, and `.stitch/rules.md` so screen proposals use the current ATP product model, English UI labels, and the existing light/dark visual system. Root `README.md` links them.
+- [x] Darkened the light `warning` and `neutral` ink tokens in `src/shared/theme.css` to clear the small-text AA contrast check on their soft badge fills; mirrored both values in `DESIGN.md`.
+- [x] `designmd lint DESIGN.md`: zero format errors. Its seven warnings concern translucent dark soft fills evaluated without their parent surface and the standalone focus-ring tokens. Chrome measured all five status ink/fill pairs composited on their card: minimum 4.79:1 in light mode and 6.06:1 in dark mode. At 1440px and 360px in both themes, the fixture Runs page had no page-wide overflow or page errors and still labeled flaky passes correctly. `npm run build` (typecheck, Vite, bundle gate) passed after the token adjustment.
+- Next: when a screen is drawn in Stitch, compare both themes at desktop and mobile widths against its current Vue route, check rendered contrast on the real surface, and record any accepted implementation change as a separate frontend slice.
+
 ### Active Slice (2026-10-15)
 
 - Closing issue #3 / CI run 38749084024: backend/frontend/reporter/server

@@ -157,7 +157,8 @@ is a paginated project page, avoiding an unbounded app-wide dropdown cache.
 
 `GET /v1/projects/{projectId}/runs` accepts `limit=20`, optional `cursor`,
 `q` (max 200 characters; branch/commit/run search), `status`, `environment`
-(name filter), and `sort=-startedAt`. Returns a page of explicit Run DTOs.
+(environment key), `source=playwright|junit|auto` (optional, server-side source
+filter), and `sort=-startedAt`. Returns a page of explicit Run DTOs.
 `GET /v1/projects/{projectId}/runs/{runId}` returns one Run DTO. `runId` is the
 internal Run ID, not reporter `localRunId`.
 

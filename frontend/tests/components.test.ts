@@ -2,6 +2,20 @@ import { mount } from "@vue/test-utils";
 import { it, expect, vi } from "vitest";
 import StatusBadge from "../src/shared/StatusBadge.vue";
 import TechnicalBlock from "../src/shared/TechnicalBlock.vue";
+import ViewTab from "../src/shared/ViewTab.vue";
+
+it("marks the selected tab with the primary text and underline colour", () => {
+  const selected = mount(ViewTab, {
+    props: { selected: true },
+    slots: { default: "Auto runs" },
+  });
+  expect(selected.get("button").classes()).toEqual(
+    expect.arrayContaining(["border-primary", "text-primary", "selected"]),
+  );
+  const idle = mount(ViewTab, { slots: { default: "Playwright" } });
+  expect(idle.get("button").classes()).toContain("border-transparent");
+  expect(idle.get("button").classes()).not.toContain("text-primary");
+});
 
 it("passed runs with flaky tests never show clean green", () => {
   const wrapper = mount(StatusBadge, { props: { status: "passed", flaky: 2 } });

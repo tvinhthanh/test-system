@@ -47,13 +47,13 @@
      alone — they always carry an icon and a label. */
   --success: oklch(0.5 0.12 155);
   --success-soft: oklch(0.955 0.03 155);
-  --warning: oklch(0.56 0.12 75);
+  --warning: oklch(0.53 0.12 75);
   --warning-soft: oklch(0.965 0.04 85);
   --danger: oklch(0.53 0.18 24);
   --danger-soft: oklch(0.96 0.03 24);
   --info: oklch(0.52 0.13 252);
   --info-soft: oklch(0.955 0.025 252);
-  --neutral: oklch(0.55 0.01 155);
+  --neutral: oklch(0.52 0.01 155);
   --neutral-soft: oklch(0.955 0.004 150);
 
   /* §8.7 failure categories → fixed dataviz slots (validated palette, light
@@ -190,6 +190,18 @@
   }
   ::selection {
     background: color-mix(in oklch, var(--ring) 28%, transparent);
+  }
+}
+
+/* Compact desktop controls keep their density; touch layouts need a reliable
+   hit area even when a page requests a small shadcn button variant. */
+@media (pointer: coarse), (max-width: 63.999rem) {
+  [data-slot="button"] {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+  [role="tab"] {
+    min-height: 2.75rem;
   }
 }
 

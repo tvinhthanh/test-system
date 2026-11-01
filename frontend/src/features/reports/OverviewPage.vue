@@ -35,6 +35,15 @@ const weeks = computed(() => columns(trend.value ?? [], failureCategories));
 const peak = computed(() =>
   weeks.value.reduce((m, w) => Math.max(m, w.total), 0),
 );
+const categoryTotals = computed(() =>
+  failureCategories.map((category) => ({
+    category,
+    count: weeks.value.reduce(
+      (total, week) => total + (week.counts[category] ?? 0),
+      0,
+    ),
+  })),
+);
 const showTable = ref(false);
 const hovered = ref<number | null>(null);
 const hoveredWeek = computed(() =>
@@ -103,10 +112,11 @@ const weekLabel = (iso: string) =>
   <AsyncState :loading="loading" :error="error" :rows="4" @retry="refresh">
     <section
       v-if="metrics"
-      class="kpi-row grid grid-cols-2 gap-3 lg:grid-cols-4"
+      class="kpi-row grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-0 lg:overflow-hidden lg:rounded-lg lg:border lg:bg-card"
       aria-label="Key figures"
     >
       <StatTile
+        variant="segment"
         label="Median time to root cause"
         :value="
           metrics.ttrcMedianSeconds === null
@@ -120,6 +130,7 @@ const weekLabel = (iso: string) =>
         "
       />
       <StatTile
+        variant="segment"
         label="Time to first view"
         :value="
           metrics.timeToFirstViewSeconds === null
@@ -129,11 +140,13 @@ const weekLabel = (iso: string) =>
         note="median, failure → first FAILURE_SEEN"
       />
       <StatTile
+        variant="segment"
         label="Untriaged"
         :value="percent(metrics.untriagedRate)"
         :note="`${metrics.failures - metrics.triaged} of ${metrics.failures} failures without a decision`"
       />
       <StatTile
+        variant="segment"
         label="Triage coverage"
         :value="percent(metrics.triageCoverage)"
         :note="`${metrics.seen} of ${metrics.failures} failures seen by someone`"
@@ -199,97 +212,125 @@ const weekLabel = (iso: string) =>
         </Table>
       </div>
       <figure v-else class="trend-chart bg-card m-0 rounded-lg border p-4">
-        <div class="chart-scroll relative overflow-x-auto pb-1">
-          <svg
-            class="block"
-            :width="weeks.length * geometry.step + geometry.gap"
-            :height="plotHeight + 28"
-            role="img"
-            :aria-label="`Failures per week by category, ${weeks.length} weeks, busiest week ${peak}`"
-          >
-            <line
-              class="stroke-border"
-              :x1="0"
-              :x2="weeks.length * geometry.step + geometry.gap"
-              :y1="plotHeight + 0.5"
-              :y2="plotHeight + 0.5"
-            />
-            <g
-              v-for="(w, i) in weeks"
-              :key="w.week"
-              class="column outline-none"
-              :class="{ hovered: hovered === i }"
-              :transform="`translate(${geometry.gap + i * geometry.step}, 0)`"
-              tabindex="0"
-              @mouseenter="hovered = i"
-              @mouseleave="hovered = null"
-              @focus="hovered = i"
-              @blur="hovered = null"
-            >
-              <!-- Hit target wider than the mark. -->
-              <rect
-                class="hit fill-transparent"
-                :class="hovered === i && 'fill-accent'"
-                :x="-geometry.gap / 2"
-                :y="0"
-                :width="geometry.step"
-                :height="plotHeight + 28"
-                rx="4"
-              />
-              <rect
-                v-for="s in stack(w)"
-                :key="s.category"
-                :class="`series-${s.category}`"
-                :x="0"
-                :y="s.y"
-                :width="geometry.barWidth"
-                :height="s.h"
-                rx="1"
-              />
-              <text
-                v-if="i % geometry.tickEvery === 0"
-                class="tick fill-muted-foreground text-[10px]"
-                :x="geometry.barWidth / 2"
-                :y="plotHeight + 18"
-                text-anchor="middle"
-              >
-                {{ weekLabel(w.week) }}
-              </text>
-            </g>
-          </svg>
+        <div class="lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-6">
           <div
-            v-if="hovered !== null && hoveredWeek"
-            class="chart-tooltip bg-popover text-popover-foreground pointer-events-none absolute top-2 z-10 flex min-w-40 flex-col gap-1 rounded-md border px-3 py-2 text-xs shadow-md"
-            role="status"
-            :style="{
-              left: `${geometry.gap + hovered * geometry.step + geometry.barWidth + 8}px`,
-            }"
+            class="chart-scroll relative mx-auto w-fit max-w-full overflow-x-auto pb-1"
           >
-            <strong class="font-medium"
-              >Week of {{ weekLabel(hoveredWeek.week) }}</strong
+            <svg
+              class="block"
+              :width="weeks.length * geometry.step + geometry.gap"
+              :height="plotHeight + 28"
+              role="img"
+              :aria-label="`Failures per week by category, ${weeks.length} weeks, busiest week ${peak}`"
             >
-            <span
-              v-for="c in failureCategories"
-              v-show="hoveredWeek.counts[c]"
-              :key="c"
-              class="flex items-center gap-2"
-              ><i
-                :class="`swatch series-${c} inline-block size-2.5 rounded-[2px]`"
-              />{{ categoryLabel[c] }}
-              <b class="ml-auto font-mono font-medium tabular-nums">{{
-                hoveredWeek.counts[c]
-              }}</b></span
+              <line
+                class="stroke-border"
+                :x1="0"
+                :x2="weeks.length * geometry.step + geometry.gap"
+                :y1="plotHeight + 0.5"
+                :y2="plotHeight + 0.5"
+              />
+              <g
+                v-for="(w, i) in weeks"
+                :key="w.week"
+                class="column outline-none"
+                :class="{ hovered: hovered === i }"
+                :transform="`translate(${geometry.gap + i * geometry.step}, 0)`"
+                tabindex="0"
+                @mouseenter="hovered = i"
+                @mouseleave="hovered = null"
+                @focus="hovered = i"
+                @blur="hovered = null"
+              >
+                <!-- Hit target wider than the mark. -->
+                <rect
+                  class="hit fill-transparent"
+                  :class="hovered === i && 'fill-accent'"
+                  :x="-geometry.gap / 2"
+                  :y="0"
+                  :width="geometry.step"
+                  :height="plotHeight + 28"
+                  rx="4"
+                />
+                <rect
+                  v-for="s in stack(w)"
+                  :key="s.category"
+                  :class="`series-${s.category}`"
+                  :x="0"
+                  :y="s.y"
+                  :width="geometry.barWidth"
+                  :height="s.h"
+                  rx="1"
+                />
+                <text
+                  v-if="i % geometry.tickEvery === 0"
+                  class="tick fill-muted-foreground text-[10px]"
+                  :x="geometry.barWidth / 2"
+                  :y="plotHeight + 18"
+                  text-anchor="middle"
+                >
+                  {{ weekLabel(w.week) }}
+                </text>
+              </g>
+            </svg>
+            <div
+              v-if="hovered !== null && hoveredWeek"
+              class="chart-tooltip bg-popover text-popover-foreground pointer-events-none absolute top-2 z-10 flex min-w-40 flex-col gap-1 rounded-md border px-3 py-2 text-xs shadow-md"
+              role="status"
+              :style="{
+                left: `${geometry.gap + hovered * geometry.step + geometry.barWidth + 8}px`,
+              }"
             >
-            <span class="total mt-1 flex items-center gap-2 border-t pt-1"
-              >Total
-              <b class="ml-auto font-mono font-medium tabular-nums">{{
-                hoveredWeek.total
-              }}</b></span
-            >
+              <strong class="font-medium"
+                >Week of {{ weekLabel(hoveredWeek.week) }}</strong
+              >
+              <span
+                v-for="c in failureCategories"
+                v-show="hoveredWeek.counts[c]"
+                :key="c"
+                class="flex items-center gap-2"
+                ><i
+                  :class="`swatch series-${c} inline-block size-2.5 rounded-[2px]`"
+                />{{ categoryLabel[c] }}
+                <b class="ml-auto font-mono font-medium tabular-nums">{{
+                  hoveredWeek.counts[c]
+                }}</b></span
+              >
+              <span class="total mt-1 flex items-center gap-2 border-t pt-1"
+                >Total
+                <b class="ml-auto font-mono font-medium tabular-nums">{{
+                  hoveredWeek.total
+                }}</b></span
+              >
+            </div>
           </div>
+          <aside
+            class="hidden lg:block lg:border-l lg:pl-6"
+            aria-label="Failure category totals"
+          >
+            <h3 class="text-sm font-semibold">Across shown weeks</h3>
+            <dl class="mt-3 divide-y">
+              <div
+                v-for="item in categoryTotals"
+                :key="item.category"
+                class="flex items-center justify-between gap-3 py-2 text-xs"
+              >
+                <dt class="flex min-w-0 items-center gap-2">
+                  <i
+                    :class="`swatch series-${item.category} inline-block size-2.5 shrink-0 rounded-[2px]`"
+                    aria-hidden="true"
+                  />
+                  <span>{{ categoryLabel[item.category] }}</span>
+                </dt>
+                <dd class="font-mono font-medium tabular-nums">
+                  {{ item.count }}
+                </dd>
+              </div>
+            </dl>
+          </aside>
         </div>
         <figcaption
-          class="legend text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs"
+          class="legend text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs lg:hidden"
         >
           <span
             v-for="c in failureCategories"
