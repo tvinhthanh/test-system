@@ -23,6 +23,19 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Test-only dependency advisories (2026-11-01)
+
+- `npm audit` failed on 4 moderate advisories: glob ≤ 14.0.1 and minimatch < 11.0.1. Both come only through `@vue/test-utils` → js-beautify, and even the newest js-beautify still asks for the affected ranges.
+- `package.json` now has `overrides` for js-beautify's subtree: glob 14.0.3 and minimatch 11.0.3. js-beautify loads them only in its CLI, not in the HTML formatting the tests use. Remove the override once js-beautify takes the fixed versions.
+- Checked in a clean worktree with npm 10.9.2, as CI uses:
+  - `npm ci`;
+  - `npm audit`: 0;
+  - vitest 132/132;
+  - build and the bundle gate (60.3 KiB).
+
+  Details: `backend/GATES.md`, 01-11-2026.
+- The shared working copy's `node_modules` were installed before this lockfile. They still work, and `npm ci` brings them up to date.
+
 ### Any provider's AI key (QĐ-18, 2026-10-31)
 
 - AI settings has a provider select. The choices are Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Groq and OpenRouter, plus the operator's OpenAI-compatible endpoint when the server has one.

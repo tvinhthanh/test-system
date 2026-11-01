@@ -824,3 +824,15 @@ Chủ dự án có key OpenAI, hỏi dùng được không, rồi quyết "sửa
   - xAI, Mistral, OpenRouter có trả usage khi stream không (không có thì số token ghi 0);
   - tên model `mistral-*-latest` (trang model của Mistral không liệt kê alias). Sai thì lúc lưu báo lỗi kèm model key dùng được.
 - Endpoint `openai-compatible` mới chạy với server giả, chưa chạy với Ollama, vLLM hay LiteLLM thật.
+
+## Ghép nhánh vào `main` — 01-11-2026
+
+Chủ dự án bảo "commit push merge". Trước khi ghép, các gate CI chạy được trên laptop được chạy lại trên đúng cây sẽ vào `main`: QĐ-18 (3933687) cộng phần agent frontend làm xong nhưng chưa commit (21-10 → 30-10, ghi trong `frontend/PLAN.md`, commit 1c9d16f). Tất cả chạy trong worktree sạch; `node_modules` của agent frontend không bị đụng tới.
+
+- Frontend: `npm ci`; vitest 132/132 (33 file); typecheck + build + bundle gate 60,3 KiB gzip (37 module lazy, không có fixture); prettier và `git diff --check` sạch.
+- Backend: govulncheck v1.9.0 trên go1.26.10, như CI — code không gọi tới lỗ hổng nào.
+- `npm audit` của reporter và checker: 0.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 1 | Trung bình (gate CI frontend) | `npm audit` của frontend đỏ vì 4 cảnh báo moderate công bố sau 30-10: glob 9.0.0–14.0.1 (GHSA-3g3m-2fjr-6pw4: hủy bằng AbortSignal mà vẫn duyệt file sau timeout) và minimatch < 11.0.1 (GHSA-g3hv-75wg-m249: DoS khi mở rộng pattern). Hai gói chỉ vào qua `@vue/test-utils` 2.4.6 → js-beautify 1.15.4 → glob 10.5.0 và editorconfig 1.0.7 → minimatch 9.0.9. Bản vá chỉ có ở glob 14.0.2+ và minimatch 11.0.1+ (27-10). Ngay js-beautify mới nhất (2.0.3) vẫn cần glob ^13 và minimatch ~10.2, nên nâng `@vue/test-utils` không đủ; `npm audit fix` không đổi gì | `overrides` trong `frontend/package.json`, chỉ áp trong cây của js-beautify: glob 14.0.3, minimatch 11.0.3. js-beautify chỉ nạp hai gói này trong `cli.js`; phần định dạng HTML mà `@vue/test-utils` dùng không nạp chúng. Lockfile chỉ khác bản cũ ở glob, minimatch, brace-expansion, balanced-match và path-scurry: thêm 2 gói, bớt 34 gói con của glob 10; `@emnapi` giữ nguyên. Bỏ override khi js-beautify nhận bản vá | worktree sạch: `npm ci` bằng npm 10.9.2 (như CI) chạy được; `npm audit` 0; vitest 132/132; typecheck + build + bundle gate 60,3 KiB; `js-beautify.html()` vẫn chạy |
