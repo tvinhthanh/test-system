@@ -15,6 +15,9 @@ Thumbs.db
 # Deployment secrets (deploy/.env.example is the template).
 backend/deploy/.env
 
+# Local go-run environment with your AI key (local.env.cmd.example is the template).
+backend/local.env.cmd
+
 # The root certificate server/atp.sh ca exports.
 server/atp-root-ca.crt
 
