@@ -4,6 +4,8 @@ ATP (Report Center) là nơi cả nhóm test làm việc trên cùng một dashb
 
 Tên nút và menu dưới đây giữ nguyên tiếng Anh như trên giao diện và được **in đậm**. Trong app, mục **How to test** ở thanh bên trái là bản tóm tắt ngắn của tài liệu này.
 
+*Cập nhật theo bản ngày 01-11-2026.*
+
 ---
 
 ## 1. Bắt đầu
@@ -30,7 +32,8 @@ Organization (công ty)
 
 - Mọi dữ liệu test (case, plan, run, release) đều thuộc về **một project**.
 - Trang đầu (**Projects**) liệt kê các project bạn được xem. Bấm vào một project để vào làm việc.
-- Dòng breadcrumb trên cùng (`Workspace › tên workspace › tên project › màn hình`) cho biết bạn đang ở đâu.
+- Dòng trên cùng cho biết bạn đang ở đâu: `tên workspace › tên project › màn hình`. Trên điện thoại chỉ còn `tên project › màn hình`.
+- Muốn đổi sang project khác, bấm ô tên project ngay dưới chữ **PROJECT** ở đầu thanh bên trái. App về trang **Projects** để bạn chọn lại.
 
 ### 1.3 Vai trò: ai làm được gì
 
@@ -38,18 +41,25 @@ Organization (công ty)
 |---|---|
 | **viewer** | Chỉ xem: plan, kết quả, báo cáo. |
 | **member** (tester) | Thêm việc test: viết case và plan, ghi kết quả và bằng chứng, triage lỗi, chạy URL check, thêm environment, nhờ AI soạn case, quản lý tài khoản test, chạy auto test và quét site. |
-| **maintainer** | Thêm quyền của member, cộng thêm: quyết định release, cấp CI token, gộp test identity, cài đặt project. |
-| **workspace admin** | Tạo project và quản lý member trong workspace. |
+| **maintainer** | Thêm quyền của member, cộng thêm: quyết định release, cấp CI token, gộp test identity, import JUnit, cài đặt project, xóa và khôi phục run. |
+| **workspace admin** | Tạo, xóa và khôi phục project; quản lý member trong workspace. Làm được mọi việc của maintainer, trừ xóa run. |
 | **org admin** | Quản lý workspace, member và token trong cả organization; cài đặt AI. |
 | **org owner** | Toàn quyền, kể cả trao vai trò owner và xem **Usage**. Bắt buộc bật xác thực hai bước. |
 
 Vai trò được kế thừa xuống dưới: ai là org admin thì cũng là admin của mọi workspace và project bên trong.
 
-**Thanh bên trái** chỉ hiện những mục bạn có quyền dùng:
-- **Start testing**: member trở lên.
-- **CI tokens**: maintainer trở lên.
-- **Members**: người quản lý member của project.
-- **Team**: admin của organization hoặc workspace.
+**Thanh bên trái** chia mục thành bốn nhóm. Mục nào bạn không có quyền dùng thì không hiện; nhóm không còn mục nào thì ẩn luôn.
+
+| Nhóm | Mục | Ai thấy |
+|---|---|---|
+| **WORKSPACE** | **Projects**: mọi project bạn được xem. **Team**: quản lý người, project, AI. | **Team**: admin của organization hoặc workspace |
+| **WORK** | **Start testing** ([mục 3](#3-cách-nhanh-nhất-start-testing)), **Auto test** ([mục 6](#6-auto-test-hệ-thống-tự-chạy-test)), **Test management** ([mục 5](#5-làm-từng-bước-khi-cần-kiểm-soát-kỹ-hơn)), **How to test** | **Start testing**: member trở lên |
+| **RESULTS** | **Overview**, **ROI**, **Test runs**, **Test intelligence** ([mục 7.2](#72-xem-kết-quả-và-triage)) | Mọi người trong project |
+| **MANAGE** | **CI tokens** ([mục 7.1](#71-kết-nối-pipeline)), **Members** ([mục 2.1](#21-thêm-người)) | **CI tokens**: maintainer trở lên. **Members**: người quản lý member của project |
+
+- Góc dưới thanh bên trái là tên và email của bạn. Cạnh đó có biểu tượng khiên (**Account security**, [mục 8](#8-tài-khoản-của-bạn)) và nút đăng xuất.
+- Trên điện thoại, thanh bên trái được thu gọn. Bấm nút ☰ ở góc trên bên trái để mở.
+- Biểu tượng ở góc trên bên phải đổi giao diện sáng / tối.
 
 ---
 
@@ -81,8 +91,13 @@ Chỉ có khi người vận hành bật `SIGNUP=on` (xem mục 10).
 
 ### 2.2 Tạo project
 
-- Vào **Team**, chọn workspace, điền ô **New project in this workspace**, rồi bấm **Create project**.
-- Project đã xóa nằm trong danh sách project bị xóa của workspace và khôi phục được trong 30 ngày.
+Việc này dành cho workspace admin trở lên.
+
+- **Tạo:** vào **Team**, chọn workspace, điền ô **New project in this workspace**, rồi bấm **Create project**.
+- **Xóa:** vào project đó, mở **Members**. Ở phần **Delete this project** cuối trang, gõ đúng tên project để xác nhận rồi bấm **Delete project**.
+  - Run, kết quả, artifact, test case và CI token của project bị xóa theo.
+  - CI token của project ngừng chạy ngay.
+- **Khôi phục:** vào **Team**, chọn workspace, tìm project trong **Recently deleted projects** rồi bấm **Restore**. Quá 30 ngày thì project bị xóa hẳn.
 - Workspace mới được tạo bằng lệnh của người vận hành: `bash server/atp.sh admin ws create -org <org-id> -name "Tên"`.
 
 ### 2.3 Bật AI soạn test case (không bắt buộc)
@@ -111,6 +126,10 @@ Dữ liệu gửi cho provider đang dùng: chỉ khi tester bấm **Draft cases
 
 Xem [mục 7](#7-dành-cho-người-viết-automation-playwright).
 
+### 2.5 Usage (chỉ org owner)
+
+Vào **Team** rồi bấm **Usage** ở dòng organization. Mỗi ngày trang ghi một dòng: số test đang hoạt động, số run và dung lượng artifact. **Chưa có khoản nào bị tính tiền.** Đây chỉ là số đo để chọn cách tính phí sau này. Dòng đầu tiên hiện vào ngày hôm sau.
+
 ---
 
 ## 3. Cách nhanh nhất: Start testing
@@ -133,6 +152,8 @@ Có 10 loại:
 | **Accessibility** | Bàn phím, trình đọc màn hình, độ tương phản |
 | **Compatibility** | Các trình duyệt, điện thoại, kích thước màn hình |
 | **Recovery** | Mất mạng, lỗi server, thao tác bị gián đoạn |
+
+Chọn xong, danh sách thu lại còn một dòng tóm tắt. Muốn chọn lại thì bấm **Change type**.
 
 ### Bước 2: Which site? (site cần test)
 
@@ -284,7 +305,7 @@ Mở mục **Auto test** trên thanh bên trái. Ở đây hệ thống **tự l
 
 ### 6.1 Chọn site và tài khoản test
 
-1. Ở đầu trang, chọn **Environment (site under test)**. Environment phải có địa chỉ.
+1. Ở đầu trang, chọn **Environment (site under test)**. Environment phải có địa chỉ. Chưa có thì chọn **+ New environment…** và làm như ở [Start testing, bước 2](#bước-2-which-site-site-cần-test).
 2. Nếu trang cần đăng nhập (chat, giỏ hàng…), bấm **Test accounts** → **Add account**, điền các ô sau rồi bấm **Save account**:
    - **Key**, ví dụ `default`;
    - **User name or email**;
@@ -327,6 +348,18 @@ Các ô cần điền:
 Cách hệ thống tìm phần tử:
 - **Role and name**: nên dùng nhất. Ví dụ role `button` + name `Gửi`, hoặc role `textbox` + name `Tin nhắn`.
 - **Field label**, **Placeholder**, **Visible text**, **Test id**, **CSS selector**: dùng khi role và name không hợp.
+- Hai hành động **Press a key** và **Check: text is there** không bắt buộc có phần tử. Chọn **The page** để bấm phím trên trang đang mở. Chọn **Anywhere on the page** để tìm chữ trên cả trang.
+
+> **Bước mới luôn bắt đầu là "Click" vào một "button".** Khi đổi bước đó sang **Press a key** hay **Check: text is there**, phần tử "button" vẫn còn nguyên, và bước sẽ thành *"Press Enter in a button"* rồi fail. Nếu không nhắm vào phần tử nào, hãy đổi ô tìm phần tử sang **The page** hoặc **Anywhere on the page**. Ô chữ mờ dưới mỗi bước ghi bằng lời hệ thống sẽ làm gì. Hãy đọc nó trước khi lưu.
+
+Ví dụ: thêm một việc trong app demo TodoMVC. Environment có địa chỉ `https://demo.playwright.dev`; ô **Where it starts** là `/todomvc/`. Case này đã được chạy thật trên server và pass trong khoảng 1 giây.
+
+| # | Hành động | Phần tử | Giá trị |
+|---|---|---|---|
+| 1 | **Check: title contains** | (không có) | `TodoMVC` |
+| 2 | **Type into** | **Placeholder**: `What needs to be done?` | `Buy milk` |
+| 3 | **Press a key** | **The page** | `Enter` |
+| 4 | **Check: text is there** | **Anywhere on the page** | `Buy milk` |
 
 Một số lưu ý khi viết bước:
 - Gõ `{{tên_input}}` ở ô giá trị để dùng input.
@@ -348,7 +381,9 @@ Bước AI đã sửa có ghi chú riêng. Bấm **Keep the repair in the case**
 
 **Kết quả còn được ghi vào hai nơi** (có nút mở ngay trên trang run):
 - **Test plan** "Auto test · …": mỗi case là một execution, kèm ảnh chụp.
-- **Test runs**: dùng cho release gate và phát hiện test chập chờn (flaky), như một run CI.
+- **Test runs**, tab **Auto runs**: dùng cho release gate và phát hiện test chập chờn (flaky), như một run CI.
+
+Tab **Runs** của Auto test liệt kê các lần chạy trước, kể cả lần chạy từ CI.
 
 ### 6.5 Quét site
 
@@ -387,26 +422,51 @@ Cách 2, chạy trong repo của bạn:
 
 Mỗi pipeline dùng một token riêng, để thu hồi một token (**Revoke**) mà không làm dừng các pipeline khác.
 
-Có báo cáo JUnit XML (ví dụ từ Cypress, Jest, pytest)? Dùng **Import JUnit** trên trang Test runs để đưa vào.
+**Có báo cáo JUnit XML?** Ví dụ từ Cypress, Jest, pytest, Maven, hay test runner của Node (`node --test --test-reporter=junit`). Maintainer trở lên đưa được nó vào như một run đã chạy:
+1. Trên trang **Test runs**, bấm **Import JUnit**.
+2. Chọn file ở **Report (.xml)**, rồi điền:
+   - **Environment**;
+   - **Framework**: tên nhóm test, ví dụ `pytest` hay `node`. Giữ nguyên tên này cho cùng một bộ test để lịch sử nối liền.
+   - **Branch**.
+3. Nếu báo cáo không ghi ngày giờ chạy (test runner của Node không ghi), chọn ngày ở **Run date (only if the report has none)**.
+4. Bấm **Import**, rồi bấm **Open the run** để xem.
+
+Import lại đúng file đó không tạo thêm run. Trong CI, gửi thẳng file lên server bằng CI token:
+
+```
+curl -H "Authorization: Bearer $ATP_TOKEN" -H "Content-Type: application/xml" \
+  --data-binary @report.xml "$ATP_URL/v1/imports/junit?environment=ci&framework=pytest"
+```
 
 ### 7.2 Xem kết quả và triage
 
-- **Test runs**: các lần chạy, mới nhất ở trên cùng. Mở một run để xem từng test. Mở một test fail để vào **Failure detail**:
-  - Lỗi và stack trace của từng lần thử.
-  - Ảnh chụp, video, trace (**Open in trace viewer**).
-  - **Test history**: test này đã chạy ra sao qua các lần.
-  - **Triage** với 3 lựa chọn:
-    - **Mark flaky**: test chập chờn.
-    - **Known issue**: lỗi đã biết.
-    - **Resolve**: đã xử lý.
+- **Test runs**: các lần chạy, mới nhất ở trên cùng.
+  - Các tab theo nguồn: **All runs**, **Playwright** (reporter đẩy lên), **JUnit imports**, **Auto runs** (do Auto test chạy). Tab đang chọn nằm trong địa chỉ trang, nên gửi link cho người khác thì họ mở đúng tab đó. Trên điện thoại, kéo ngang hàng tab nếu không thấy **Auto runs**.
+  - Lọc bằng ô tìm (branch, commit hoặc mã run), **Status** và **Environment**.
+  - Dưới hàng tab có link nhanh sang **Manual plans**, **Specialized results** và **Start testing (10 types)**.
+  - Mở một run để xem từng test. Mở một test fail để vào **Failure detail**:
+    - Lỗi và stack trace của từng lần thử.
+    - Ảnh chụp, video, trace (**Open in trace viewer**).
+    - **Test history**: test này đã chạy ra sao qua các lần.
+    - **Triage** với 3 lựa chọn:
+      - **Mark flaky**: test chập chờn.
+      - **Known issue**: lỗi đã biết.
+      - **Resolve**: đã xử lý.
 
-    Mọi quyết định triage đều được ghi lại kèm tên người làm.
+      Mọi quyết định triage đều được ghi lại kèm tên người làm.
+  - **Xóa một run** (chỉ maintainer, org admin và org owner; workspace admin không xóa được): mở run, bấm **Delete run** rồi **Confirm delete**.
+    - Run đã xóa nằm ở mục **Recently deleted runs** cuối trang Test runs.
+    - Bấm **Restore** để lấy lại. Mỗi dòng ghi ngày run bị xóa hẳn (*removed for good on …*).
 - **Test intelligence**:
   - **All tests**: mỗi test một dòng, giữ nguyên dù test bị đổi tên.
   - **Flaky view**: các test chập chờn.
   - **Review queue**: các cặp test có thể là cùng một test bị đổi tên, chờ người xác nhận.
-- **Overview**: sức khỏe triage, gồm thời gian tìm ra nguyên nhân, độ phủ và nhóm lỗi.
-- **ROI**: số giờ tiết kiệm được, đo từ dữ liệu triage thật so với baseline nhóm tự đo. Không có số nào là ước đoán.
+- **Overview** (**Triage health**): chọn khoảng **Last 30 days** hoặc **Last 90 days**.
+  - Bốn con số: **Median time to root cause** (từ lúc thấy lỗi đến lúc chấp nhận nguyên nhân), **Time to first view**, **Untriaged** (fail chưa ai quyết định) và **Triage coverage** (fail đã có người xem).
+  - Biểu đồ **Failure categories by week**: số fail mỗi tuần, chia theo nhóm lỗi, kèm tổng theo nhóm. Nút cạnh tiêu đề chuyển giữa biểu đồ và bảng số.
+- **ROI** (**Return on triage**): số giờ tiết kiệm được, đo từ dữ liệu triage thật so với baseline nhóm tự đo.
+  - Maintainer ghi baseline ở phần **Baselines**. Chưa có baseline thì trang ghi **Not enough data** thay vì đoán.
+  - Ô **Your hourly cost (optional)** đổi giờ ra tiền ngay trên trang. Con số này không được lưu và không gửi đi đâu.
 
 ---
 
@@ -441,6 +501,9 @@ Nút bên cạnh biểu tượng khiên dùng để đăng xuất (**Sign out**)
 | *"Auto test is off on this server"* | Người vận hành cần bật `URLCHECK=on` rồi chạy `bash server/atp.sh up`. |
 | Auto run báo *"could not sign in as …"* | Mở **Test accounts**: kiểm lại mật khẩu, bấm **Find sign-in steps**, hoặc sửa **Steps**. |
 | Bước fail: *"The element was not found or could not be used"* | Giao diện đã đổi. Bật **AI repairs…** rồi chạy lại, hoặc **Edit** case và sửa tên phần tử. |
+| Bước ghi *"… in a button"* dù bạn không định bấm nút nào (ví dụ *"Press Enter in a button"*) | Phần tử mặc định của bước mới vẫn còn. **Edit** case, đổi ô tìm phần tử sang **The page** hoặc **Anywhere on the page** ([mục 6.3](#63-tự-viết-hoặc-sửa-case)). |
+| Import JUnit báo *"This is not a JUnit report we can read: … no timestamp …"* | Báo cáo không ghi ngày chạy. Chọn **Run date (only if the report has none)** rồi bấm **Import** lại. |
+| Không thấy tab **Auto runs** trên điện thoại | Hàng tab dài hơn màn hình. Kéo ngang hàng tab. |
 | Bước fail: *"tried to leave the site under test"* | Bước đó bấm vào link sang site khác. Hệ thống luôn giữ trình duyệt trong site đang test. |
 | Case lỗi: *"The start page did not open"* | Kiểm tra lại ô **Where it starts**, các input của case và địa chỉ của environment. |
 

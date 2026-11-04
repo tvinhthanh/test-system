@@ -836,3 +836,35 @@ Chủ dự án bảo "commit push merge". Trước khi ghép, các gate CI chạ
 | # | Mức | Phát hiện | Sửa | Test |
 |---|---|---|---|---|
 | 1 | Trung bình (gate CI frontend) | `npm audit` của frontend đỏ vì 4 cảnh báo moderate công bố sau 30-10: glob 9.0.0–14.0.1 (GHSA-3g3m-2fjr-6pw4: hủy bằng AbortSignal mà vẫn duyệt file sau timeout) và minimatch < 11.0.1 (GHSA-g3hv-75wg-m249: DoS khi mở rộng pattern). Hai gói chỉ vào qua `@vue/test-utils` 2.4.6 → js-beautify 1.15.4 → glob 10.5.0 và editorconfig 1.0.7 → minimatch 9.0.9. Bản vá chỉ có ở glob 14.0.2+ và minimatch 11.0.1+ (27-10). Ngay js-beautify mới nhất (2.0.3) vẫn cần glob ^13 và minimatch ~10.2, nên nâng `@vue/test-utils` không đủ; `npm audit fix` không đổi gì | `overrides` trong `frontend/package.json`, chỉ áp trong cây của js-beautify: glob 14.0.3, minimatch 11.0.3. js-beautify chỉ nạp hai gói này trong `cli.js`; phần định dạng HTML mà `@vue/test-utils` dùng không nạp chúng. Lockfile chỉ khác bản cũ ở glob, minimatch, brace-expansion, balanced-match và path-scurry: thêm 2 gói, bớt 34 gói con của glob 10; `@emnapi` giữ nguyên. Bỏ override khi js-beautify nhận bản vá | worktree sạch: `npm ci` bằng npm 10.9.2 (như CI) chạy được; `npm audit` 0; vitest 132/132; typecheck + build + bundle gate 60,3 KiB; `js-beautify.html()` vẫn chạy |
+
+### Kiểm với dữ liệu thật sau khi ghép — 01-11-2026
+
+`main` (3c6ca7b) chạy như một hệ thống thật trên laptop, không Docker: Postgres 17, migrate, api, worker, checker (Chromium headless) và caddy-lite cho TLS — như job e2e của CI, thêm `URLCHECK=on`. Dữ liệu thật, không fixture, không mock:
+
+- 2 run Playwright do reporter đẩy lên, mỗi run 7 event và 17 artifact;
+- báo cáo JUnit của một lần chạy thật: bộ test của chính reporter, `node --test --test-reporter=junit`, 25 test;
+- Auto test do checker chạy trên site công khai thật.
+
+Một script Playwright lái giao diện thật và so cái giao diện hiện với cái API trả. 37/38 đạt; chỗ trượt là example.com, xem cuối mục.
+
+- **Test runs:** 4 tab nguồn (All, Playwright, JUnit, Auto) hiện đúng từng run API trả, trước và sau khi có run Auto. URL giữ `source=`, Back quay lại tab trước.
+- **Auto test:**
+  - site mới thêm được chọn ngay; "New environment" bỏ chọn site;
+  - trang bắt đầu quét đi theo site mới chọn, nhưng giữ URL tester đã gõ;
+  - tab đi theo URL;
+  - case viết trên giao diện chạy xong, run nằm dưới Auto runs và không nằm dưới Playwright;
+  - quét site xong.
+- **Case trên TodoMVC** (`demo.playwright.dev`, app làm ra để test): gõ, Enter, thấy chữ — đạt trong 1,3 s; trang Test run ghi Passed 1/1.
+- **Start testing:** 10 loại, 2 cột ở 1440 px; chọn site, tạo plan, màn hình chạy mở ra.
+- **Overview:** chú thích của ô Untriaged và Triage coverage khớp `/metrics/triage`; tổng theo nhóm khớp `/metrics/trend`.
+- **360 px:** không cuộn ngang ở Test runs, Auto test, Start testing, Overview. Không lỗi trang hay console, không 4xx/5xx ngoài dự kiến.
+
+| # | Mức | Phát hiện | Sửa | Test |
+|---|---|---|---|---|
+| 2 | Cao (mất dữ liệu không báo) | Import JUnit của test runner Node. Node ghi test ở gốc thẳng dưới `<testsuites>`, ngoài mọi `<testsuite>`, mà parser chỉ đọc `<testsuite>`. File chỉ có test ở gốc → 400 `no <testcase>`; file có cả `describe` → test ở gốc bị **bỏ mà không báo** (mẫu thật: còn 4/5). Node cũng không ghi file và luôn ghi `classname="test"`, nên tên `describe` mất khỏi tên test, và hai test cùng tên ở hai `describe` chỉ còn phân biệt bằng occurrenceIndex | `<testcase>` dưới `<testsuites>` thành một suite không tên. Với `classname="test"` và không có file, các suite bao quanh là describe (`Cart › coupons › applies a coupon`). Nhánh `claude/junit-node-test-runner` | `TestNodeTestRunnerMapping` (mẫu thật từ Node 22; trên code cũ chỉ còn 4/5) và refusal "node, no date". api đã sửa chạy trên stack thật: file 25 test ở gốc → 201; mẫu lồng nhau → 5 test, đúng suite |
+| 3 | Trung bình (frontend, chưa sửa) | Bước Auto test mới thêm mặc định là "Click a button" (role button, không tên). Đổi action sang Press hay See text — hai action mà phần tử là tùy chọn — vẫn giữ phần tử đó. Bước thành "Press Enter in a button", "See “Buy milk” in a button", và case trượt (TodoMVC: hết 10 s không tìm được nút) | Chưa sửa: `update()` trong `StepsEditor.vue` nên bỏ phần tử mặc định khi đổi sang action có phần tử tùy chọn | Chọn "The page" / "Anywhere on the page" thì case đạt |
+| 4 | Thấp (frontend, chưa sửa) | "1 tests", "1 runs on this page"; ở 360 px tab "Auto runs" khuất bên phải dải tab, không có dấu hiệu còn tab | — | ảnh chụp |
+
+Không phải lỗi: example.com đã đổi nội dung. Trang không còn heading "Example Domain" và tự ghi "avoid relying on it for testing", nên case kiểm heading trượt. Checker báo đúng "heading “Example Domain” is not visible", kèm ảnh lúc cuối và chỗ trượt.
+
+Chưa kiểm ở lần này: AI với key thật, mail SMTP thật, Docker.

@@ -4,6 +4,7 @@
 #   backend   gofmt · go vet · go test ./... on real Postgres 17 — unit,
 #             cmd/api contract + tenant walk (T4), test/failure (T1),
 #             test/observe (T3), test/restore (§11.5 drill, needs pg_dump 17)
+#             · go test -race on identity/queue/metric (N46)
 #             · govulncheck · the image builds
 #   reporter  npm ci · test · npm audit
 #   frontend  npm ci · typecheck · unit · build (bundle gate) · npm audit
@@ -105,6 +106,15 @@ jobs:
           S3_TEST_ACCESS_KEY: atptestkey
           S3_TEST_SECRET_KEY: atptestsecret123
         run: go test -count=1 -timeout 15m ./...
+
+      # N46: the identity race test proves the logic (one identity per
+      # fingerprint under 16 workers); -race proves the memory side, and only
+      # runs where cgo has a C compiler. Limited to the packages that share
+      # state across goroutines, so the detector's slowdown stays in minutes.
+      - name: go test -race (identity, queue, metric)
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 -timeout 10m ./internal/identity/... ./internal/platform/queue/... ./internal/platform/metric/...
 
       # Pinned and built with the toolchain go.mod names (GOTOOLCHAIN=local);
       # v1.8+ needs Go 1.26, so it moved off v1.1.4 with go1.26.9. Bump with

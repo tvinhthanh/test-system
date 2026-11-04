@@ -17,6 +17,8 @@ go test ./...                    # gồm test kiến trúc; test cần Postgres 
 TEST_DATABASE_URL=postgres://user:pw@localhost:5432/atp_test?sslmode=disable go test ./...
 ```
 
+**Key AI khi chạy local:** binary Go không đọc file `.env` (`deploy/.env` là của compose). Trên Windows: `copy local.env.cmd.example local.env.cmd`, điền `LLM_API_KEY` và `LLM_PROVIDER`, rồi `call local.env.cmd` trong **cả hai** cửa sổ api và worker trước `go run`. File đó cũng bật checker (`URLCHECK=on`, `URLCHECK_URL=http://127.0.0.1:8090`; chạy `npm start` trong `checker/`). `local.env.cmd` đã nằm trong `.gitignore`. Hoặc không đặt gì, dán key ở dashboard: Team → organization → AI settings.
+
 Bề mặt HTTP công khai: [`deploy/openapi.yaml`](deploy/openapi.yaml) (OpenAPI 3.1; test
 so với router thật, lint trong CI). Staging đầy đủ bằng container (Postgres, migrate, api, worker, Prometheus, Caddy TLS,
 backup hằng ngày): [`deploy/README.md`](deploy/README.md) — `docker compose -f
@@ -45,13 +47,12 @@ Biến môi trường (`internal/platform/config`): sai giá trị → thoát ng
 | `TRUSTED_PROXIES` | *(trống; `compose.yml` đặt dải private của mạng compose)* | reverse proxy (CIDR) mà `X-Forwarded-For` của nó chỉ ra client. Sau Caddy **bắt buộc** đặt, nếu không mọi giới hạn theo IP (đăng nhập, MFA, lời mời, reset) đếm Caddy như một người cho tất cả — ai cũng khóa được mọi người (rà soát 28-09) |
 | `TEST_DATABASE_URL` | *(trống)* | chỉ cho test; mỗi test tạo schema riêng `t_xxxx`, chạy migration, xóa khi xong (`pg/pgtest`) |
 
-## Điều kiện QĐ-11 — đọc trước khi viết code
+## Luật kỹ thuật — đọc trước khi viết code
 
-1. **Ngày nào không gửi outreach thì ngày đó không code.** Cột `Code?` trong `phase0/07-outreach-messages.md`. Tuần 0 (12→14-09): ≥ 8 tên vào tracker thay cho "đã gửi". 11-09 là ngoại lệ duy nhất, ghi ở QĐ-11.
-2. **Gate-0 (26-10) giữ nguyên.** Code ở đây không phải lý lẽ tại Gate-0. KILL → thư mục này là bài học Go.
-3. Không cắt: identity + resolver, artifact cap phía server, tenant isolation.
-4. `test/arch/` phải xanh trước mỗi commit; luật mới thêm vào đó trước, module thêm sau.
-5. Không demo cho người phỏng vấn.
+1. Không cắt: identity + resolver, artifact cap phía server, tenant isolation.
+2. `test/arch/` phải xanh trước mỗi commit; luật mới thêm vào đó trước, module thêm sau.
+
+Các điều kiện quy trình của QĐ-11 (outreach, Gate-0) nằm ở SPEC §1.11.
 
 ## Module P1-min (§6.9.11) — cái gì đã có
 
