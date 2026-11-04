@@ -152,6 +152,7 @@ services:
       CHECKER_CONCURRENCY: ${CHECKER_CONCURRENCY:-2}
       CHECKER_SESSIONS: ${CHECKER_SESSIONS:-4}
       CHECKER_BROWSERS: ${CHECKER_BROWSERS:-chromium,firefox,webkit}
+      CHECKER_LOADS: ${CHECKER_LOADS:-1}
     networks: [checknet]
     expose: ["8090"]
     shm_size: 512m # Chromium's shared memory

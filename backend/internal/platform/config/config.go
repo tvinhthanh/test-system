@@ -85,6 +85,12 @@ type Config struct {
 	// body to that one fixed host.
 	URLCheck    bool
 	URLCheckURL string
+	// Load tests (QĐ-19 tier 3): the caps one load run may ask for —
+	// LOAD_MAX_VUS virtual users (default 20, at most 200) for
+	// LOAD_MAX_SECONDS (default 60, at most 600). They run in the checker
+	// (URLCHECK=on), only against a host its organization proved it owns.
+	LoadMaxVUs     int
+	LoadMaxSeconds int
 	// AI-drafted test cases (QĐ-15, QĐ-18): the server's own API key
 	// (LLM_API_KEY, "" = none — organizations may still bring theirs) for
 	// LLM_PROVIDER (default anthropic; any provider platform/llm lists, or
@@ -187,6 +193,16 @@ func Load() (Config, error) {
 	c.URLCheckURL = strings.TrimSuffix(getenv("URLCHECK_URL", "http://checker:8090"), "/")
 	if u, err := url.Parse(c.URLCheckURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return c, fmt.Errorf("URLCHECK_URL=%q: want http(s)://host[:port]", c.URLCheckURL)
+	}
+	if v, err := strconv.Atoi(getenv("LOAD_MAX_VUS", "20")); err != nil || v < 1 || v > 200 {
+		return c, fmt.Errorf("LOAD_MAX_VUS: want 1 to 200")
+	} else {
+		c.LoadMaxVUs = v
+	}
+	if v, err := strconv.Atoi(getenv("LOAD_MAX_SECONDS", "60")); err != nil || v < 5 || v > 600 {
+		return c, fmt.Errorf("LOAD_MAX_SECONDS: want 5 to 600")
+	} else {
+		c.LoadMaxSeconds = v
 	}
 	switch v := strings.ToLower(getenv("MAIL", "off")); v {
 	case "smtp":

@@ -3,6 +3,7 @@ package autotest
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -127,4 +128,37 @@ func jpegOrNil(b []byte) []byte {
 		return nil
 	}
 	return b
+}
+
+// httpLoader is the checker's /verify and /load (QĐ-19 tier 3): a client
+// that waits as long as the longest load the caps allow, and its tail.
+type httpLoader struct {
+	base   string
+	client *outbound.Client
+}
+
+// NewHTTPLoader talks to the checker at base; maxSeconds is LOAD_MAX_SECONDS.
+func NewHTTPLoader(base string, maxSeconds int) (Loader, error) {
+	c, err := outbound.New(time.Duration(maxSeconds)*time.Second+2*time.Minute, base)
+	if err != nil {
+		return nil, err
+	}
+	return &httpLoader{base: strings.TrimSuffix(base, "/"), client: c.WithMaxBody(1 << 20)}, nil
+}
+
+func (h *httpLoader) VerifyFile(ctx context.Context, base string) (FileProof, error) {
+	var out FileProof
+	err := h.client.PostJSON(ctx, h.base+"/verify", map[string]any{"base": base}, &out)
+	return out, err
+}
+
+func (h *httpLoader) Load(ctx context.Context, spec LoadSpec) (json.RawMessage, error) {
+	var out json.RawMessage
+	if err := h.client.PostJSON(ctx, h.base+"/load", spec, &out); err != nil {
+		if errors.Is(err, outbound.ErrAnswer) && strings.Contains(err.Error(), "answered 503") {
+			return nil, tell("the checker is running another load test; try again when it ends")
+		}
+		return nil, err
+	}
+	return out, nil
 }

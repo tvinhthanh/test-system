@@ -406,6 +406,33 @@ Mỗi case chạy một lần cho mỗi variant, và mỗi lần chạy có kế
 
 Hiện chỉ đặt variant được qua API hoặc CI, bằng trường `"variants": ["chromium/desktop", "firefox/phone", "webkit/tablet"]` khi tạo run. Màn hình Auto test chưa có ô chọn này. Firefox không giả lập điện thoại đầy đủ: ở `firefox/phone` chỉ có cỡ màn hình và cảm ứng.
 
+**Load test (kiểm tra tải).** Hệ thống gửi request thật vào site, nên chỉ chạy được vào host mà organization của bạn đã chứng minh là của mình.
+
+1. Gọi `GET /v1/projects/{project}/environments/{environment}/ownership`. Kết quả trả về:
+   - một token;
+   - hai cách chứng minh: file `fileUrl` với nội dung `fileText`, hoặc bản ghi DNS TXT `dnsName` với nội dung `dnsText`.
+2. Làm một trong hai cách:
+   - đặt file `/.well-known/atp-verification.txt` chứa dòng `atp-verification=<token>` lên đúng host đó (trả 200, không chuyển hướng);
+   - hoặc tạo bản ghi TXT `_atp-verification.<host>` với cùng nội dung.
+3. Gọi `POST …/ownership/check` với `{"method": "file"}` hoặc `{"method": "dns"}`, rồi đọc lại bằng `GET …/ownership` cho tới khi `status` là `verified`.
+4. Gọi `POST /v1/projects/{project}/load-runs`, ví dụ `{"environmentId": "…", "paths": ["/", "/search?q=ao"], "vus": 10, "seconds": 60, "rampSeconds": 10, "maxP95Ms": 800, "maxErrorRate": 1}`.
+5. Đọc kết quả bằng `GET …/load-runs/{id}`. Kết quả gồm:
+   - số request và số request mỗi giây;
+   - thời gian trả lời p50, p95, p99;
+   - tỉ lệ lỗi: không trả lời hoặc lỗi 5xx (4xx đếm riêng);
+   - số lượng theo từng mã status;
+   - diễn biến từng giây;
+   - `verdict`: đạt hoặc không đạt theo ngưỡng.
+
+Những điều cần biết:
+- Ngay trước mỗi lần chạy, hệ thống kiểm lại chứng minh. Nếu file hoặc bản ghi đã bị gỡ, lần chạy dừng và không gửi tải.
+- Load test không theo chuyển hướng, nên chỉ gửi tới đúng host đã chứng minh.
+- Người vận hành đặt trần bằng `LOAD_MAX_VUS` (mặc định 20) và `LOAD_MAX_SECONDS` (mặc định 60).
+- Mỗi organization chạy một load test một lúc. Mỗi project chạy tối đa 20 lần một ngày.
+- Màn hình cho load test chưa có, hiện chỉ dùng được qua API.
+
+> **Hãy chạy load test trên staging.** Kể cả với site của chính bạn, tải lớn trên production có thể làm chậm người dùng thật.
+
 ### 6.5 Quét site
 
 Vào tab **Site scan**, điền rồi bấm **Scan site**:

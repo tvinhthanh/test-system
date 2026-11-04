@@ -10,6 +10,8 @@
 //   POST /sessions/:id/steps        {steps, vars, look?, shot?} runs them
 //   POST /sessions/:id/look         {shot?} the page as a model reads it
 //   DELETE /sessions/:id
+//   POST /verify {base}             the site's /.well-known/atp-verification.txt (QĐ-19)
+//   POST /load {base, paths, vus, seconds, rampSeconds?}   a load test, answered when done
 //
 // login = {url, steps, vars}: the sign-in page, the steps that sign in and
 // the variables they use ({{username}}, {{password}}). The worker sends the
@@ -20,11 +22,12 @@
 // two minutes, or open for fifteen, is closed.
 //
 //   PORT=8090  URLCHECK_ALLOW_PRIVATE=off|on  CHECKER_CONCURRENCY=2  CHECKER_SESSIONS=4
-//   CHECKER_BROWSERS=chromium,firefox,webkit  (engines sessions may ask for; QĐ-19)
+//   CHECKER_BROWSERS=chromium,firefox,webkit  (engines sessions may ask for; QĐ-19)  CHECKER_LOADS=1
 import http from "node:http";
 import { readOutline, runCheck } from "./check.mjs";
 import { DEVICES, enabledEngines, ENGINES, launchOptions } from "./engines.mjs";
 import { startProxy } from "./proxy.mjs";
+import { invalidLoad, runLoad, verifyFile } from "./load.mjs";
 import { Session } from "./session.mjs";
 import { invalidStep, MAX_STEPS } from "./steps.mjs";
 
@@ -36,6 +39,7 @@ const policy = { allowPrivate };
 const MAX_BODY = 256 * 1024;
 const IDLE_MS = 120_000;
 const LIFETIME_MS = 15 * 60_000;
+const maxLoads = Math.max(1, Number(process.env.CHECKER_LOADS || 1));
 
 const log = (msg, fields = {}) =>
   console.log(JSON.stringify({ time: new Date().toISOString(), msg, ...fields }));
@@ -215,11 +219,42 @@ async function handleSessions(req, res, parts) {
   return send(res, 200, out);
 }
 
+
+// QĐ-19 tier 3. /verify reads a site's proof file; /load runs a load test
+// (CHECKER_LOADS at once, default 1 — a load test is the checker's heaviest
+// work). The worker asks only for hosts whose owner proved them.
+let loading = 0;
+async function handleLoad(req, res, path) {
+  const body = await readJSON(req);
+  if (path === "/verify") {
+    let base;
+    try {
+      base = httpURL(body.base);
+    } catch {
+      return send(res, 400, { error: "base must be an http(s) address without credentials" });
+    }
+    return send(res, 200, await verifyFile(base.href, policy));
+  }
+  const spec = { base: body.base, paths: body.paths, vus: body.vus, seconds: body.seconds, rampSeconds: body.rampSeconds ?? 0 };
+  const bad = invalidLoad(spec);
+  if (bad) return send(res, 400, { error: bad });
+  if (loading >= maxLoads) return send(res, 503, { error: "busy" });
+  loading++;
+  const started = Date.now();
+  try {
+    const result = await runLoad(spec, policy);
+    log("load done", { host: new URL(spec.base).host, vus: spec.vus, seconds: spec.seconds, requests: result.requests, ms: Date.now() - started });
+    send(res, 200, result);
+  } finally {
+    loading--;
+  }
+}
 const server = http.createServer(async (req, res) => {
   try {
     const path = (req.url ?? "").split("?")[0];
     if (req.method === "GET" && path === "/healthz") return send(res, 200, { status: "ok", running, sessions: sessions.size });
     if (req.method === "POST" && (path === "/check" || path === "/outline")) return await handleCheck(req, res, path);
+    if (req.method === "POST" && (path === "/verify" || path === "/load")) return await handleLoad(req, res, path);
     const parts = path.split("/").filter(Boolean);
     if (parts[0] === "sessions" && parts.length <= 3) return await handleSessions(req, res, parts);
     send(res, 404, { error: "not found" });
@@ -228,7 +263,8 @@ const server = http.createServer(async (req, res) => {
     if (!err.status) log("request failed", { err: firstLine(err) });
   }
 });
-server.requestTimeout = 180_000;
+// A load test answers when it ends: up to ten minutes and the tail.
+server.requestTimeout = 720_000;
 server.listen(port, "0.0.0.0", () => log("checker listening", { port, concurrency, maxSessions, allowPrivate, engines }));
 
 const reaper = setInterval(async () => {

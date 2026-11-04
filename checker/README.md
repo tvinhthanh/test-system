@@ -32,6 +32,21 @@ is also told to send localhost through the proxy and to turn WebRTC and
 HTTP/3 off. `test/engines.test.mjs` proves that loopback stays closed on all
 three engines, by IP, by name and over IPv6.
 
+**Load tests and ownership proof** (QĐ-19 tier 3, `src/load.mjs`):
+
+- `POST /verify {base}` reads `/.well-known/atp-verification.txt`. It
+  returns `{status, text}`, with at most 4 KB of text.
+- `POST /load {base, paths, vus, seconds, rampSeconds}` runs `vus` virtual
+  users sending GETs to the paths for `seconds`. It answers when done with
+  requests, errors (no answer or 5xx), 4xx, rps, latency p50–p99, statuses
+  and a per-second timeline.
+
+Both use Playwright's request API through a guarded proxy of their own.
+Redirects are not followed, and a refused host ends the run as `blocked`.
+The worker asks only for a host its organization proved and within
+`LOAD_MAX_VUS` / `LOAD_MAX_SECONDS`. The checker caps again at 200 VUs and
+600 s, and runs `CHECKER_LOADS` (default 1) at a time.
+
 Three **check steps** (QĐ-19, `src/inspect.mjs`) take no element and check
 the page as the steps before left it. A result's `note` carries the
 details, passed or failed:

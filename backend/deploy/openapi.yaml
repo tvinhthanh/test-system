@@ -1892,6 +1892,137 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/ownership:
+    get:
+      operationId: getSiteOwnership
+      tags: [dashboard]
+      summary: The proof that the organization owns the environment's host (QĐ-19), for load tests
+      description: |
+        Needs `testmgmt.write`. The token is made the first time. Prove it
+        either way: serve `fileText` at `fileUrl` (status 200, no redirect)
+        or publish a TXT record `dnsText` at `dnsName`; then check it.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      responses:
+        "200":
+          description: The proof and its state.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteOwnership" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/ownership/check:
+    post:
+      operationId: checkSiteOwnership
+      tags: [dashboard]
+      summary: Check the ownership proof now (queued; poll getSiteOwnership)
+      description: "Needs `testmgmt.write` and `URLCHECK=on` (the file is read by the checker, behind its guard)."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { type: string, enum: [file, dns] }
+      responses:
+        "202":
+          description: Checking.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteOwnership" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/load-runs:
+    post:
+      operationId: createLoadRun
+      tags: [dashboard]
+      summary: Run a load test against an environment's host (QĐ-19)
+      description: |
+        Needs `testmgmt.write`, `URLCHECK=on` and an ownership proof for the
+        host, which the worker checks again right before the traffic.
+        `vus` virtual users send GETs to `paths` (each starting with `/`,
+        none = `/`) for `seconds`, started evenly over `rampSeconds`;
+        redirects are not followed. Caps: `LOAD_MAX_VUS`, `LOAD_MAX_SECONDS`.
+        One load test at a time per organization, 20 a day per project.
+        An error is a request with no answer or a 5xx; the verdict fails
+        when p95 is over `maxP95Ms` or the error rate over `maxErrorRate` (%).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environmentId, vus, seconds]
+              properties:
+                environmentId: { type: string, format: uuid }
+                paths: { type: array, maxItems: 20, items: { type: string, pattern: "^/", maxLength: 2000 } }
+                vus: { type: integer, minimum: 1, maximum: 200 }
+                seconds: { type: integer, minimum: 5, maximum: 600 }
+                rampSeconds: { type: integer, minimum: 0 }
+                maxP95Ms: { type: integer, minimum: 0, maximum: 600000, description: "0 or omitted: no threshold." }
+                maxErrorRate: { type: number, minimum: 0, maximum: 100, description: "Percent; omitted: no threshold." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`OWNERSHIP_NOT_PROVED` or `AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_LOAD_RUNS`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listLoadRuns
+      tags: [dashboard]
+      summary: The project's load tests, newest first (50)
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The load tests; `enabled` is false when the checker is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor, enabled]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LoadRun" } }
+                  nextCursor: { type: "null" }
+                  enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/load-runs/{loadRunId}:
+    get:
+      operationId: getLoadRun
+      tags: [dashboard]
+      summary: One load test with its result
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: loadRunId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The load test.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/site-scans:
     post:
       operationId: createSiteScan
@@ -5244,6 +5375,45 @@ components:
               variant: { type: string }
               status: { type: string, enum: [pending, passed, failed, error] }
               error: { type: string }
+    SiteOwnership:
+      type: object
+      required: [host, token, method, status, error, verifiedAt, checkedAt, fileUrl, fileText, dnsName, dnsText]
+      properties:
+        host: { type: string, description: "The environment's host (with its port), what a load test hits." }
+        token: { type: string }
+        method: { type: string, enum: ["", file, dns] }
+        status: { type: string, enum: [unverified, checking, verified, failed] }
+        error: { type: string }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        checkedAt: { type: [string, "null"], format: date-time }
+        fileUrl: { type: string }
+        fileText: { type: string }
+        dnsName: { type: string }
+        dnsText: { type: string }
+    LoadRun:
+      type: object
+      required: [id, environmentId, host, paths, vus, seconds, rampSeconds, maxP95Ms, maxErrorRate, status, verdict, reasons, result, error, requestedBy, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        host: { type: string }
+        paths: { type: array, items: { type: string } }
+        vus: { type: integer }
+        seconds: { type: integer }
+        rampSeconds: { type: integer }
+        maxP95Ms: { type: [integer, "null"] }
+        maxErrorRate: { type: [number, "null"] }
+        status: { type: string, enum: [queued, running, done, error] }
+        verdict: { type: string, enum: ["", passed, failed] }
+        reasons: { type: array, items: { type: string } }
+        result:
+          description: "Once done: requests, errors (no answer or 5xx), clientErrors (4xx), errorRate (%), rps, latencyMs {min, p50, p90, p95, p99, max}, statuses {code: count}, errorSamples, timeline [{t, requests, errors, avgMs}], seconds."
+          type: [object, "null"]
+        error: { type: string }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
     SiteScan:
       type: object
       required: [id, environmentId, startUrl, maxPages, account, status, requestedBy, error, pages, checked, passed, warnings, failed, createdAt, finishedAt]

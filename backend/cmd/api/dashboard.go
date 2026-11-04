@@ -134,6 +134,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.urlCheckRoutes(handle)
 	d.aiRoutes(handle)
 	d.autotestRoutes(handle)
+	d.loadRoutes(handle)
 	d.orgDeleteRoutes(handle)
 	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).

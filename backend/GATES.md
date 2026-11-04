@@ -908,3 +908,28 @@ Run có thêm `variants` dạng `trình duyệt/thiết bị` (Chromium, Firefox
     - ảnh chụp lấy theo variant;
     - trần 300 dòng case × variant.
 - **Chưa kiểm:** image Docker có Firefox và WebKit (laptop không có Docker; CI job `checker` build image); WebRTC của WebKit (không có cờ tắt). Proxy chặn mọi TCP; UDP của WebRTC trên WebKit là rủi ro còn lại, nằm trong container `cap_drop: ALL` trên `checknet`. Giao diện chưa có ô chọn variant.
+
+## QĐ-19 tầng 3 — load test chỉ vào host đã chứng minh sở hữu — 04-11-2026
+
+Migration 0048 thêm `site_ownership` và `load_runs`, cùng 5 route: `…/environments/{id}/ownership`, `…/ownership/check` và `…/load-runs`. Checker có thêm `/verify` và `/load`.
+
+- **Checker** (`node --test test/load.test.mjs`, fixture trên 127.0.0.1): 4/4 pass.
+  - **Chạy tải thật:** 4 VU trong 5 giây đếm đúng 500 vào `errors`, 404 vào `clientErrors`; 302 không được theo; p95 ≥ 100 ms trên path chậm 150 ms; timeline đủ 5 ô.
+  - **Guard:** không có allow thì load trả `blocked` và site **không nhận request nào**, kể cả khi gọi bằng tên `localhost`. Request API của Playwright đi qua proxy guard cả với loopback.
+  - **File chứng minh** chỉ đọc được khi guard cho phép.
+- **Backend** (`TestLoadNeedsProofAndCaps`, Postgres thật, checker và DNS giả):
+  - chưa chứng minh thì `ErrNotProved`;
+  - file sai thì `failed`, kèm lý do; file đúng thì `verified`;
+  - trần VU và thời lượng, `rampSeconds` và path rời host bị từ chối;
+  - mỗi organization một load cùng lúc;
+  - verdict "p95 340 ms is over 300 ms";
+  - **chứng minh bị gỡ trước lần chạy thì không gửi tải** và chứng minh chuyển `failed`;
+  - DNS TXT dùng được;
+  - purge project xóa load run.
+- **Tenant walk** đi qua cả 5 route mới. Path chứa environment của tenant khác trả 404, không còn là 400. `deploy/routes.txt` có 158 route.
+- `npm test` của checker: 31/31. Backend `go test -p 1 ./internal/autotest/ ./cmd/worker/ ./cmd/api/ ./test/arch/ ./internal/platform/config/` pass.
+- **Chưa kiểm:**
+  - load vào site HTTPS thật từ server;
+  - tải lớn (200 VU) trên request API của Playwright, nên có thể phải chuyển sang client HTTP riêng nếu nó nghẽn;
+  - giao diện;
+  - xóa `site_ownership` khi xóa organization.

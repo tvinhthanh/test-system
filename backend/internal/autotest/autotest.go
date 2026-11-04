@@ -39,6 +39,9 @@ const (
 	JobDraft = "autotest.draft"
 	JobLogin = "autotest.login"
 	JobCase  = "autotest.case"
+	// QĐ-19 tier 3.
+	JobOwnership = "autotest.ownership"
+	JobLoad      = "autotest.load"
 )
 
 const (
@@ -357,10 +360,13 @@ type Deps struct {
 	DB       *pg.DB
 	Pepper   []byte // TOKEN_PEPPER: seals test accounts' passwords
 	Tenancy  tenancy.Service
-	Browser  Browser  // nil in the api: it only queues
-	LLM      LLM      // nil: no drafting or repairs
-	Keys     Keys     // nil: no drafting or repairs
-	Recorder Recorder // nil: results stay in auto_runs only
+	Browser  Browser   // nil in the api: it only queues
+	LLM      LLM       // nil: no drafting or repairs
+	Keys     Keys      // nil: no drafting or repairs
+	Recorder Recorder  // nil: results stay in auto_runs only
+	Loader   Loader    // nil in the api: it only queues (QĐ-19 tier 3)
+	TXT      TXTLookup // DNS TXT records for ownership; nil: net.DefaultResolver
+	LoadCaps LoadCaps  // what one load run may ask for
 }
 
 var (
@@ -370,6 +376,9 @@ var (
 	ErrNotConfigured = errors.New("autotest: no API key configured")
 	// ErrBusy: too many requests waiting, or the day's limit reached.
 	ErrBusy = errors.New("autotest: too many requests")
+	// ErrNotProved: a load test needs the organization to have proved it
+	// owns the host (QĐ-19 tier 3).
+	ErrNotProved = errors.New("autotest: host ownership not proved")
 )
 
 type Service interface {
@@ -405,6 +414,16 @@ type Service interface {
 	// spec, keyed by case id.
 	LastResults(ctx context.Context, projectID string) (map[string]LastResult, error)
 
+	// Load tests (QĐ-19 tier 3). Ownership returns the organization's proof
+	// for the environment's host (making its token the first time);
+	// CheckOwnership queues checking it by "file" or "dns".
+	Ownership(ctx context.Context, projectID, orgID, environmentID, actor string) (Ownership, error)
+	CheckOwnership(ctx context.Context, projectID, orgID, environmentID, method, actor string) (Ownership, error)
+	// CreateLoadRun queues a load test: ErrNotProved without a proof.
+	CreateLoadRun(ctx context.Context, in NewLoadRun) (LoadRun, error)
+	LoadRuns(ctx context.Context, projectID string, limit int) ([]LoadRun, error)
+	GetLoadRun(ctx context.Context, projectID, id string) (LoadRun, error)
+
 	// Logins hands the checker an account's sign-in for a site scan:
 	// nil when the account has no working steps yet.
 	LoginFor(ctx context.Context, projectID, environmentID, key string) (*Login, error)
@@ -413,6 +432,8 @@ type Service interface {
 	DraftWorker(concurrency int) *queue.Worker
 	LoginWorker(concurrency int) *queue.Worker
 	CaseWorker(concurrency int) *queue.Worker
+	OwnershipWorker(concurrency int) *queue.Worker
+	LoadWorker(concurrency int) *queue.Worker
 
 	Prune(ctx context.Context, before time.Time, limit int) (int, error)
 	PurgeProject(ctx context.Context, projectID string) error

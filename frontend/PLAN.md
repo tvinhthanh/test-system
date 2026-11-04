@@ -41,6 +41,16 @@ draft was removed on 2026-09-18.
   - a variant picker beside "Run selected";
   - group or label the run screen's cases by variant;
   - pass `variant` on screenshots and apply-heal. Without it, the default variant's screenshot is shown.
+- Tier 3, load tests, has five routes and no screen yet:
+  - `GET …/environments/{id}/ownership`: the token and the two ways to prove the host;
+  - `POST …/ownership/check {method}`;
+  - `POST/GET …/load-runs` and `GET …/load-runs/{id}`.
+
+  Schemas are openapi `SiteOwnership` and `LoadRun`.
+- Frontend to do for tier 3:
+  - an ownership panel on the environment;
+  - a load-run form that respects the server caps;
+  - a result view: p50–p99, rps, errors, a timeline chart and the verdict.
 
 ### Test-only dependency advisories (2026-11-01)
 
