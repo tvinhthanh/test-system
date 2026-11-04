@@ -11,14 +11,17 @@
 //   role      the ARIA role when by = role ("button", "textbox", …)
 //   name      the accessible name, label, placeholder, text, test id or CSS
 //   value     what to type / pick / press, the address, the text expected,
-//             or milliseconds to wait
+//             or milliseconds to wait; for a check_* step, how strict
+//             it is (inspect.mjs)
 //   say, expected   human words, shown in reports; not used to run
 // {{name}} in name or value is a variable: the case's inputs, the account's
 // {{username}} and {{password}}, and {{random}} / {{timestamp}}.
+import { checkAccessibility, checkPerformance, checkSecurity, CHECK_ACTIONS, invalidCheckValue } from "./inspect.mjs";
 
 export const ACTIONS = [
   "goto", "click", "fill", "select", "check", "uncheck", "press", "hover", "wait",
   "expect_visible", "expect_hidden", "expect_text", "expect_url", "expect_value", "expect_title",
+  ...CHECK_ACTIONS,
 ];
 export const BY = ["role", "label", "placeholder", "text", "testid", "css"];
 // The roles getByRole is asked for — the ARIA roles a page shows a user.
@@ -40,11 +43,12 @@ export const NAV_MS = 30_000;
 const SETTLE_MS = 1_500;
 const MAX_WAIT_MS = 10_000;
 
-/** Why a step did not pass. kind: input | locator | assert | navigation | page */
+/** Why a step did not pass. kind: input | locator | assert | navigation | page; note: a check's details */
 export class StepError extends Error {
-  constructor(kind, message) {
+  constructor(kind, message, note = "") {
     super(message);
     this.kind = kind;
+    this.note = note;
   }
 }
 
@@ -72,6 +76,10 @@ export function invalidStep(s) {
   if (by && by !== "role" && !s.name) return `${by} needs a value`;
   if (VALUE.has(s.do) && s.do !== "fill" && s.do !== "expect_value" && !s.value) return `${s.do} needs a value`;
   if (s.do === "wait" && !(Number(s.value) > 0 && Number(s.value) <= MAX_WAIT_MS)) return `wait is 1 to ${MAX_WAIT_MS} ms`;
+  if (CHECK_ACTIONS.includes(s.do)) {
+    const bad = invalidCheckValue(s.do, s.value);
+    if (bad) return bad;
+  }
   for (const k of ["name", "value"]) if ((s[k] ?? "").length > 2000) return `${k} is over 2000 characters`;
   return "";
 }
@@ -131,10 +139,12 @@ async function until(check, what) {
 }
 
 /**
- * Runs one step on page. Resolves when it passed; throws StepError.
+ * Runs one step on page. Resolves when it passed — with a check's details
+ * (a string; undefined for other steps); throws StepError.
  * @param {import("playwright").Page} page
  * @param {object} s a step (invalidStep(s) === "")
- * @param {{vars: Record<string,string>, base: URL, allowed: (host: string) => boolean}} ctx
+ * @param {{vars: Record<string,string>, base: URL, allowed: (host: string) => boolean,
+ *   seen?: {doc: () => object | null, plain: () => string[]}}} ctx  seen: what a session saw, for check_security
  */
 export async function runStep(page, s, ctx) {
   const bad = invalidStep(s);
@@ -215,6 +225,22 @@ export async function runStep(page, s, ctx) {
         const t = await page.title();
         return t.includes(value) || `the title is “${cut(t, 120)}”`;
       }, `the page title does not contain “${cut(value, 120)}”`);
+    case "check_accessibility":
+    case "check_performance":
+    case "check_security": {
+      let r;
+      try {
+        if (s.do === "check_accessibility") r = await checkAccessibility(page, value);
+        else if (s.do === "check_performance") r = await checkPerformance(page, value);
+        else if (!ctx.seen) throw new StepError("input", "check_security runs only in a test session");
+        else r = await checkSecurity(page, value, ctx.seen);
+      } catch (err) {
+        if (err instanceof StepError) throw err;
+        throw new StepError("page", `the check could not run: ${firstLine(err)}`);
+      }
+      if (!r.ok) throw new StepError(r.kind ?? "assert", r.error, r.note);
+      return r.note;
+    }
   }
   throw new StepError("input", `unknown action ${s.do}`);
 }

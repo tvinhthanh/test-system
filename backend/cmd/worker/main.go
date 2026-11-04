@@ -56,6 +56,10 @@ const (
 	autoCaseConcurrency  = 2
 	autoDraftConcurrency = 1
 	autoLoginConcurrency = 1
+	// Ownership checks are one small request; a load test is the checker's
+	// heaviest work, one at a time (CHECKER_LOADS on the checker side).
+	ownershipConcurrency = 2
+	loadConcurrency      = 1
 )
 
 func main() {
@@ -128,13 +132,19 @@ func main() {
 	// sessions, so the pools run with URLCHECK=on; the key and model are the
 	// organization's AI settings; results go to plans and test runs.
 	var browser autotest.Browser
+	var loader autotest.Loader // QĐ-19 tier 3: ownership files and load tests
 	if cfg.URLCheck {
+		if loader, err = autotest.NewHTTPLoader(cfg.URLCheckURL, cfg.LoadMaxSeconds); err != nil {
+			logger.Error("boot", "err", err)
+			os.Exit(2)
+		}
 		if browser, err = autotest.NewHTTPBrowser(cfg.URLCheckURL); err != nil {
 			logger.Error("boot", "err", err)
 			os.Exit(2)
 		}
 	}
 	auto := autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Browser: browser, LLM: model, Keys: ai,
+		Loader: loader, LoadCaps: autotest.LoadCaps{MaxVUs: cfg.LoadMaxVUs, MaxSeconds: cfg.LoadMaxSeconds},
 		Recorder: recorder{tm: tm, art: art, tenancy: ten, ingest: ingestDeps, jobs: jobs, results: res, logger: logger}})
 	// URL checks (QĐ-14) and site scans (QĐ-16): the pool only with
 	// URLCHECK=on; pruning and purging old checks always, so turning checks
@@ -187,6 +197,8 @@ func main() {
 			{auto.CaseWorker(autoCaseConcurrency), autoCaseConcurrency},
 			{auto.DraftWorker(autoDraftConcurrency), autoDraftConcurrency},
 			{auto.LoginWorker(autoLoginConcurrency), autoLoginConcurrency},
+			{auto.OwnershipWorker(ownershipConcurrency), ownershipConcurrency},
+			{auto.LoadWorker(loadConcurrency), loadConcurrency},
 		}
 		for _, p := range pools {
 			wg.Add(1)

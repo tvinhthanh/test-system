@@ -20,12 +20,53 @@ leaves it fails and the browser comes back. `{{name}}` in a step is a
 variable the worker sends per call — including `{{password}}`, which is
 used and forgotten when the session closes.
 
+A session runs on the **browser and device** the worker asks for (QĐ-19
+tier 2, `src/engines.mjs`):
+- **Browser:** `chromium`, `firefox` or `webkit`.
+- **Device:** `desktop` (1366×768), or `phone` / `tablet` with Playwright's
+  Pixel 7, iPhone 13, Galaxy Tab S4 and iPad profiles.
+
+Firefox has no mobile emulation, so on a phone or tablet it gets the screen
+size and touch only. Every engine runs behind the same guarded proxy. Firefox
+is also told to send localhost through the proxy and to turn WebRTC and
+HTTP/3 off. `test/engines.test.mjs` proves that loopback stays closed on all
+three engines, by IP, by name and over IPv6.
+
+**Load tests and ownership proof** (QĐ-19 tier 3, `src/load.mjs`):
+
+- `POST /verify {base}` reads `/.well-known/atp-verification.txt`. It
+  returns `{status, text}`, with at most 4 KB of text.
+- `POST /load {base, paths, vus, seconds, rampSeconds}` runs `vus` virtual
+  users sending GETs to the paths for `seconds`. It answers when done with
+  requests, errors (no answer or 5xx), 4xx, rps, latency p50–p99, statuses
+  and a per-second timeline.
+
+Both use Playwright's request API through a guarded proxy of their own.
+Redirects are not followed, and a refused host ends the run as `blocked`.
+The worker asks only for a host its organization proved and within
+`LOAD_MAX_VUS` / `LOAD_MAX_SECONDS`. The checker caps again at 200 VUs and
+600 s, and runs `CHECKER_LOADS` (default 1) at a time.
+
+Three **check steps** (QĐ-19, `src/inspect.mjs`) take no element and check
+the page as the steps before left it. A result's `note` carries the
+details, passed or failed:
+
+- `check_accessibility` runs axe-core (WCAG 2.0/2.1/2.2 A/AA). The value is
+  the lowest impact that fails, serious by default.
+- `check_performance` compares the last load's LCP/FCP/TTFB/load/CLS with
+  a budget such as `lcp=2500 cls=0.1 ttfb=800`. A metric the browser does
+  not report is noted, not failed.
+- `check_security` reads what the session saw: the main document's
+  headers, the page's cookies, and plain-HTTP requests or "Mixed Content"
+  messages from an HTTPS page. A high finding fails; with `strict`, a
+  medium one does too. It does not attack anything.
+
 ```
 POST /check {"url": "https://staging.example.com", "login"?: {url, steps, vars}}
   → {"report": {...}, "links": [...], "screenshots": {"desktop": "<base64 JPEG>", "mobile": "..."}}
 POST /outline {"url": "…"}
   → {"outline": {title, lang, headings, links, forms, buttons, text}}   (QĐ-15: what AI drafting reads)
-POST /sessions {"base": "https://staging.example.com", "login"?: {url, steps, vars}}
+POST /sessions {"base": "https://staging.example.com", "login"?: {url, steps, vars}, "browser"?: "firefox", "device"?: "phone"}
   → {"id", "loggedIn"?, "error"?}
 POST /sessions/:id/steps {"steps": [...], "vars": {...}, "shot"?: "failure"|"always"|"none"}
   → {"ok", "results": [{status, kind, error, ms}], "url", "console", tree/title/screenshot on a failure}
@@ -61,6 +102,7 @@ the service on a network shared with the worker alone.
 | `URLCHECK_ALLOW_PRIVATE` | `off` | `on`: also 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 … |
 | `CHECKER_CONCURRENCY` | `2` | checks at once; more answer 503 and the worker retries |
 | `CHECKER_SESSIONS` | `4` | auto-test sessions open at once; more answer 503 and the worker retries |
+| `CHECKER_BROWSERS` | `chromium,firefox,webkit` | engines a session may ask for (QĐ-19); another answers 422 and the tester is told. Build the image with `--build-arg ENGINES=` for Chromium alone (smaller) |
 
 ## Develop
 

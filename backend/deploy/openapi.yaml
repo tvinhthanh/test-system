@@ -1793,6 +1793,7 @@ paths:
                 environmentId: { type: string, format: uuid }
                 caseIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
                 heal: { type: boolean, default: true }
+                variants: { type: array, maxItems: 9, items: { type: string, pattern: "^(chromium|firefox|webkit)/(desktop|phone|tablet)$" }, description: "The compatibility matrix (QĐ-19): each case runs once per browser/device. None: chromium/desktop. Cases × variants ≤ 300." }
       responses:
         "202":
           description: Queued.
@@ -1855,6 +1856,7 @@ paths:
         - { $ref: "#/components/parameters/AutoRunId" }
         - { $ref: "#/components/parameters/TestCaseId" }
         - { name: shot, in: path, required: true, schema: { type: string, enum: [final, failure] } }
+        - { name: variant, in: query, required: false, schema: { type: string }, description: "The run case's browser/device (QĐ-19); omitted: chromium/desktop." }
       responses:
         "200":
           description: The image.
@@ -1881,6 +1883,7 @@ paths:
               required: [step]
               properties:
                 step: { type: integer, minimum: 0, description: "Index of the repaired step." }
+                variant: { type: string, description: "The run case's browser/device (QĐ-19); omitted: chromium/desktop." }
       responses:
         "200":
           description: The case's spec after the repair.
@@ -1888,6 +1891,137 @@ paths:
         "400": { $ref: "#/components/responses/InvalidPayload" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/ownership:
+    get:
+      operationId: getSiteOwnership
+      tags: [dashboard]
+      summary: The proof that the organization owns the environment's host (QĐ-19), for load tests
+      description: |
+        Needs `testmgmt.write`. The token is made the first time. Prove it
+        either way: serve `fileText` at `fileUrl` (status 200, no redirect)
+        or publish a TXT record `dnsText` at `dnsName`; then check it.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      responses:
+        "200":
+          description: The proof and its state.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteOwnership" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/ownership/check:
+    post:
+      operationId: checkSiteOwnership
+      tags: [dashboard]
+      summary: Check the ownership proof now (queued; poll getSiteOwnership)
+      description: "Needs `testmgmt.write` and `URLCHECK=on` (the file is read by the checker, behind its guard)."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { type: string, enum: [file, dns] }
+      responses:
+        "202":
+          description: Checking.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteOwnership" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/load-runs:
+    post:
+      operationId: createLoadRun
+      tags: [dashboard]
+      summary: Run a load test against an environment's host (QĐ-19)
+      description: |
+        Needs `testmgmt.write`, `URLCHECK=on` and an ownership proof for the
+        host, which the worker checks again right before the traffic.
+        `vus` virtual users send GETs to `paths` (each starting with `/`,
+        none = `/`) for `seconds`, started evenly over `rampSeconds`;
+        redirects are not followed. Caps: `LOAD_MAX_VUS`, `LOAD_MAX_SECONDS`.
+        One load test at a time per organization, 20 a day per project.
+        An error is a request with no answer or a 5xx; the verdict fails
+        when p95 is over `maxP95Ms` or the error rate over `maxErrorRate` (%).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environmentId, vus, seconds]
+              properties:
+                environmentId: { type: string, format: uuid }
+                paths: { type: array, maxItems: 20, items: { type: string, pattern: "^/", maxLength: 2000 } }
+                vus: { type: integer, minimum: 1, maximum: 200 }
+                seconds: { type: integer, minimum: 5, maximum: 600 }
+                rampSeconds: { type: integer, minimum: 0 }
+                maxP95Ms: { type: integer, minimum: 0, maximum: 600000, description: "0 or omitted: no threshold." }
+                maxErrorRate: { type: number, minimum: 0, maximum: 100, description: "Percent; omitted: no threshold." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`OWNERSHIP_NOT_PROVED` or `AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_LOAD_RUNS`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listLoadRuns
+      tags: [dashboard]
+      summary: The project's load tests, newest first (50)
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The load tests; `enabled` is false when the checker is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor, enabled]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LoadRun" } }
+                  nextCursor: { type: "null" }
+                  enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/load-runs/{loadRunId}:
+    get:
+      operationId: getLoadRun
+      tags: [dashboard]
+      summary: One load test with its result
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: loadRunId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The load test.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/site-scans:
     post:
@@ -4033,6 +4167,7 @@ paths:
                 environment: { type: string }
                 caseIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
                 heal: { type: boolean, default: true }
+                variants: { type: array, maxItems: 9, items: { type: string, pattern: "^(chromium|firefox|webkit)/(desktop|phone|tablet)$" }, description: "As on createAutoRun (QĐ-19)." }
       responses:
         "202":
           description: Queued.
@@ -5071,9 +5206,19 @@ components:
         `value` is what to type, pick or press, the address, the text expected,
         or milliseconds to wait. `{{name}}` in `name` or `value` is a variable.
         `say` and `expected` are for people.
+
+        Check steps (QĐ-19) take no element and check the page as it is:
+        `check_accessibility` (value "" or minor/moderate/serious/critical —
+        axe-core WCAG A/AA, fails at that impact or worse, "" = serious),
+        `check_performance` (value "" or a budget such as
+        `lcp=2500 cls=0.1 ttfb=800`; metrics lcp, fcp, ttfb, load in ms and
+        cls) and `check_security` (value "" or `strict` — HTTPS, HSTS, CSP,
+        clickjacking, nosniff, version headers, CORS, cookie flags, mixed
+        content; fails on a high finding, strict also on medium). Their
+        details are the result's `note`.
       required: [do]
       properties:
-        do: { type: string, enum: [goto, click, fill, select, check, uncheck, press, hover, wait, expect_visible, expect_hidden, expect_text, expect_url, expect_value, expect_title] }
+        do: { type: string, enum: [goto, click, fill, select, check, uncheck, press, hover, wait, expect_visible, expect_hidden, expect_text, expect_url, expect_value, expect_title, check_accessibility, check_performance, check_security] }
         by: { type: string, enum: ["", role, label, placeholder, text, testid, css] }
         role: { type: string, description: "An ARIA role when `by` is role (button, link, textbox, …)." }
         name: { type: string, maxLength: 2000 }
@@ -5153,6 +5298,7 @@ components:
         status: { type: string, enum: [passed, failed, skipped] }
         kind: { type: string, enum: [input, locator, assert, navigation, page], description: "Why a step failed: locator — its element was not found or usable; assert — the expectation did not hold; navigation — a page did not open or the browser tried to leave the site." }
         error: { type: string }
+        note: { type: string, maxLength: 1000, description: "A check step's details (QĐ-19), passed or failed: the problems axe found, the timings against the budget, the security findings by level." }
         ms: { type: integer }
         healed:
           type: object
@@ -5162,7 +5308,7 @@ components:
             reason: { type: string }
     AutoRun:
       type: object
-      required: [id, environmentId, planId, status, trigger, requestedBy, heal, total, passed, failed, errored, healed, testRunId, error, createdAt, startedAt, finishedAt]
+      required: [id, environmentId, planId, status, trigger, requestedBy, heal, variants, total, passed, failed, errored, healed, testRunId, error, createdAt, startedAt, finishedAt]
       properties:
         id: { type: string, format: uuid }
         environmentId: { type: string, format: uuid }
@@ -5171,7 +5317,8 @@ components:
         trigger: { type: string, enum: [dashboard, ci] }
         requestedBy: { type: string }
         heal: { type: boolean }
-        total: { type: integer }
+        variants: { type: array, items: { type: string }, description: "browser/device each case ran on (QĐ-19), e.g. firefox/phone; [chromium/desktop] for a run that asked for none." }
+        total: { type: integer, description: "Case runs: cases × variants." }
         passed: { type: integer }
         failed: { type: integer }
         errored: { type: integer, description: "Cases that could not run (no sign-in, the page did not open)." }
@@ -5186,9 +5333,10 @@ components:
           description: On getAutoRun only, by position.
           items:
             type: object
-            required: [caseId, position, title, target, account, inputs, steps, status, results, console, healed, durationMs, error, screenshots, executionId, finishedAt]
+            required: [caseId, variant, position, title, target, account, inputs, steps, status, results, console, healed, durationMs, error, screenshots, executionId, finishedAt]
             properties:
               caseId: { type: string, format: uuid }
+              variant: { type: string, description: "browser/device this case run used; a case appears once per variant of the run." }
               position: { type: integer }
               title: { type: string }
               target: { type: string }
@@ -5221,11 +5369,51 @@ components:
           type: array
           items:
             type: object
-            required: [title, status, error]
+            required: [title, variant, status, error]
             properties:
               title: { type: string }
+              variant: { type: string }
               status: { type: string, enum: [pending, passed, failed, error] }
               error: { type: string }
+    SiteOwnership:
+      type: object
+      required: [host, token, method, status, error, verifiedAt, checkedAt, fileUrl, fileText, dnsName, dnsText]
+      properties:
+        host: { type: string, description: "The environment's host (with its port), what a load test hits." }
+        token: { type: string }
+        method: { type: string, enum: ["", file, dns] }
+        status: { type: string, enum: [unverified, checking, verified, failed] }
+        error: { type: string }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        checkedAt: { type: [string, "null"], format: date-time }
+        fileUrl: { type: string }
+        fileText: { type: string }
+        dnsName: { type: string }
+        dnsText: { type: string }
+    LoadRun:
+      type: object
+      required: [id, environmentId, host, paths, vus, seconds, rampSeconds, maxP95Ms, maxErrorRate, status, verdict, reasons, result, error, requestedBy, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        host: { type: string }
+        paths: { type: array, items: { type: string } }
+        vus: { type: integer }
+        seconds: { type: integer }
+        rampSeconds: { type: integer }
+        maxP95Ms: { type: [integer, "null"] }
+        maxErrorRate: { type: [number, "null"] }
+        status: { type: string, enum: [queued, running, done, error] }
+        verdict: { type: string, enum: ["", passed, failed] }
+        reasons: { type: array, items: { type: string } }
+        result:
+          description: "Once done: requests, errors (no answer or 5xx), clientErrors (4xx), errorRate (%), rps, latencyMs {min, p50, p90, p95, p99, max}, statuses {code: count}, errorSamples, timeline [{t, requests, errors, avgMs}], seconds."
+          type: [object, "null"]
+        error: { type: string }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
     SiteScan:
       type: object
       required: [id, environmentId, startUrl, maxPages, account, status, requestedBy, error, pages, checked, passed, warnings, failed, createdAt, finishedAt]

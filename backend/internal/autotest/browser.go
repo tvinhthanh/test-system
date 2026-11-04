@@ -3,6 +3,8 @@ package autotest
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -42,10 +44,13 @@ func (v wireView) view() View {
 	return View{URL: v.URL, Title: v.Title, Tree: v.Tree, Screenshot: jpegOrNil(shot)}
 }
 
-func (h *httpBrowser) Open(ctx context.Context, base string, login *Login) (Session, LoginResult, error) {
+func (h *httpBrowser) Open(ctx context.Context, base string, login *Login, on Variant) (Session, LoginResult, error) {
 	body := map[string]any{"base": base}
 	if login != nil {
 		body["login"] = login
+	}
+	if on.Browser != "" {
+		body["browser"], body["device"] = on.Browser, on.Device
 	}
 	var out struct {
 		ID       string `json:"id"`
@@ -53,6 +58,11 @@ func (h *httpBrowser) Open(ctx context.Context, base string, login *Login) (Sess
 		Error    string `json:"error"`
 	}
 	if err := h.client.PostJSON(ctx, h.base+"/sessions", body, &out); err != nil {
+		// 422: the checker does not run that browser (CHECKER_BROWSERS) —
+		// retrying cannot help, the tester is told.
+		if errors.Is(err, outbound.ErrAnswer) && strings.Contains(err.Error(), "answered 422") {
+			return nil, LoginResult{}, tell("this server's checker does not run %s (the operator sets CHECKER_BROWSERS)", on.Browser)
+		}
 		return nil, LoginResult{}, err
 	}
 	if out.ID == "" {
@@ -77,6 +87,7 @@ func (s *httpSession) Run(ctx context.Context, steps []Step, vars map[string]str
 			Status string `json:"status"`
 			Kind   string `json:"kind"`
 			Error  string `json:"error"`
+			Note   string `json:"note"`
 			Ms     int    `json:"ms"`
 		} `json:"results"`
 		wireView
@@ -89,7 +100,7 @@ func (s *httpSession) Run(ctx context.Context, steps []Step, vars map[string]str
 	}
 	o := Outcome{OK: out.OK, URL: out.URL, Console: out.Console}
 	for _, r := range out.Results {
-		o.Results = append(o.Results, StepOutcome{Status: r.Status, Kind: r.Kind, Error: cut(r.Error, 500), Ms: r.Ms})
+		o.Results = append(o.Results, StepOutcome{Status: r.Status, Kind: r.Kind, Error: cut(r.Error, 500), Note: cut(r.Note, 1000), Ms: r.Ms})
 	}
 	if !out.OK {
 		v := out.view()
@@ -117,4 +128,37 @@ func jpegOrNil(b []byte) []byte {
 		return nil
 	}
 	return b
+}
+
+// httpLoader is the checker's /verify and /load (QĐ-19 tier 3): a client
+// that waits as long as the longest load the caps allow, and its tail.
+type httpLoader struct {
+	base   string
+	client *outbound.Client
+}
+
+// NewHTTPLoader talks to the checker at base; maxSeconds is LOAD_MAX_SECONDS.
+func NewHTTPLoader(base string, maxSeconds int) (Loader, error) {
+	c, err := outbound.New(time.Duration(maxSeconds)*time.Second+2*time.Minute, base)
+	if err != nil {
+		return nil, err
+	}
+	return &httpLoader{base: strings.TrimSuffix(base, "/"), client: c.WithMaxBody(1 << 20)}, nil
+}
+
+func (h *httpLoader) VerifyFile(ctx context.Context, base string) (FileProof, error) {
+	var out FileProof
+	err := h.client.PostJSON(ctx, h.base+"/verify", map[string]any{"base": base}, &out)
+	return out, err
+}
+
+func (h *httpLoader) Load(ctx context.Context, spec LoadSpec) (json.RawMessage, error) {
+	var out json.RawMessage
+	if err := h.client.PostJSON(ctx, h.base+"/load", spec, &out); err != nil {
+		if errors.Is(err, outbound.ErrAnswer) && strings.Contains(err.Error(), "answered 503") {
+			return nil, tell("the checker is running another load test; try again when it ends")
+		}
+		return nil, err
+	}
+	return out, nil
 }

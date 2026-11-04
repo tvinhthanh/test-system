@@ -43,6 +43,11 @@ POST /v1/projects/{projectId}/auto-runs/{autoRunId}/cases/{testCaseId}/apply-hea
 POST /v1/projects/{projectId}/site-scans
 GET /v1/projects/{projectId}/site-scans
 GET /v1/projects/{projectId}/site-scans/{scanId}
+GET /v1/projects/{projectId}/environments/{environmentId}/ownership
+POST /v1/projects/{projectId}/environments/{environmentId}/ownership/check
+POST /v1/projects/{projectId}/load-runs
+GET /v1/projects/{projectId}/load-runs
+GET /v1/projects/{projectId}/load-runs/{loadRunId}
 POST /v1/auto-runs
 GET /v1/auto-runs/{autoRunId}
 GET /v1/organizations/{organizationId}/ai-settings

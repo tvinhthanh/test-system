@@ -3,14 +3,10 @@
 // says passed / warning / failed with a one-line summary and up to 20
 // details; the report's verdict is the worst of them. The page's text is
 // untrusted: details are plain strings, cut to 300 characters.
-import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
 import tls from "node:tls";
+import { axeSource } from "./inspect.mjs";
 import { Blocked, resolveAllowed, startProxy } from "./proxy.mjs";
 import { runStep, StepError } from "./steps.mjs";
-
-const require = createRequire(import.meta.url);
-const axeSource = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 
 const NAV_TIMEOUT_MS = 30_000;
 const SETTLE_MS = 3_000;
@@ -223,14 +219,17 @@ async function signIn(context, url, login) {
   }
 }
 
-let ua = "";
+// One user agent per browser (engine) this process launched.
+const uas = new WeakMap();
 export async function defaultUA(browser) {
+  let ua = uas.get(browser);
   if (!ua) {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     // Some sites turn "HeadlessChrome" away; the suffix still names the checker.
     ua = (await page.evaluate(() => navigator.userAgent)).replace("HeadlessChrome", "Chrome");
     await ctx.close();
+    uas.set(browser, ua);
   }
   return ua;
 }

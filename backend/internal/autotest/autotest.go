@@ -39,6 +39,9 @@ const (
 	JobDraft = "autotest.draft"
 	JobLogin = "autotest.login"
 	JobCase  = "autotest.case"
+	// QĐ-19 tier 3.
+	JobOwnership = "autotest.ownership"
+	JobLoad      = "autotest.load"
 )
 
 const (
@@ -209,6 +212,7 @@ type Run struct {
 	Trigger       string
 	RequestedBy   string
 	Heal          bool
+	Variants      []string // browser/device each case runs on; [""] = the default alone (QĐ-19)
 	Total         int
 	Passed        int
 	Failed        int
@@ -227,6 +231,7 @@ type Run struct {
 // RunCase is one case of a run.
 type RunCase struct {
 	CaseID         string
+	Variant        string // "" = chromium/desktop; else browser/device (QĐ-19)
 	Position       int
 	Title          string
 	Spec           Spec // as it was when the run started
@@ -247,6 +252,7 @@ type StepResult struct {
 	Status string `json:"status"` // passed | failed | skipped
 	Kind   string `json:"kind,omitempty"`
 	Error  string `json:"error,omitempty"`
+	Note   string `json:"note,omitempty"` // a check step's details (QĐ-19), passed or failed
 	Ms     int    `json:"ms"`
 	Healed *Heal  `json:"healed,omitempty"`
 }
@@ -267,6 +273,7 @@ type NewRun struct {
 	Titles        map[string]string // case id → title
 	Trigger       string
 	Heal          bool
+	Variants      []string // browser/device ("firefox/phone"); empty = the default alone (QĐ-19)
 	Actor         string
 }
 
@@ -274,7 +281,9 @@ type NewRun struct {
 
 // Browser opens sessions in the checker service (NewHTTPBrowser).
 type Browser interface {
-	Open(ctx context.Context, base string, login *Login) (Session, LoginResult, error)
+	// Open starts a session on the variant's browser and device (QĐ-19);
+	// the zero Variant is Chromium on a desktop.
+	Open(ctx context.Context, base string, login *Login, on Variant) (Session, LoginResult, error)
 }
 
 // Login is how a session signs in: the sign-in page, the steps, and the
@@ -312,6 +321,7 @@ type StepOutcome struct {
 	Status string // passed | failed
 	Kind   string // input | locator | assert | navigation | page
 	Error  string
+	Note   string // a check step's details
 	Ms     int
 }
 
@@ -350,10 +360,13 @@ type Deps struct {
 	DB       *pg.DB
 	Pepper   []byte // TOKEN_PEPPER: seals test accounts' passwords
 	Tenancy  tenancy.Service
-	Browser  Browser  // nil in the api: it only queues
-	LLM      LLM      // nil: no drafting or repairs
-	Keys     Keys     // nil: no drafting or repairs
-	Recorder Recorder // nil: results stay in auto_runs only
+	Browser  Browser   // nil in the api: it only queues
+	LLM      LLM       // nil: no drafting or repairs
+	Keys     Keys      // nil: no drafting or repairs
+	Recorder Recorder  // nil: results stay in auto_runs only
+	Loader   Loader    // nil in the api: it only queues (QĐ-19 tier 3)
+	TXT      TXTLookup // DNS TXT records for ownership; nil: net.DefaultResolver
+	LoadCaps LoadCaps  // what one load run may ask for
 }
 
 var (
@@ -363,6 +376,9 @@ var (
 	ErrNotConfigured = errors.New("autotest: no API key configured")
 	// ErrBusy: too many requests waiting, or the day's limit reached.
 	ErrBusy = errors.New("autotest: too many requests")
+	// ErrNotProved: a load test needs the organization to have proved it
+	// owns the host (QĐ-19 tier 3).
+	ErrNotProved = errors.New("autotest: host ownership not proved")
 )
 
 type Service interface {
@@ -382,7 +398,7 @@ type Service interface {
 	SaveSpec(ctx context.Context, projectID, caseID string, in SpecInput) (Spec, error)
 	DeleteSpec(ctx context.Context, projectID, caseID string) (bool, error)
 	// ApplyHeal puts a run's repair of step `index` into the case's spec.
-	ApplyHeal(ctx context.Context, projectID, runID, caseID string, index int, actor string) (Spec, error)
+	ApplyHeal(ctx context.Context, projectID, runID, caseID, variant string, index int, actor string) (Spec, error)
 
 	// Drafts.
 	RequestDraft(ctx context.Context, in NewDraft) (DraftRequest, error)
@@ -393,10 +409,20 @@ type Service interface {
 	Runs(ctx context.Context, projectID string, limit int) ([]Run, error)
 	GetRun(ctx context.Context, projectID, id string) (Run, error)
 	// Shot returns a case's screenshot (JPEG): which is "final" or "failure".
-	Shot(ctx context.Context, projectID, runID, caseID, which string) ([]byte, error)
+	Shot(ctx context.Context, projectID, runID, caseID, variant, which string) ([]byte, error)
 	// LastResults returns the newest finished status of each case with a
 	// spec, keyed by case id.
 	LastResults(ctx context.Context, projectID string) (map[string]LastResult, error)
+
+	// Load tests (QĐ-19 tier 3). Ownership returns the organization's proof
+	// for the environment's host (making its token the first time);
+	// CheckOwnership queues checking it by "file" or "dns".
+	Ownership(ctx context.Context, projectID, orgID, environmentID, actor string) (Ownership, error)
+	CheckOwnership(ctx context.Context, projectID, orgID, environmentID, method, actor string) (Ownership, error)
+	// CreateLoadRun queues a load test: ErrNotProved without a proof.
+	CreateLoadRun(ctx context.Context, in NewLoadRun) (LoadRun, error)
+	LoadRuns(ctx context.Context, projectID string, limit int) ([]LoadRun, error)
+	GetLoadRun(ctx context.Context, projectID, id string) (LoadRun, error)
 
 	// Logins hands the checker an account's sign-in for a site scan:
 	// nil when the account has no working steps yet.
@@ -406,6 +432,8 @@ type Service interface {
 	DraftWorker(concurrency int) *queue.Worker
 	LoginWorker(concurrency int) *queue.Worker
 	CaseWorker(concurrency int) *queue.Worker
+	OwnershipWorker(concurrency int) *queue.Worker
+	LoadWorker(concurrency int) *queue.Worker
 
 	Prune(ctx context.Context, before time.Time, limit int) (int, error)
 	PurgeProject(ctx context.Context, projectID string) error

@@ -8,8 +8,8 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.54** (02-11-2026) — 18 ADR đã chốt, 65 phát hiện N đã xử lý; tiến độ build ở [`SPEC.md` §0.5](SPEC.md) |
-| Đã build | **P1-min** (ingest, identity, flaky, triage, dashboard, reporter, deploy), **P2 Test Management** (case/suite/requirement/plan/execution, release gate, importer CSV + JUnit, ROI), RBAC 6 role, member ba tầng, MFA, OAuth, mời qua email, tự đăng ký có duyệt, **Start testing**, **Auto test**, URL check, AI của 8 nhà cung cấp |
+| Spec | **v3.55** (04-11-2026) — 19 ADR đã chốt, 65 phát hiện N đã xử lý; tiến độ build ở [`SPEC.md` §0.5](SPEC.md) |
+| Đã build | **P1-min** (ingest, identity, flaky, triage, dashboard, reporter, deploy), **P2 Test Management** (case/suite/requirement/plan/execution, release gate, importer CSV + JUnit, ROI), RBAC 6 role, member ba tầng, MFA, OAuth, mời qua email, tự đăng ký có duyệt, **Start testing**, **Auto test** (có bước kiểm tra accessibility, tốc độ, bảo mật — QĐ-19), URL check, AI của 8 nhà cung cấp |
 | Gate kỹ thuật | T0 T1 T3 T4 ✅ · T2 T5 còn phần cần server (soak 24–72 h, ingest 100 đồng thời) · pentest chưa làm — [`backend/GATES.md`](backend/GATES.md) |
 | Identity | precision **1,0000** · recall **0,9920** trên corpus tổng hợp (§9.6) |
 

@@ -7,27 +7,34 @@
 // a page that talks a model into "go to …" from going anywhere.
 import { randomUUID } from "node:crypto";
 import { defaultUA } from "./check.mjs";
+import { contextProxy, deviceOptions } from "./engines.mjs";
 import { startProxy } from "./proxy.mjs";
 import { lookAt, runStep, siteOf, StepError } from "./steps.mjs";
 
-const DESKTOP = { width: 1366, height: 768 };
 const USER_AGENT_SUFFIX = " ATP-Auto-Test/1";
 
 export class Session {
-  /** @param {import("playwright").Browser} browser */
-  static async open(browser, { base, policy }) {
+  /**
+   * @param {import("playwright").Browser} browser
+   * @param {{base: string, policy: object, engine?: string, device?: string}} opts
+   *   engine: the browser's engine name (chromium | firefox | webkit); device: desktop | phone | tablet
+   */
+  static async open(browser, { base, policy, engine = "chromium", device = "desktop" }) {
     const s = new Session();
     s.id = randomUUID();
     s.base = new URL(base);
     s.site = siteOf(s.base.hostname);
+    s.engine = engine;
+    s.device = device;
     s.proxy = await startProxy(policy);
+    const dev = deviceOptions(engine, device);
     s.ctx = await browser.newContext({
-      viewport: DESKTOP,
-      proxy: { server: s.proxy.url, bypass: "<-loopback>" },
+      ...dev,
+      proxy: contextProxy(engine, s.proxy.url),
       ignoreHTTPSErrors: true,
       serviceWorkers: "block",
       acceptDownloads: false,
-      userAgent: (await defaultUA(browser)) + USER_AGENT_SUFFIX,
+      userAgent: (dev.userAgent ?? (await defaultUA(browser))) + USER_AGENT_SUFFIX,
     });
     s.console = [];
     s.left = [];
@@ -39,6 +46,23 @@ export class Session {
     });
     s.page.on("console", (m) => {
       if (m.type() === "error") s.note(`console: ${m.text()}`);
+      // Chromium blocks or upgrades mixed content and says so here only.
+      if (/^Mixed Content:/.test(m.text()) && s.plain.length < 20) s.plain.push(m.text().slice(0, 300));
+    });
+    // What check_security reads (inspect.mjs): the main document's response
+    // and plain-HTTP requests made from an HTTPS page since it loaded.
+    s.doc = null;
+    s.plain = [];
+    s.page.on("response", (res) => {
+      const req = res.request();
+      if (req.frame() !== s.page.mainFrame() || !req.isNavigationRequest()) return;
+      if (res.status() >= 300 && res.status() < 400) return;
+      s.doc = { url: res.url(), status: res.status(), headers: res.headers() };
+      s.plain = [];
+    });
+    s.page.on("request", (req) => {
+      if (req.isNavigationRequest() && req.frame() === s.page.mainFrame()) return;
+      if (req.url().startsWith("http:") && s.page.url().startsWith("https:") && s.plain.length < 20) s.plain.push(`${req.resourceType()} ${req.url().slice(0, 250)}`);
     });
     s.page.on("pageerror", (e) => s.note(`uncaught: ${e.message}`));
     // The last address on the site, to come back to after a stopped navigation.
@@ -84,12 +108,13 @@ export class Session {
   }
 
   ctxFor(vars) {
-    return { vars, base: this.base, allowed: (h) => this.allowed(h) };
+    return { vars, base: this.base, allowed: (h) => this.allowed(h), seen: { doc: () => this.doc, plain: () => this.plain } };
   }
 
   /**
-   * Runs steps in order and stops at the first that does not pass.
-   * @returns {Promise<{results: {status: string, kind?: string, error?: string, ms: number}[], ok: boolean}>}
+   * Runs steps in order and stops at the first that does not pass. A check
+   * step's details are its result's note, passed or failed.
+   * @returns {Promise<{results: {status: string, kind?: string, error?: string, note?: string, ms: number}[], ok: boolean}>}
    */
   async run(steps, vars) {
     this.used = Date.now();
@@ -98,10 +123,12 @@ export class Session {
       const started = Date.now();
       const leftBefore = this.left.length;
       let failure = null;
+      let note = "";
       try {
-        await runStep(this.page, step, this.ctxFor(vars));
+        note = (await runStep(this.page, step, this.ctxFor(vars))) || "";
       } catch (err) {
         failure = { kind: err instanceof StepError ? err.kind : "page", error: String(err?.message ?? err).split("\n")[0].slice(0, 300) };
+        if (err?.note) failure.note = String(err.note).slice(0, 1000);
       }
       // A step that sent the browser off the site (a link, a redirect, a
       // script) leaves Chromium on its error page: go back to the site and
@@ -116,7 +143,7 @@ export class Session {
         this.used = Date.now();
         return { results, ok: false };
       }
-      results.push({ status: "passed", ms: Date.now() - started });
+      results.push(note ? { status: "passed", note: note.slice(0, 1000), ms: Date.now() - started } : { status: "passed", ms: Date.now() - started });
     }
     this.used = Date.now();
     return { results, ok: true };

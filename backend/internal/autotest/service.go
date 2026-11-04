@@ -487,14 +487,14 @@ func (s *service) DeleteSpec(ctx context.Context, projectID, caseID string) (boo
 	return err == nil && tag.RowsAffected() > 0, err
 }
 
-func (s *service) ApplyHeal(ctx context.Context, projectID, runID, caseID string, index int, actor string) (Spec, error) {
+func (s *service) ApplyHeal(ctx context.Context, projectID, runID, caseID, variant string, index int, actor string) (Spec, error) {
 	actor, err := validActor(actor)
 	if err != nil {
 		return Spec{}, err
 	}
 	var out Spec
 	err = s.DB.WithTx(ctx, func(ctx context.Context) error {
-		rc, err := s.runCase(ctx, projectID, runID, caseID)
+		rc, err := s.runCase(ctx, projectID, runID, caseID, variant)
 		if err != nil {
 			return err
 		}
@@ -661,14 +661,14 @@ func withBuiltins(inputs map[string]string, account map[string]string) map[strin
 
 // ------------------------------------------------------------------- runs
 
-const runColumns = `id, project_id, org_id, environment_id, coalesce(plan_id::text, ''), status, trigger, requested_by, heal,
+const runColumns = `id, project_id, org_id, environment_id, coalesce(plan_id::text, ''), status, trigger, requested_by, heal, variants,
 	total, passed, failed, errored, healed, input_tokens, output_tokens, coalesce(test_run_id::text, ''), coalesce(error, ''),
 	created_at, started_at, finished_at`
 
 func scanRun(row interface{ Scan(dest ...any) error }) (Run, error) {
 	var r Run
 	var started, finished *time.Time
-	err := row.Scan(&r.ID, &r.ProjectID, &r.OrgID, &r.EnvironmentID, &r.PlanID, &r.Status, &r.Trigger, &r.RequestedBy, &r.Heal,
+	err := row.Scan(&r.ID, &r.ProjectID, &r.OrgID, &r.EnvironmentID, &r.PlanID, &r.Status, &r.Trigger, &r.RequestedBy, &r.Heal, &r.Variants,
 		&r.Total, &r.Passed, &r.Failed, &r.Errored, &r.Healed, &r.InputTokens, &r.OutputTokens, &r.TestRunID, &r.Error,
 		&r.CreatedAt, &started, &finished)
 	if errors.Is(err, pg.ErrNoRows) {
@@ -678,6 +678,9 @@ func scanRun(row interface{ Scan(dest ...any) error }) (Run, error) {
 		return Run{}, err
 	}
 	r.CreatedAt = r.CreatedAt.UTC()
+	if len(r.Variants) == 0 {
+		r.Variants = []string{""} // a run from before QĐ-19
+	}
 	if started != nil {
 		r.StartedAt = started.UTC()
 	}
@@ -687,14 +690,14 @@ func scanRun(row interface{ Scan(dest ...any) error }) (Run, error) {
 	return r, nil
 }
 
-const runCaseColumns = `case_id, position, title, spec, status, results, console, healed, duration_ms, coalesce(error, ''),
+const runCaseColumns = `case_id, variant, position, title, spec, status, results, console, healed, duration_ms, coalesce(error, ''),
 	final_shot IS NOT NULL, failure_shot IS NOT NULL, coalesce(execution_id::text, ''), finished_at`
 
 func scanRunCase(row interface{ Scan(dest ...any) error }, projectID string) (RunCase, error) {
 	var c RunCase
 	var spec, results, console []byte
 	var finished *time.Time
-	err := row.Scan(&c.CaseID, &c.Position, &c.Title, &spec, &c.Status, &results, &console, &c.Healed, &c.DurationMs, &c.Error,
+	err := row.Scan(&c.CaseID, &c.Variant, &c.Position, &c.Title, &spec, &c.Status, &results, &console, &c.Healed, &c.DurationMs, &c.Error,
 		&c.HasFinalShot, &c.HasFailureShot, &c.ExecutionID, &finished)
 	if errors.Is(err, pg.ErrNoRows) {
 		return RunCase{}, ErrNotFound
@@ -732,6 +735,13 @@ func (s *service) CreateRun(ctx context.Context, in NewRun) (Run, error) {
 	}
 	if in.Trigger != TriggerDashboard && in.Trigger != TriggerCI {
 		return Run{}, invalid("trigger")
+	}
+	variants, err := cleanVariants(in.Variants)
+	if err != nil {
+		return Run{}, err
+	}
+	if len(in.Cases)*len(variants) > MaxRunRows {
+		return Run{}, invalid("a run has at most %d case runs (cases × variants); this one has %d", MaxRunRows, len(in.Cases)*len(variants))
 	}
 	actor, err := validActor(in.Actor)
 	if err != nil {
@@ -775,12 +785,13 @@ func (s *service) CreateRun(ctx context.Context, in NewRun) (Run, error) {
 			}
 			seen[id] = true
 		}
-		out, err = scanRun(q.QueryRow(ctx, `INSERT INTO auto_runs (project_id, org_id, environment_id, plan_id, trigger, requested_by, heal, total)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING `+runColumns,
-			in.ProjectID, in.OrgID, in.EnvironmentID, nullable(in.PlanID), in.Trigger, actor, in.Heal, len(in.Cases)))
+		out, err = scanRun(q.QueryRow(ctx, `INSERT INTO auto_runs (project_id, org_id, environment_id, plan_id, trigger, requested_by, heal, total, variants)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING `+runColumns,
+			in.ProjectID, in.OrgID, in.EnvironmentID, nullable(in.PlanID), in.Trigger, actor, in.Heal, len(in.Cases)*len(variants), variants))
 		if err != nil {
 			return err
 		}
+		// Each case once per variant, the cases in order within a variant.
 		for i, id := range in.Cases {
 			sp := specs[id]
 			snap, _ := json.Marshal(specJSON{Target: sp.Target, Account: sp.Account, Inputs: sp.Inputs, Steps: sp.Steps})
@@ -788,13 +799,19 @@ func (s *service) CreateRun(ctx context.Context, in NewRun) (Run, error) {
 			if title == "" {
 				title = "Case " + id[:8]
 			}
-			if _, err := q.Exec(ctx, `INSERT INTO auto_run_cases (run_id, case_id, position, title, spec) VALUES ($1, $2, $3, $4, $5)`,
-				out.ID, id, i, title, snap); err != nil {
-				return err
-			}
-			if _, _, err := s.q.Add(ctx, queue.Enqueue{Kind: JobCase, Key: out.ID + "/" + id, MaxAttempts: 3,
-				Payload: map[string]string{"runId": out.ID, "caseId": id, "projectId": in.ProjectID}}); err != nil {
-				return err
+			for _, v := range variants {
+				if _, err := q.Exec(ctx, `INSERT INTO auto_run_cases (run_id, case_id, variant, position, title, spec) VALUES ($1, $2, $3, $4, $5, $6)`,
+					out.ID, id, v, i, title, snap); err != nil {
+					return err
+				}
+				key := out.ID + "/" + id
+				if v != "" {
+					key += "/" + v
+				}
+				if _, _, err := s.q.Add(ctx, queue.Enqueue{Kind: JobCase, Key: key, MaxAttempts: 3,
+					Payload: map[string]string{"runId": out.ID, "caseId": id, "variant": v, "projectId": in.ProjectID}}); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -834,7 +851,7 @@ func (s *service) GetRun(ctx context.Context, projectID, id string) (Run, error)
 	if err != nil {
 		return Run{}, err
 	}
-	rows, err := q.Query(ctx, `SELECT `+runCaseColumns+` FROM auto_run_cases WHERE run_id = $1 ORDER BY position`, id)
+	rows, err := q.Query(ctx, `SELECT `+runCaseColumns+` FROM auto_run_cases WHERE run_id = $1 ORDER BY position, variant`, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -850,23 +867,23 @@ func (s *service) GetRun(ctx context.Context, projectID, id string) (Run, error)
 	return r, rows.Err()
 }
 
-func (s *service) runCase(ctx context.Context, projectID, runID, caseID string) (RunCase, error) {
+func (s *service) runCase(ctx context.Context, projectID, runID, caseID, variant string) (RunCase, error) {
 	if !uuidRe.MatchString(projectID) || !uuidRe.MatchString(runID) || !uuidRe.MatchString(caseID) {
 		return RunCase{}, ErrNotFound
 	}
 	return scanRunCase(s.DB.Q(ctx).QueryRow(ctx, `SELECT `+runCaseColumns+` FROM auto_run_cases c
-		WHERE c.run_id = $1 AND c.case_id = $2 AND EXISTS (SELECT 1 FROM auto_runs r WHERE r.id = c.run_id AND r.project_id = $3)`,
-		runID, caseID, projectID), projectID)
+		WHERE c.run_id = $1 AND c.case_id = $2 AND c.variant = $4 AND EXISTS (SELECT 1 FROM auto_runs r WHERE r.id = c.run_id AND r.project_id = $3)`,
+		runID, caseID, projectID, variant), projectID)
 }
 
-func (s *service) Shot(ctx context.Context, projectID, runID, caseID, which string) ([]byte, error) {
+func (s *service) Shot(ctx context.Context, projectID, runID, caseID, variant, which string) ([]byte, error) {
 	col := map[string]string{"final": "final_shot", "failure": "failure_shot"}[which]
 	if col == "" || !uuidRe.MatchString(projectID) || !uuidRe.MatchString(runID) || !uuidRe.MatchString(caseID) {
 		return nil, ErrNotFound
 	}
 	var b []byte
 	err := s.DB.Q(ctx).QueryRow(ctx, `SELECT c.`+col+` FROM auto_run_cases c JOIN auto_runs r ON r.id = c.run_id
-		WHERE c.run_id = $1 AND c.case_id = $2 AND r.project_id = $3`, runID, caseID, projectID).Scan(&b)
+		WHERE c.run_id = $1 AND c.case_id = $2 AND c.variant = $4 AND r.project_id = $3`, runID, caseID, projectID, variant).Scan(&b)
 	if errors.Is(err, pg.ErrNoRows) || (err == nil && b == nil) {
 		return nil, ErrNotFound
 	}
@@ -903,10 +920,10 @@ func (s *service) LastResults(ctx context.Context, projectID string) (map[string
 func (s *service) Prune(ctx context.Context, before time.Time, limit int) (int, error) {
 	q := s.DB.Q(ctx)
 	total := 0
-	for _, table := range []string{"auto_drafts", "auto_runs"} {
+	for _, table := range []string{"auto_drafts", "auto_runs", "load_runs"} {
 		// Runs still going are kept whatever their age.
 		extra := ""
-		if table == "auto_runs" {
+		if table == "auto_runs" || table == "load_runs" {
 			extra = ` AND status NOT IN ('queued', 'running')`
 		}
 		tag, err := q.Exec(ctx, `DELETE FROM `+table+` WHERE id IN (
@@ -924,7 +941,7 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 		return nil
 	}
 	q := s.DB.Q(ctx)
-	for _, table := range []string{"auto_runs", "auto_drafts", "auto_specs", "environment_accounts"} {
+	for _, table := range []string{"auto_runs", "auto_drafts", "auto_specs", "environment_accounts", "load_runs"} {
 		if _, err := q.Exec(ctx, `DELETE FROM `+table+` WHERE project_id = $1`, projectID); err != nil {
 			return err
 		}

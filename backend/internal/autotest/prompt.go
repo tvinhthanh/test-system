@@ -16,10 +16,10 @@ var typeBriefs = map[string]string{
 	"regression":    "the main flows on this page with the data most likely to break after a change.",
 	"e2e":           "a complete journey from the start page to the result the user wants, including what is saved and shown afterwards.",
 	"functional":    "each feature on the page: valid input, invalid input, limits, empty states and the messages shown.",
-	"performance":   "actions that should finish quickly: each step waits at most ten seconds, so slow pages fail.",
-	"security":      "what a browser can check: input that must be shown as text, not run (<b>, <script>), limits on what the account may do.",
+	"performance":   "the pages and actions a user waits for: open each, then check_performance (the page's load timings against a budget); each step also waits at most ten seconds, so a slow action fails.",
+	"security":      "what a browser can check: check_security on the pages that matter (sign-in, account, forms), input that must be shown as text, not run (<b>, <script>), limits on what the account may do.",
 	"usability":     "feedback after every action, clear messages after mistakes, recovering from an error.",
-	"accessibility": "everything reachable by role and name, labelled fields, messages announced in alerts or status regions.",
+	"accessibility": "check_accessibility on each state a user reaches (the page, an open dialog, a form showing its errors), everything reachable by role and name, labelled fields, messages announced in alerts or status regions.",
 	"compatibility": "the main flows with long text, other alphabets and emoji.",
 	"recovery":      "what happens after a mistake mid-flow: going back, sending twice, empty or interrupted input.",
 }
@@ -35,6 +35,10 @@ Actions ("do"):
 - expect_text (value: the text; on an element, or on the whole page when "by" is "")
 - expect_value (value: what a field holds)
 - expect_url (value: part of the address), expect_title (value: part of the page title)
+- check_accessibility (value: "" or the lowest impact that fails — minor, moderate, serious, critical; "" = serious) — automatic WCAG A/AA checks of the page as it is now
+- check_performance (value: "" or a budget such as "lcp=2500 cls=0.1 ttfb=800", milliseconds; also fcp and load) — the page's load timings
+- check_security (value: "" or "strict") — HTTPS, security headers, cookie flags and plain-HTTP requests of the page
+The three check_* steps take no element and count as the expect step that proves the outcome; use them when the test type asks for them, after the steps that bring the page into the state to check.
 
 Elements ("by", "role", "name"), in order of preference:
 - "by": "role" — "role" is the ARIA role and "name" the accessible name, exactly as the accessibility tree shows them: "- button \"Send\"" is role "button", name "Send"; "- textbox \"Message\"" is role "textbox", name "Message".

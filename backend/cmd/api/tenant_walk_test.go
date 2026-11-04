@@ -161,7 +161,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	if r := a.user.post(baseA+"/environments/"+envA+"/accounts", map[string]any{"key": "walk-account", "username": "a", "password": "p"}); r.code != 200 {
 		t.Fatalf("seed A's test account: %d %s", r.code, r.raw)
 	}
-	var draftA, autoRunA, scanA string
+	var draftA, autoRunA, scanA, loadA string
 	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO auto_drafts (project_id, org_id, environment_id, target, count, status, drafts, requested_by, finished_at)
 		VALUES ($1, $2, $3, '/', 1, 'done', '[]', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID, envA).Scan(&draftA); err != nil {
 		t.Fatal(err)
@@ -172,6 +172,10 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	}
 	if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO auto_run_cases (run_id, case_id, position, title, spec, status, final_shot, finished_at)
 		VALUES ($1, $2, 0, 'Walk', '{}', 'passed', '\xffd8ffe0'::bytea, now())`, autoRunA, caseA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO load_runs (project_id, org_id, environment_id, host, base, paths, vus, seconds, requested_by)
+		VALUES ($1, $2, $3, 'alpha.example', 'https://alpha.example', '{/}', 1, 5, 'a@alpha.example') RETURNING id`, string(a.project), a.orgID, envA).Scan(&loadA); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO site_scans (project_id, start_url, max_pages, requested_by) VALUES ($1, 'https://alpha.example/', 5, 'a@alpha.example') RETURNING id`,
@@ -217,7 +221,7 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"environmentId": envA,
 		"checkId":       checkA.ID, "which": "desktop",
 		"suggestionId": suggestionA,
-		"accountKey":   "walk-account", "draftId": draftA, "autoRunId": autoRunA, "shot": "final", "scanId": scanA,
+		"accountKey":   "walk-account", "draftId": draftA, "autoRunId": autoRunA, "shot": "final", "scanId": scanA, "loadRunId": loadA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
@@ -281,6 +285,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"POST /v1/projects/{projectId}/auto-runs":                                                     map[string]any{"environmentId": envA},
 		"POST /v1/projects/{projectId}/auto-runs/{autoRunId}/cases/{testCaseId}/apply-heal":           map[string]any{"step": 0},
 		"POST /v1/projects/{projectId}/site-scans":                                                    map[string]any{"url": "https://beta.example"},
+		// Load tests (QĐ-19 tier 3).
+		"POST /v1/projects/{projectId}/environments/{environmentId}/ownership/check": map[string]any{"method": "file"},
+		"POST /v1/projects/{projectId}/load-runs":                                    map[string]any{"environmentId": envA, "vus": 1, "seconds": 5},
 		// ROI baseline (§6.8.3, QĐ-13): a valid measurement, so only the tenant check refuses.
 		"POST /v1/projects/{projectId}/roi/baselines": map[string]any{"kind": "retrospective", "failures": 10, "medianMinutes": 180, "periodFrom": "2026-08-01", "periodTo": "2026-08-14"},
 	}

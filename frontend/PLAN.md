@@ -23,6 +23,35 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Check steps in Auto test (QĐ-19, 2026-11-04) — backend only, frontend to do
+
+- The backend and the checker have three new step actions with no element: `check_accessibility`, `check_performance` and `check_security`. The value says how strict each one is (openapi `AutoStep`). AI drafts already use them for the accessibility, performance and security test types.
+- A step result can now carry `note`: the check's details, passed or failed. These are the axe problems, the timings against the budget, or the security findings by level (openapi `AutoStepResult.note`).
+- Frontend to do (not changed by Claude, per the backend-only split):
+  - add the three actions to `features/autotest/steps.ts`: they need no element and an optional value;
+  - offer them in `StepsEditor.vue`;
+  - show `note` under a step's result on the run screen.
+
+  Until then, a drafted case with a check step shows the raw action name.
+- Tier 2, the browser × device matrix, is also backend only so far.
+  - `POST …/auto-runs` (and the CI route) takes `variants: ["firefox/phone", …]`.
+  - `AutoRun` has `variants`. Each run case has a `variant` and appears once per variant.
+  - The screenshot URL takes `?variant=`; apply-heal takes `variant` in the body.
+- Frontend to do:
+  - a variant picker beside "Run selected";
+  - group or label the run screen's cases by variant;
+  - pass `variant` on screenshots and apply-heal. Without it, the default variant's screenshot is shown.
+- Tier 3, load tests, has five routes and no screen yet:
+  - `GET …/environments/{id}/ownership`: the token and the two ways to prove the host;
+  - `POST …/ownership/check {method}`;
+  - `POST/GET …/load-runs` and `GET …/load-runs/{id}`.
+
+  Schemas are openapi `SiteOwnership` and `LoadRun`.
+- Frontend to do for tier 3:
+  - an ownership panel on the environment;
+  - a load-run form that respects the server caps;
+  - a result view: p50–p99, rps, errors, a timeline chart and the verdict.
+
 ### Test-only dependency advisories (2026-11-01)
 
 - `npm audit` failed on 4 moderate advisories: glob ≤ 14.0.1 and minimatch < 11.0.1. Both come only through `@vue/test-utils` → js-beautify, and even the newest js-beautify still asks for the affected ranges.

@@ -26,8 +26,10 @@ type Step struct {
 
 var (
 	// Actions a step may take.
+	// The check_* actions are in checks.go (QĐ-19).
 	Actions = []string{"goto", "click", "fill", "select", "check", "uncheck", "press", "hover", "wait",
-		"expect_visible", "expect_hidden", "expect_text", "expect_url", "expect_value", "expect_title"}
+		"expect_visible", "expect_hidden", "expect_text", "expect_url", "expect_value", "expect_title",
+		"check_accessibility", "check_performance", "check_security"}
 	// Locators: how a step names its element.
 	Locators = []string{"role", "label", "placeholder", "text", "testid", "css"}
 	// Roles getByRole is asked for.
@@ -93,6 +95,9 @@ func (s Step) Validate() error {
 		if ms, err := strconv.Atoi(s.Value); err != nil || ms < 1 || ms > MaxWaitMs {
 			return fmt.Errorf("wait is 1 to %d ms", MaxWaitMs)
 		}
+	}
+	if err := checkValue(s.Do, s.Value); err != nil {
+		return err
 	}
 	if len(s.Name) > 2000 || len(s.Value) > 2000 {
 		return fmt.Errorf("name and value are at most 2000 bytes")
@@ -239,6 +244,8 @@ func Describe(s Step) string {
 		return fmt.Sprintf("%s holds “%s”", capital(el), s.Value)
 	case "expect_title":
 		return fmt.Sprintf("The page title contains “%s”", s.Value)
+	case "check_accessibility", "check_performance", "check_security":
+		return describeCheck(s)
 	}
 	return s.Do
 }

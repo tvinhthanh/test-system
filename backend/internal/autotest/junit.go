@@ -67,7 +67,13 @@ func JUnit(run Run, envKey string) []byte {
 		if c.Status == CasePending {
 			continue
 		}
-		jc := junitCase{Name: c.Title, ClassName: Framework, File: CaseFile(c.CaseID), Time: seconds(c.DurationMs)}
+		// One test per case and variant (QĐ-19): the default keeps the bare
+		// title, so a case keeps the identity it had before the matrix.
+		name := c.Title
+		if c.Variant != "" {
+			name += " [" + c.Variant + "]"
+		}
+		jc := junitCase{Name: name, ClassName: Framework, File: CaseFile(c.CaseID), Time: seconds(c.DurationMs)}
 		log := stepLog(c)
 		switch c.Status {
 		case CaseFailed:
@@ -105,6 +111,9 @@ func stepLog(c RunCase) string {
 				fmt.Fprintf(&b, " — repaired by AI: %s", r.Healed.Reason)
 			} else if r.Error != "" {
 				fmt.Fprintf(&b, " — %s", r.Error)
+			}
+			if r.Note != "" {
+				fmt.Fprintf(&b, "\n   %s", strings.ReplaceAll(r.Note, "\n", " "))
 			}
 		}
 		b.WriteString("\n")

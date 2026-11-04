@@ -361,6 +361,19 @@ Ví dụ: thêm một việc trong app demo TodoMVC. Environment có địa ch�
 | 3 | **Press a key** | **The page** | `Enter` |
 | 4 | **Check: text is there** | **Anywhere on the page** | `Buy milk` |
 
+**Bước kiểm tra trang (accessibility, tốc độ, bảo mật).** Ba bước dưới đây không cần phần tử. Chúng kiểm tra trang đúng ở trạng thái mà các bước trước đã đưa tới, ví dụ đã đăng nhập, đang mở hộp thoại, hoặc form đang báo lỗi. Ô giá trị quyết định độ khắt khe và có thể để trống. Kết quả chi tiết nằm dưới bước trên trang run, kể cả khi bước pass.
+
+| Bước (`do`) | Kiểm gì | Giá trị |
+|---|---|---|
+| `check_accessibility` | Lỗi WCAG 2.0/2.1/2.2 mức A và AA, do axe-core tự tìm | Để trống: fail khi có lỗi mức serious trở lên. Hoặc ghi `minor`, `moderate`, `serious`, `critical` |
+| `check_performance` | Thời gian tải trang gần nhất: LCP, FCP, TTFB (byte đầu), load, độ xô lệch bố cục CLS | Để trống: LCP ≤ 2,5 s, CLS ≤ 0,1, TTFB ≤ 800 ms. Hoặc ghi ngân sách riêng, ví dụ `lcp=2000 ttfb=500 load=4000` |
+| `check_security` | HTTPS, HSTS, CSP, chống clickjacking, nosniff, header lộ phiên bản phần mềm, CORS, cờ Secure/HttpOnly của cookie, tài nguyên HTTP trên trang HTTPS | Để trống: fail khi có lỗi mức high. Ghi `strict` để fail cả lỗi mức medium |
+
+Khi lập plan loại accessibility, performance hoặc security, AI soạn case tự dùng các bước này. Có hai giới hạn cần biết:
+- Kiểm tra tự động chỉ tìm được khoảng một phần ba lỗi accessibility, nên vẫn cần thử bằng bàn phím và trình đọc màn hình.
+- `check_security` chỉ xem những gì trình duyệt thấy được, đó không phải pentest.
+- Nếu màn hình sửa bước chưa có ba hành động này, hãy dùng AI soạn case, hoặc gửi bước qua API.
+
 Một số lưu ý khi viết bước:
 - Gõ `{{tên_input}}` ở ô giá trị để dùng input.
 - Mỗi case nên kết thúc bằng ít nhất một bước **Check**.
@@ -384,6 +397,41 @@ Bước AI đã sửa có ghi chú riêng. Bấm **Keep the repair in the case**
 - **Test runs**, tab **Auto runs**: dùng cho release gate và phát hiện test chập chờn (flaky), như một run CI.
 
 Tab **Runs** của Auto test liệt kê các lần chạy trước, kể cả lần chạy từ CI.
+
+**Chạy trên nhiều trình duyệt và thiết bị (kiểm tra tương thích).** Một run có thể yêu cầu nhiều *variant* dạng `trình duyệt/thiết bị`:
+- trình duyệt là `chromium`, `firefox` hoặc `webkit` (nhân của Safari);
+- thiết bị là `desktop`, `phone` hoặc `tablet`.
+
+Mỗi case chạy một lần cho mỗi variant, và mỗi lần chạy có kết quả, ảnh chụp và một test riêng trong Test runs, ví dụ "Gửi tin [firefox/phone]". Không chọn variant nào thì case chạy trên `chromium/desktop` như trước. Giới hạn: tối đa 9 variant mỗi run, và số case × số variant không quá 300.
+
+Hiện chỉ đặt variant được qua API hoặc CI, bằng trường `"variants": ["chromium/desktop", "firefox/phone", "webkit/tablet"]` khi tạo run. Màn hình Auto test chưa có ô chọn này. Firefox không giả lập điện thoại đầy đủ: ở `firefox/phone` chỉ có cỡ màn hình và cảm ứng.
+
+**Load test (kiểm tra tải).** Hệ thống gửi request thật vào site, nên chỉ chạy được vào host mà organization của bạn đã chứng minh là của mình.
+
+1. Gọi `GET /v1/projects/{project}/environments/{environment}/ownership`. Kết quả trả về:
+   - một token;
+   - hai cách chứng minh: file `fileUrl` với nội dung `fileText`, hoặc bản ghi DNS TXT `dnsName` với nội dung `dnsText`.
+2. Làm một trong hai cách:
+   - đặt file `/.well-known/atp-verification.txt` chứa dòng `atp-verification=<token>` lên đúng host đó (trả 200, không chuyển hướng);
+   - hoặc tạo bản ghi TXT `_atp-verification.<host>` với cùng nội dung.
+3. Gọi `POST …/ownership/check` với `{"method": "file"}` hoặc `{"method": "dns"}`, rồi đọc lại bằng `GET …/ownership` cho tới khi `status` là `verified`.
+4. Gọi `POST /v1/projects/{project}/load-runs`, ví dụ `{"environmentId": "…", "paths": ["/", "/search?q=ao"], "vus": 10, "seconds": 60, "rampSeconds": 10, "maxP95Ms": 800, "maxErrorRate": 1}`.
+5. Đọc kết quả bằng `GET …/load-runs/{id}`. Kết quả gồm:
+   - số request và số request mỗi giây;
+   - thời gian trả lời p50, p95, p99;
+   - tỉ lệ lỗi: không trả lời hoặc lỗi 5xx (4xx đếm riêng);
+   - số lượng theo từng mã status;
+   - diễn biến từng giây;
+   - `verdict`: đạt hoặc không đạt theo ngưỡng.
+
+Những điều cần biết:
+- Ngay trước mỗi lần chạy, hệ thống kiểm lại chứng minh. Nếu file hoặc bản ghi đã bị gỡ, lần chạy dừng và không gửi tải.
+- Load test không theo chuyển hướng, nên chỉ gửi tới đúng host đã chứng minh.
+- Người vận hành đặt trần bằng `LOAD_MAX_VUS` (mặc định 20) và `LOAD_MAX_SECONDS` (mặc định 60).
+- Mỗi organization chạy một load test một lúc. Mỗi project chạy tối đa 20 lần một ngày.
+- Màn hình cho load test chưa có, hiện chỉ dùng được qua API.
+
+> **Hãy chạy load test trên staging.** Kể cả với site của chính bạn, tải lớn trên production có thể làm chậm người dùng thật.
 
 ### 6.5 Quét site
 
@@ -528,6 +576,7 @@ Chạy từ thư mục gốc repo, trên máy làm server. Máy cần Docker; n�
 Các tùy chọn trong `backend/deploy/.env`:
 - `URLCHECK=on`: bật URL check, quét site và Auto test. Thêm một service Chromium, image khoảng 1 GB.
 - `CHECKER_SESSIONS=4`: số trình duyệt Auto test mở cùng lúc, mỗi cái khoảng 150 MB.
+- `CHECKER_BROWSERS=chromium,firefox,webkit`: các trình duyệt mà run được phép yêu cầu (ma trận tương thích, QĐ-19). Image checker cài sẵn cả ba, nên nặng hơn image chỉ có Chromium vài trăm MB.
 - `URLCHECK_ALLOW_PRIVATE=on`: cho URL check mở địa chỉ trong mạng LAN.
 - `LLM_API_KEY=…`: key của server cho phần AI, thuộc provider `LLM_PROVIDER`. Provider mặc định là `anthropic`; có thể đặt `openai`, `gemini`, `xai`, `mistral`, `deepseek`, `groq`, `openrouter`, hoặc `openai-compatible` cho endpoint riêng tại `LLM_BASE_URL` (khi đó bắt buộc có `LLM_MODEL`). Organization vẫn chọn provider, model và key riêng trong **AI settings**. `LLM_MODEL` chỉ là model key của server dùng khi organization chưa chọn gì.
 - `MAIL=smtp`, kèm `SMTP_HOST`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD` và `PUBLIC_URL`: gửi email mời, quên mật khẩu và link đăng ký. Dùng được SES, Resend, Mailgun, Postmark, Gmail (mật khẩu ứng dụng) và Microsoft 365. Với Microsoft 365, tenant phải còn cho đăng nhập SMTP bằng mật khẩu; Microsoft đang tắt dần cách này, nên về lâu dài nên dùng một dịch vụ gửi mail.

@@ -868,3 +868,68 @@ Một script Playwright lái giao diện thật và so cái giao diện hiện v
 Không phải lỗi: example.com đã đổi nội dung. Trang không còn heading "Example Domain" và tự ghi "avoid relying on it for testing", nên case kiểm heading trượt. Checker báo đúng "heading “Example Domain” is not visible", kèm ảnh lúc cuối và chỗ trượt.
 
 Chưa kiểm ở lần này: AI với key thật, mail SMTP thật, Docker.
+
+## QĐ-19 tầng 1 — bước kiểm tra accessibility, tốc độ, bảo mật trong Auto test — 04-11-2026
+
+Thêm ba action vào bước Auto test: `check_accessibility`, `check_performance`, `check_security`. Chi tiết ở SPEC QĐ-19 và `checker/README.md`. Không có migration: `auto_run_cases.results` là jsonb, mỗi kết quả có thêm `note`.
+
+- **Checker, Chromium thật trên trang fixture** (`cd checker && node --test test/inspect.test.mjs`): 5/5 pass.
+  - **Accessibility:** trang có nhãn thì pass. Trang thiếu `alt` và nhãn thì fail, kind là `assert`, và lỗi nêu tên rule (image-alt / label).
+  - **Performance:** ngân sách `load=500` trên trang có ảnh tải 1,2 s thì fail với dòng "over budget: Page load".
+  - **Security:**
+    - trang HTTP có ô mật khẩu thì fail mức high;
+    - `Server: Apache/2.4.1`, cookie `session_id` thiếu HttpOnly và việc thiếu CSP đều nằm trong `note`;
+    - `strict` làm fail cả trang tốt, vì trang fixture chạy HTTP (mức medium);
+    - các finding chỉ có trên HTTPS (HSTS, mixed content, CORS `*` kèm credentials, cookie không Secure) được kiểm bằng unit test.
+- **Cả bộ test của checker** (`npm test`) pass, kể cả các bài cũ về step, session và URL check.
+- **Backend** (`TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5499/atp go test ./internal/autotest/ ./cmd/worker/ ./cmd/api/`) pass.
+  - **TestStepsAndAddresses** kiểm việc validate giá trị của ba bước, mô tả bằng lời, export Playwright (bước kiểm tra thành chú thích, không thành code) và log JUnit có `note`.
+  - **TestRunHealsRecordsAndFinishes** kiểm `note` đi từ checker giả, qua run, vào DB.
+- **Chưa kiểm:** chạy trên Firefox và WebKit (tầng 2); WebKit không báo LCP và CLS, và bước kiểm tra ghi rõ điều đó chứ không fail. Chưa chạy trên site HTTPS thật từ server, vì laptop không có Docker.
+
+## QĐ-19 tầng 2 — ma trận trình duyệt và thiết bị — 04-11-2026
+
+Run có thêm `variants` dạng `trình duyệt/thiết bị` (Chromium, Firefox, WebKit × desktop, phone, tablet); mỗi case chạy một lần cho mỗi variant. Migration 0047 thêm `auto_runs.variants` và `auto_run_cases.variant`, và đưa `variant` vào khóa chính.
+
+- **Guard SSRF trên ba engine** (`checker/test/engines.test.mjs`):
+  - Policy không cho phép loopback, mở `127.0.0.1`, `localhost` và `[::1]` trên Chromium, Firefox và WebKit. Cả chín lần đều không tới được site, vì trang lỗi của trình duyệt thay cho nội dung.
+  - Đã thử Firefox của Playwright 1.63 khi không có hai pref `allow_hijacking_localhost` / `no_proxies_on`: vẫn bị chặn, vì bản build đã đặt sẵn. Code vẫn đặt hai pref đó, phòng khi Playwright đổi mặc định.
+- **Case chạy được trên mọi tổ hợp đã thử:** điền form, bấm, `expect_text` và `check_accessibility` đều pass trên desktop và phone của cả ba engine.
+  - Desktop có `innerWidth` 1366.
+  - Phone có bề rộng 3xx–4xx và `pointer: coarse`, kể cả trên Firefox, nơi phone chỉ có cỡ màn hình và cảm ứng.
+- **Kết quả kiểm thử:**
+  - `npm test` của checker: 27/27 pass.
+  - Backend: `go test -p 1 ./internal/autotest/ ./cmd/worker/ ./cmd/api/ ./test/arch/` pass.
+  - **TestRunMatrix** kiểm:
+    - variant lặp và `chromium/desktop` gộp lại;
+    - variant sai bị từ chối;
+    - 1 case × 3 variant thành 3 lần chạy, mở trên đúng trình duyệt và thiết bị;
+    - JUnit đặt tên `Send`, `Send [firefox/phone]`, `Send [webkit/tablet]`;
+    - ảnh chụp lấy theo variant;
+    - trần 300 dòng case × variant.
+- **Chưa kiểm:** image Docker có Firefox và WebKit (laptop không có Docker; CI job `checker` build image); WebRTC của WebKit (không có cờ tắt). Proxy chặn mọi TCP; UDP của WebRTC trên WebKit là rủi ro còn lại, nằm trong container `cap_drop: ALL` trên `checknet`. Giao diện chưa có ô chọn variant.
+
+## QĐ-19 tầng 3 — load test chỉ vào host đã chứng minh sở hữu — 04-11-2026
+
+Migration 0048 thêm `site_ownership` và `load_runs`, cùng 5 route: `…/environments/{id}/ownership`, `…/ownership/check` và `…/load-runs`. Checker có thêm `/verify` và `/load`.
+
+- **Checker** (`node --test test/load.test.mjs`, fixture trên 127.0.0.1): 4/4 pass.
+  - **Chạy tải thật:** 4 VU trong 5 giây đếm đúng 500 vào `errors`, 404 vào `clientErrors`; 302 không được theo; p95 ≥ 100 ms trên path chậm 150 ms; timeline đủ 5 ô.
+  - **Guard:** không có allow thì load trả `blocked` và site **không nhận request nào**, kể cả khi gọi bằng tên `localhost`. Request API của Playwright đi qua proxy guard cả với loopback.
+  - **File chứng minh** chỉ đọc được khi guard cho phép.
+- **Backend** (`TestLoadNeedsProofAndCaps`, Postgres thật, checker và DNS giả):
+  - chưa chứng minh thì `ErrNotProved`;
+  - file sai thì `failed`, kèm lý do; file đúng thì `verified`;
+  - trần VU và thời lượng, `rampSeconds` và path rời host bị từ chối;
+  - mỗi organization một load cùng lúc;
+  - verdict "p95 340 ms is over 300 ms";
+  - **chứng minh bị gỡ trước lần chạy thì không gửi tải** và chứng minh chuyển `failed`;
+  - DNS TXT dùng được;
+  - purge project xóa load run.
+- **Tenant walk** đi qua cả 5 route mới. Path chứa environment của tenant khác trả 404, không còn là 400. `deploy/routes.txt` có 158 route.
+- `npm test` của checker: 31/31. Backend `go test -p 1 ./internal/autotest/ ./cmd/worker/ ./cmd/api/ ./test/arch/ ./internal/platform/config/` pass.
+- **Chưa kiểm:**
+  - load vào site HTTPS thật từ server;
+  - tải lớn (200 VU) trên request API của Playwright, nên có thể phải chuyển sang client HTTP riêng nếu nó nghẽn;
+  - giao diện;
+  - xóa `site_ownership` khi xóa organization.
