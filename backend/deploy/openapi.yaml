@@ -5071,9 +5071,19 @@ components:
         `value` is what to type, pick or press, the address, the text expected,
         or milliseconds to wait. `{{name}}` in `name` or `value` is a variable.
         `say` and `expected` are for people.
+
+        Check steps (QĐ-19) take no element and check the page as it is:
+        `check_accessibility` (value "" or minor/moderate/serious/critical —
+        axe-core WCAG A/AA, fails at that impact or worse, "" = serious),
+        `check_performance` (value "" or a budget such as
+        `lcp=2500 cls=0.1 ttfb=800`; metrics lcp, fcp, ttfb, load in ms and
+        cls) and `check_security` (value "" or `strict` — HTTPS, HSTS, CSP,
+        clickjacking, nosniff, version headers, CORS, cookie flags, mixed
+        content; fails on a high finding, strict also on medium). Their
+        details are the result's `note`.
       required: [do]
       properties:
-        do: { type: string, enum: [goto, click, fill, select, check, uncheck, press, hover, wait, expect_visible, expect_hidden, expect_text, expect_url, expect_value, expect_title] }
+        do: { type: string, enum: [goto, click, fill, select, check, uncheck, press, hover, wait, expect_visible, expect_hidden, expect_text, expect_url, expect_value, expect_title, check_accessibility, check_performance, check_security] }
         by: { type: string, enum: ["", role, label, placeholder, text, testid, css] }
         role: { type: string, description: "An ARIA role when `by` is role (button, link, textbox, …)." }
         name: { type: string, maxLength: 2000 }
@@ -5153,6 +5163,7 @@ components:
         status: { type: string, enum: [passed, failed, skipped] }
         kind: { type: string, enum: [input, locator, assert, navigation, page], description: "Why a step failed: locator — its element was not found or usable; assert — the expectation did not hold; navigation — a page did not open or the browser tried to leave the site." }
         error: { type: string }
+        note: { type: string, maxLength: 1000, description: "A check step's details (QĐ-19), passed or failed: the problems axe found, the timings against the budget, the security findings by level." }
         ms: { type: integer }
         healed:
           type: object

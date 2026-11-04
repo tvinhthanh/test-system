@@ -95,6 +95,9 @@ func (s *fakeSession) Run(_ context.Context, steps []Step, vars map[string]strin
 			s.sent = value
 		case st.Do == "expect_text" && !strings.Contains(s.view().Tree, value):
 			return fail("assert", "the text “"+value+"” is not on the page")
+		case IsCheck(st.Do):
+			o.Results = append(o.Results, StepOutcome{Status: "passed", Note: st.Do + ": nothing found", Ms: 5})
+			continue
 		}
 		o.Results = append(o.Results, StepOutcome{Status: "passed", Ms: 5})
 	}
@@ -345,7 +348,8 @@ func TestRunHealsRecordsAndFinishes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	save(caseSend, st("fill", "role", "textbox", "Tin nhắn", "{{text}}"), st("click", "role", "button", "Gửi", ""), st("expect_text", "", "", "", "Xin chào"))
+	save(caseSend, st("fill", "role", "textbox", "Tin nhắn", "{{text}}"), st("click", "role", "button", "Gửi", ""), st("expect_text", "", "", "", "Xin chào"),
+		st("check_accessibility", "", "", "", ""))
 	save(caseHeal, st("fill", "role", "textbox", "Tin nhắn", "hello"), st("click", "role", "button", "Send", ""), st("expect_text", "", "", "", "hello"))
 	save(caseAssert, st("expect_text", "", "", "", "something else"), st("click", "role", "button", "Gửi", ""))
 	run, err := f.svc.CreateRun(ctx, NewRun{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, PlanID: "d0000000-0000-4000-8000-000000000001",
@@ -371,6 +375,10 @@ func TestRunHealsRecordsAndFinishes(t *testing.T) {
 	byID := map[string]RunCase{}
 	for _, c := range run.Cases {
 		byID[c.CaseID] = c
+	}
+	// A check step's details are kept with its result (QĐ-19).
+	if sent := byID[caseSend]; sent.Status != CasePassed || len(sent.Results) != 4 || sent.Results[3].Note != "check_accessibility: nothing found" {
+		t.Fatalf("check step: %+v", sent.Results)
 	}
 	heal := byID[caseHeal]
 	if heal.Status != CasePassed || heal.Results[1].Healed == nil || heal.Results[1].Healed.Steps[0].Name != "Gửi" || heal.ExecutionID == "" {
@@ -525,6 +533,16 @@ func TestStepsAndAddresses(t *testing.T) {
 		{st("fill", "label", "", "Message", ""), true},
 		{st("press", "", "", "", "Enter"), true},
 		{st("eval", "", "", "", "x"), false},
+		// Check steps (QĐ-19): no element, a value that says how strict.
+		{st("check_accessibility", "", "", "", ""), true},
+		{st("check_accessibility", "", "", "", "moderate"), true},
+		{st("check_accessibility", "", "", "", "AA"), false},
+		{st("check_accessibility", "css", "", "main", ""), false},
+		{st("check_performance", "", "", "", "lcp=2000, cls=0.05;load<4000"), true},
+		{st("check_performance", "", "", "", "speed=1"), false},
+		{st("check_performance", "", "", "", "ttfb=0"), false},
+		{st("check_security", "", "", "", "strict"), true},
+		{st("check_security", "", "", "", "loose"), false},
 	} {
 		if err := tc.s.Validate(); (err == nil) != tc.ok {
 			t.Errorf("%+v: %v", tc.s, err)
@@ -545,5 +563,20 @@ func TestStepsAndAddresses(t *testing.T) {
 	}
 	if Describe(st("fill", "label", "", "Message", "hi")) != "Type “hi” into the field “Message”" {
 		t.Errorf("describe: %s", Describe(st("fill", "label", "", "Message", "hi")))
+	}
+	if got := Describe(st("check_performance", "", "", "", "")); !strings.Contains(got, "LCP ≤ 2.5 s") {
+		t.Errorf("describe check: %s", got)
+	}
+	if b, err := ParseBudget(""); err != nil || b["lcp"] != 2500 || b["ttfb"] != 800 {
+		t.Errorf("default budget: %v %v", b, err)
+	}
+	// A check never becomes code in an export, and its note reaches the JUnit log.
+	out := string(Playwright([]ExportCase{{Title: "A11y", Spec: Spec{Target: "/", Steps: []Step{st("check_accessibility", "", "", "", "serious")}}}}, nil, "https://x.example", "staging"))
+	if !strings.Contains(out, "// ATP check check_accessibility serious") {
+		t.Errorf("export: %s", out)
+	}
+	log := stepLog(RunCase{Spec: Spec{Steps: []Step{st("check_security", "", "", "", "")}}, Results: []StepResult{{Status: "passed", Note: "medium: no Content-Security-Policy header"}}})
+	if !strings.Contains(log, "no Content-Security-Policy") {
+		t.Errorf("step log: %s", log)
 	}
 }

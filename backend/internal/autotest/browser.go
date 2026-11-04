@@ -77,6 +77,7 @@ func (s *httpSession) Run(ctx context.Context, steps []Step, vars map[string]str
 			Status string `json:"status"`
 			Kind   string `json:"kind"`
 			Error  string `json:"error"`
+			Note   string `json:"note"`
 			Ms     int    `json:"ms"`
 		} `json:"results"`
 		wireView
@@ -89,7 +90,7 @@ func (s *httpSession) Run(ctx context.Context, steps []Step, vars map[string]str
 	}
 	o := Outcome{OK: out.OK, URL: out.URL, Console: out.Console}
 	for _, r := range out.Results {
-		o.Results = append(o.Results, StepOutcome{Status: r.Status, Kind: r.Kind, Error: cut(r.Error, 500), Ms: r.Ms})
+		o.Results = append(o.Results, StepOutcome{Status: r.Status, Kind: r.Kind, Error: cut(r.Error, 500), Note: cut(r.Note, 1000), Ms: r.Ms})
 	}
 	if !out.OK {
 		v := out.view()

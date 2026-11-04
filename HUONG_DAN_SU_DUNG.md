@@ -361,6 +361,19 @@ Ví dụ: thêm một việc trong app demo TodoMVC. Environment có địa ch�
 | 3 | **Press a key** | **The page** | `Enter` |
 | 4 | **Check: text is there** | **Anywhere on the page** | `Buy milk` |
 
+**Bước kiểm tra trang (accessibility, tốc độ, bảo mật).** Ba bước dưới đây không cần phần tử. Chúng kiểm tra trang đúng ở trạng thái mà các bước trước đã đưa tới, ví dụ đã đăng nhập, đang mở hộp thoại, hoặc form đang báo lỗi. Ô giá trị quyết định độ khắt khe và có thể để trống. Kết quả chi tiết nằm dưới bước trên trang run, kể cả khi bước pass.
+
+| Bước (`do`) | Kiểm gì | Giá trị |
+|---|---|---|
+| `check_accessibility` | Lỗi WCAG 2.0/2.1/2.2 mức A và AA, do axe-core tự tìm | Để trống: fail khi có lỗi mức serious trở lên. Hoặc ghi `minor`, `moderate`, `serious`, `critical` |
+| `check_performance` | Thời gian tải trang gần nhất: LCP, FCP, TTFB (byte đầu), load, độ xô lệch bố cục CLS | Để trống: LCP ≤ 2,5 s, CLS ≤ 0,1, TTFB ≤ 800 ms. Hoặc ghi ngân sách riêng, ví dụ `lcp=2000 ttfb=500 load=4000` |
+| `check_security` | HTTPS, HSTS, CSP, chống clickjacking, nosniff, header lộ phiên bản phần mềm, CORS, cờ Secure/HttpOnly của cookie, tài nguyên HTTP trên trang HTTPS | Để trống: fail khi có lỗi mức high. Ghi `strict` để fail cả lỗi mức medium |
+
+Khi lập plan loại accessibility, performance hoặc security, AI soạn case tự dùng các bước này. Có hai giới hạn cần biết:
+- Kiểm tra tự động chỉ tìm được khoảng một phần ba lỗi accessibility, nên vẫn cần thử bằng bàn phím và trình đọc màn hình.
+- `check_security` chỉ xem những gì trình duyệt thấy được, đó không phải pentest.
+- Nếu màn hình sửa bước chưa có ba hành động này, hãy dùng AI soạn case, hoặc gửi bước qua API.
+
 Một số lưu ý khi viết bước:
 - Gõ `{{tên_input}}` ở ô giá trị để dùng input.
 - Mỗi case nên kết thúc bằng ít nhất một bước **Check**.

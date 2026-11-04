@@ -868,3 +868,21 @@ Một script Playwright lái giao diện thật và so cái giao diện hiện v
 Không phải lỗi: example.com đã đổi nội dung. Trang không còn heading "Example Domain" và tự ghi "avoid relying on it for testing", nên case kiểm heading trượt. Checker báo đúng "heading “Example Domain” is not visible", kèm ảnh lúc cuối và chỗ trượt.
 
 Chưa kiểm ở lần này: AI với key thật, mail SMTP thật, Docker.
+
+## QĐ-19 tầng 1 — bước kiểm tra accessibility, tốc độ, bảo mật trong Auto test — 04-11-2026
+
+Thêm ba action vào bước Auto test: `check_accessibility`, `check_performance`, `check_security`. Chi tiết ở SPEC QĐ-19 và `checker/README.md`. Không có migration: `auto_run_cases.results` là jsonb, mỗi kết quả có thêm `note`.
+
+- **Checker, Chromium thật trên trang fixture** (`cd checker && node --test test/inspect.test.mjs`): 5/5 pass.
+  - **Accessibility:** trang có nhãn thì pass. Trang thiếu `alt` và nhãn thì fail, kind là `assert`, và lỗi nêu tên rule (image-alt / label).
+  - **Performance:** ngân sách `load=500` trên trang có ảnh tải 1,2 s thì fail với dòng "over budget: Page load".
+  - **Security:**
+    - trang HTTP có ô mật khẩu thì fail mức high;
+    - `Server: Apache/2.4.1`, cookie `session_id` thiếu HttpOnly và việc thiếu CSP đều nằm trong `note`;
+    - `strict` làm fail cả trang tốt, vì trang fixture chạy HTTP (mức medium);
+    - các finding chỉ có trên HTTPS (HSTS, mixed content, CORS `*` kèm credentials, cookie không Secure) được kiểm bằng unit test.
+- **Cả bộ test của checker** (`npm test`) pass, kể cả các bài cũ về step, session và URL check.
+- **Backend** (`TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5499/atp go test ./internal/autotest/ ./cmd/worker/ ./cmd/api/`) pass.
+  - **TestStepsAndAddresses** kiểm việc validate giá trị của ba bước, mô tả bằng lời, export Playwright (bước kiểm tra thành chú thích, không thành code) và log JUnit có `note`.
+  - **TestRunHealsRecordsAndFinishes** kiểm `note` đi từ checker giả, qua run, vào DB.
+- **Chưa kiểm:** chạy trên Firefox và WebKit (tầng 2); WebKit không báo LCP và CLS, và bước kiểm tra ghi rõ điều đó chứ không fail. Chưa chạy trên site HTTPS thật từ server, vì laptop không có Docker.

@@ -224,6 +224,9 @@ func writeStep(b *strings.Builder, st Step, indent string) {
 		line = fmt.Sprintf("await expect(%s).toHaveValue(%s);", target(st), val)
 	case "expect_title":
 		line = fmt.Sprintf("await expect(page).toHaveTitle(containing(%s));", val)
+	case "check_accessibility", "check_performance", "check_security":
+		// A check runs in ATP's checker (QĐ-19); here it is a marker.
+		line = fmt.Sprintf("// ATP check %s %s: runs when ATP runs this case, not in this file.", st.Do, comment(st.Value))
 	default:
 		line = "// (unknown step skipped)"
 	}

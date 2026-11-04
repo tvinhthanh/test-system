@@ -20,6 +20,20 @@ leaves it fails and the browser comes back. `{{name}}` in a step is a
 variable the worker sends per call — including `{{password}}`, which is
 used and forgotten when the session closes.
 
+Three **check steps** (QĐ-19, `src/inspect.mjs`) take no element and check
+the page as the steps before left it. A result's `note` carries the
+details, passed or failed:
+
+- `check_accessibility` runs axe-core (WCAG 2.0/2.1/2.2 A/AA). The value is
+  the lowest impact that fails, serious by default.
+- `check_performance` compares the last load's LCP/FCP/TTFB/load/CLS with
+  a budget such as `lcp=2500 cls=0.1 ttfb=800`. A metric the browser does
+  not report is noted, not failed.
+- `check_security` reads what the session saw: the main document's
+  headers, the page's cookies, and plain-HTTP requests or "Mixed Content"
+  messages from an HTTPS page. A high finding fails; with `strict`, a
+  medium one does too. It does not attack anything.
+
 ```
 POST /check {"url": "https://staging.example.com", "login"?: {url, steps, vars}}
   → {"report": {...}, "links": [...], "screenshots": {"desktop": "<base64 JPEG>", "mobile": "..."}}

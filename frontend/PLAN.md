@@ -23,6 +23,17 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Check steps in Auto test (QĐ-19, 2026-11-04) — backend only, frontend to do
+
+- The backend and the checker have three new step actions with no element: `check_accessibility`, `check_performance` and `check_security`. The value says how strict each one is (openapi `AutoStep`). AI drafts already use them for the accessibility, performance and security test types.
+- A step result can now carry `note`: the check's details, passed or failed. These are the axe problems, the timings against the budget, or the security findings by level (openapi `AutoStepResult.note`).
+- Frontend to do (not changed by Claude, per the backend-only split):
+  - add the three actions to `features/autotest/steps.ts`: they need no element and an optional value;
+  - offer them in `StepsEditor.vue`;
+  - show `note` under a step's result on the run screen.
+
+  Until then, a drafted case with a check step shows the raw action name.
+
 ### Test-only dependency advisories (2026-11-01)
 
 - `npm audit` failed on 4 moderate advisories: glob ≤ 14.0.1 and minimatch < 11.0.1. Both come only through `@vue/test-utils` → js-beautify, and even the newest js-beautify still asks for the affected ranges.

@@ -505,7 +505,7 @@ func (s *service) execute(ctx context.Context, run Run, rc RunCase) (caseOutcome
 		out.console = append(out.console, o.Console...)
 		r := o.Results[0]
 		if o.OK {
-			out.results = append(out.results, StepResult{Status: "passed", Ms: r.Ms})
+			out.results = append(out.results, StepResult{Status: "passed", Note: r.Note, Ms: r.Ms})
 			continue
 		}
 		if healable(r.Kind) && healsLeft > 0 && o.View != nil {
@@ -534,7 +534,7 @@ func (s *service) execute(ctx context.Context, run Run, rc RunCase) (caseOutcome
 				}
 			}
 		}
-		out.results = append(out.results, StepResult{Status: "failed", Kind: r.Kind, Error: r.Error, Ms: r.Ms})
+		out.results = append(out.results, StepResult{Status: "failed", Kind: r.Kind, Error: r.Error, Note: r.Note, Ms: r.Ms})
 		out.status = CaseFailed
 		if r.Kind == "input" || r.Kind == "page" {
 			out.status = CaseError

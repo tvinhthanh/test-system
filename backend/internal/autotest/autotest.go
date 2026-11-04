@@ -247,6 +247,7 @@ type StepResult struct {
 	Status string `json:"status"` // passed | failed | skipped
 	Kind   string `json:"kind,omitempty"`
 	Error  string `json:"error,omitempty"`
+	Note   string `json:"note,omitempty"` // a check step's details (QĐ-19), passed or failed
 	Ms     int    `json:"ms"`
 	Healed *Heal  `json:"healed,omitempty"`
 }
@@ -312,6 +313,7 @@ type StepOutcome struct {
 	Status string // passed | failed
 	Kind   string // input | locator | assert | navigation | page
 	Error  string
+	Note   string // a check step's details
 	Ms     int
 }
 

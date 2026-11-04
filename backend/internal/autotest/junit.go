@@ -106,6 +106,9 @@ func stepLog(c RunCase) string {
 			} else if r.Error != "" {
 				fmt.Fprintf(&b, " — %s", r.Error)
 			}
+			if r.Note != "" {
+				fmt.Fprintf(&b, "\n   %s", strings.ReplaceAll(r.Note, "\n", " "))
+			}
 		}
 		b.WriteString("\n")
 	}
