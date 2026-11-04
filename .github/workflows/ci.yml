@@ -179,7 +179,7 @@ jobs:
           cache: npm
           cache-dependency-path: checker/package-lock.json
       - run: npm ci
-      - run: npx playwright install --with-deps --only-shell chromium
+      - run: npx playwright install --with-deps --only-shell chromium && npx playwright install --with-deps firefox webkit
       - run: npm test
       - name: npm audit (§11.6 dependency review)
         run: npm audit --audit-level=low

@@ -110,7 +110,7 @@ func (r recorder) RecordCase(ctx context.Context, run autotest.Run, c autotest.R
 
 // caseNote is the execution's note: what ran, and what went wrong.
 func caseNote(run autotest.Run, c autotest.RunCase) string {
-	note := fmt.Sprintf("Ran by ATP auto test (run %s, asked by %s).", run.ID[:8], run.RequestedBy)
+	note := fmt.Sprintf("Ran by ATP auto test on %s (run %s, asked by %s).", autotest.Label(c.Variant), run.ID[:8], run.RequestedBy)
 	if c.Error != "" {
 		note += " " + c.Error
 	}

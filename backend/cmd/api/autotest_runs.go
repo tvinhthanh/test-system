@@ -96,6 +96,7 @@ func (d *dashboard) autoDraft(w http.ResponseWriter, r *http.Request) {
 
 type autoRunCaseDTO struct {
 	CaseID      string                `json:"caseId"`
+	Variant     string                `json:"variant"` // browser/device, "chromium/desktop" by default (QĐ-19)
 	Position    int                   `json:"position"`
 	Title       string                `json:"title"`
 	Target      string                `json:"target"`
@@ -121,6 +122,7 @@ type autoRunDTO struct {
 	Trigger       string           `json:"trigger"`
 	RequestedBy   string           `json:"requestedBy"`
 	Heal          bool             `json:"heal"`
+	Variants      []string         `json:"variants"`
 	Total         int              `json:"total"`
 	Passed        int              `json:"passed"`
 	Failed        int              `json:"failed"`
@@ -143,10 +145,10 @@ func timePtr(t time.Time) *time.Time {
 
 func autoRunOut(run autotest.Run) autoRunDTO {
 	out := autoRunDTO{ID: run.ID, EnvironmentID: run.EnvironmentID, PlanID: run.PlanID, Status: run.Status, Trigger: run.Trigger, RequestedBy: run.RequestedBy,
-		Heal: run.Heal, Total: run.Total, Passed: run.Passed, Failed: run.Failed, Errored: run.Errored, Healed: run.Healed, TestRunID: run.TestRunID,
+		Heal: run.Heal, Variants: labels(run.Variants), Total: run.Total, Passed: run.Passed, Failed: run.Failed, Errored: run.Errored, Healed: run.Healed, TestRunID: run.TestRunID,
 		Error: run.Error, CreatedAt: run.CreatedAt, StartedAt: timePtr(run.StartedAt), FinishedAt: timePtr(run.FinishedAt)}
 	for _, c := range run.Cases {
-		dto := autoRunCaseDTO{CaseID: c.CaseID, Position: c.Position, Title: c.Title, Target: c.Spec.Target, Account: c.Spec.Account, Inputs: c.Spec.Inputs,
+		dto := autoRunCaseDTO{CaseID: c.CaseID, Variant: autotest.Label(c.Variant), Position: c.Position, Title: c.Title, Target: c.Spec.Target, Account: c.Spec.Account, Inputs: c.Spec.Inputs,
 			Steps: c.Spec.Steps, Status: c.Status, Results: c.Results, Console: c.Console, Healed: c.Healed, DurationMs: c.DurationMs, Error: c.Error,
 			Screenshots: []string{}, ExecutionID: c.ExecutionID, FinishedAt: timePtr(c.FinishedAt)}
 		if c.HasFinalShot {
@@ -162,7 +164,7 @@ func autoRunOut(run autotest.Run) autoRunDTO {
 
 // startRun records a plan for the cases and queues the run, in one
 // transaction. caseIDs nil: every runnable case of the project.
-func (d *dashboard) startRun(ctx context.Context, scope tenancy.Scope, env environmentDTO, caseIDs []string, heal bool, trigger, actor string) (autotest.Run, error) {
+func (d *dashboard) startRun(ctx context.Context, scope tenancy.Scope, env environmentDTO, caseIDs, variants []string, heal bool, trigger, actor string) (autotest.Run, error) {
 	project := string(scope.ProjectID)
 	if caseIDs == nil {
 		specs, err := d.auto.Specs(ctx, project)
@@ -200,7 +202,7 @@ func (d *dashboard) startRun(ctx context.Context, scope tenancy.Scope, env envir
 			return err
 		}
 		run, err = d.auto.CreateRun(ctx, autotest.NewRun{ProjectID: project, OrgID: string(scope.OrgID), EnvironmentID: env.ID, PlanID: plan.ID,
-			Cases: ids, Titles: titles, Trigger: trigger, Heal: heal, Actor: actor})
+			Cases: ids, Titles: titles, Trigger: trigger, Heal: heal, Variants: variants, Actor: actor})
 		return err
 	})
 	return run, err
@@ -214,6 +216,7 @@ func (d *dashboard) createAutoRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		EnvironmentID string   `json:"environmentId"`
 		CaseIDs       []string `json:"caseIds"`
+		Variants      []string `json:"variants"` // browser/device, e.g. "firefox/phone" (QĐ-19); none = chromium/desktop
 		Heal          *bool    `json:"heal"`
 	}
 	if !decodeBounded(w, r, &req, 64<<10) {
@@ -228,7 +231,7 @@ func (d *dashboard) createAutoRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	heal := req.Heal == nil || *req.Heal
-	run, err := d.startRun(r.Context(), scope, envs[req.EnvironmentID], req.CaseIDs, heal, autotest.TriggerDashboard, d.actor(r, p))
+	run, err := d.startRun(r.Context(), scope, envs[req.EnvironmentID], req.CaseIDs, req.Variants, heal, autotest.TriggerDashboard, d.actor(r, p))
 	if err != nil {
 		d.autoErr(w, r, err, "TOO_MANY_AUTO_RUNS")
 		return
@@ -268,7 +271,12 @@ func (d *dashboard) autoRunShot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	b, err := d.auto.Shot(r.Context(), string(scope.ProjectID), r.PathValue("autoRunId"), r.PathValue("testCaseId"), r.PathValue("shot"))
+	variant, err := variantParam(r.URL.Query().Get("variant"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "screenshot not found", nil)
+		return
+	}
+	b, err := d.auto.Shot(r.Context(), string(scope.ProjectID), r.PathValue("autoRunId"), r.PathValue("testCaseId"), variant, r.PathValue("shot"))
 	if errors.Is(err, autotest.ErrNotFound) {
 		httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "screenshot not found", nil)
 		return
@@ -295,7 +303,8 @@ func (d *dashboard) applyHeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Step *int `json:"step"`
+		Step    *int   `json:"step"`
+		Variant string `json:"variant"` // the run case's browser/device; "" = chromium/desktop
 	}
 	if !decodeSmall(w, r, &req) {
 		return
@@ -304,12 +313,17 @@ func (d *dashboard) applyHeal(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "step: the index of the repaired step", map[string]any{"field": "step"})
 		return
 	}
+	variant, err := variantParam(req.Variant)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", err.Error(), map[string]any{"field": "variant"})
+		return
+	}
 	actor := d.actor(r, p)
 	project := string(scope.ProjectID)
 	var sp autotest.Spec
-	err := d.db.WithTx(r.Context(), func(ctx context.Context) error {
+	err = d.db.WithTx(r.Context(), func(ctx context.Context) error {
 		var err error
-		if sp, err = d.auto.ApplyHeal(ctx, project, r.PathValue("autoRunId"), tc.ID, *req.Step, actor); err != nil {
+		if sp, err = d.auto.ApplyHeal(ctx, project, r.PathValue("autoRunId"), tc.ID, variant, *req.Step, actor); err != nil {
 			return err
 		}
 		sp, tc, err = d.saveSpecAndCase(ctx, project, tc.ID, autotest.SpecInput{Target: sp.Target, Account: sp.Account, Inputs: sp.Inputs, Steps: sp.Steps, Source: sp.Source, Actor: actor})
@@ -368,16 +382,17 @@ type ciRunDTO struct {
 }
 
 type ciCaseDTO struct {
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Error  string `json:"error"`
+	Title   string `json:"title"`
+	Variant string `json:"variant"`
+	Status  string `json:"status"`
+	Error   string `json:"error"`
 }
 
 func (d *dashboard) ciRunOut(run autotest.Run) ciRunDTO {
 	out := ciRunDTO{ID: run.ID, Status: run.Status, Total: run.Total, Passed: run.Passed, Failed: run.Failed, Errored: run.Errored, Healed: run.Healed,
 		FinishedAt: timePtr(run.FinishedAt), URL: strings.TrimSuffix(d.publicURL, "/") + "/p/" + run.ProjectID + "/auto/runs/" + run.ID, Cases: []ciCaseDTO{}}
 	for _, c := range run.Cases {
-		out.Cases = append(out.Cases, ciCaseDTO{Title: c.Title, Status: c.Status, Error: c.Error})
+		out.Cases = append(out.Cases, ciCaseDTO{Title: c.Title, Variant: autotest.Label(c.Variant), Status: c.Status, Error: c.Error})
 	}
 	return out
 }
@@ -390,6 +405,7 @@ func (d *dashboard) ciCreateAutoRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Environment string   `json:"environment"`
 		CaseIDs     []string `json:"caseIds"`
+		Variants    []string `json:"variants"`
 		Heal        *bool    `json:"heal"`
 	}
 	if !decodeBounded(w, r, &req, 64<<10) {
@@ -411,7 +427,7 @@ func (d *dashboard) ciCreateAutoRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	heal := req.Heal == nil || *req.Heal
-	run, err := d.startRun(r.Context(), scope, env, req.CaseIDs, heal, autotest.TriggerCI, "token:"+p.TokenID)
+	run, err := d.startRun(r.Context(), scope, env, req.CaseIDs, req.Variants, heal, autotest.TriggerCI, "token:"+p.TokenID)
 	if err != nil {
 		d.autoErr(w, r, err, "TOO_MANY_AUTO_RUNS")
 		return
@@ -430,4 +446,23 @@ func (d *dashboard) ciAutoRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d.ciRunOut(run))
+}
+
+// variantParam reads a run case's variant as the api shows it
+// ("firefox/phone", "chromium/desktop" or "") into its stored form.
+func variantParam(s string) (string, error) {
+	v, err := autotest.ParseVariant(strings.ToLower(strings.TrimSpace(s)))
+	if err != nil {
+		return "", err
+	}
+	return v.String(), nil
+}
+
+// labels are a run's variants as the api shows them.
+func labels(variants []string) []string {
+	out := make([]string, 0, len(variants))
+	for _, v := range variants {
+		out = append(out, autotest.Label(v))
+	}
+	return out
 }

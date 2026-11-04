@@ -1793,6 +1793,7 @@ paths:
                 environmentId: { type: string, format: uuid }
                 caseIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
                 heal: { type: boolean, default: true }
+                variants: { type: array, maxItems: 9, items: { type: string, pattern: "^(chromium|firefox|webkit)/(desktop|phone|tablet)$" }, description: "The compatibility matrix (QĐ-19): each case runs once per browser/device. None: chromium/desktop. Cases × variants ≤ 300." }
       responses:
         "202":
           description: Queued.
@@ -1855,6 +1856,7 @@ paths:
         - { $ref: "#/components/parameters/AutoRunId" }
         - { $ref: "#/components/parameters/TestCaseId" }
         - { name: shot, in: path, required: true, schema: { type: string, enum: [final, failure] } }
+        - { name: variant, in: query, required: false, schema: { type: string }, description: "The run case's browser/device (QĐ-19); omitted: chromium/desktop." }
       responses:
         "200":
           description: The image.
@@ -1881,6 +1883,7 @@ paths:
               required: [step]
               properties:
                 step: { type: integer, minimum: 0, description: "Index of the repaired step." }
+                variant: { type: string, description: "The run case's browser/device (QĐ-19); omitted: chromium/desktop." }
       responses:
         "200":
           description: The case's spec after the repair.
@@ -4033,6 +4036,7 @@ paths:
                 environment: { type: string }
                 caseIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
                 heal: { type: boolean, default: true }
+                variants: { type: array, maxItems: 9, items: { type: string, pattern: "^(chromium|firefox|webkit)/(desktop|phone|tablet)$" }, description: "As on createAutoRun (QĐ-19)." }
       responses:
         "202":
           description: Queued.
@@ -5173,7 +5177,7 @@ components:
             reason: { type: string }
     AutoRun:
       type: object
-      required: [id, environmentId, planId, status, trigger, requestedBy, heal, total, passed, failed, errored, healed, testRunId, error, createdAt, startedAt, finishedAt]
+      required: [id, environmentId, planId, status, trigger, requestedBy, heal, variants, total, passed, failed, errored, healed, testRunId, error, createdAt, startedAt, finishedAt]
       properties:
         id: { type: string, format: uuid }
         environmentId: { type: string, format: uuid }
@@ -5182,7 +5186,8 @@ components:
         trigger: { type: string, enum: [dashboard, ci] }
         requestedBy: { type: string }
         heal: { type: boolean }
-        total: { type: integer }
+        variants: { type: array, items: { type: string }, description: "browser/device each case ran on (QĐ-19), e.g. firefox/phone; [chromium/desktop] for a run that asked for none." }
+        total: { type: integer, description: "Case runs: cases × variants." }
         passed: { type: integer }
         failed: { type: integer }
         errored: { type: integer, description: "Cases that could not run (no sign-in, the page did not open)." }
@@ -5197,9 +5202,10 @@ components:
           description: On getAutoRun only, by position.
           items:
             type: object
-            required: [caseId, position, title, target, account, inputs, steps, status, results, console, healed, durationMs, error, screenshots, executionId, finishedAt]
+            required: [caseId, variant, position, title, target, account, inputs, steps, status, results, console, healed, durationMs, error, screenshots, executionId, finishedAt]
             properties:
               caseId: { type: string, format: uuid }
+              variant: { type: string, description: "browser/device this case run used; a case appears once per variant of the run." }
               position: { type: integer }
               title: { type: string }
               target: { type: string }
@@ -5232,9 +5238,10 @@ components:
           type: array
           items:
             type: object
-            required: [title, status, error]
+            required: [title, variant, status, error]
             properties:
               title: { type: string }
+              variant: { type: string }
               status: { type: string, enum: [pending, passed, failed, error] }
               error: { type: string }
     SiteScan:

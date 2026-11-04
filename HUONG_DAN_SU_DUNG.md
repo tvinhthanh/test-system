@@ -398,6 +398,14 @@ Bước AI đã sửa có ghi chú riêng. Bấm **Keep the repair in the case**
 
 Tab **Runs** của Auto test liệt kê các lần chạy trước, kể cả lần chạy từ CI.
 
+**Chạy trên nhiều trình duyệt và thiết bị (kiểm tra tương thích).** Một run có thể yêu cầu nhiều *variant* dạng `trình duyệt/thiết bị`:
+- trình duyệt là `chromium`, `firefox` hoặc `webkit` (nhân của Safari);
+- thiết bị là `desktop`, `phone` hoặc `tablet`.
+
+Mỗi case chạy một lần cho mỗi variant, và mỗi lần chạy có kết quả, ảnh chụp và một test riêng trong Test runs, ví dụ "Gửi tin [firefox/phone]". Không chọn variant nào thì case chạy trên `chromium/desktop` như trước. Giới hạn: tối đa 9 variant mỗi run, và số case × số variant không quá 300.
+
+Hiện chỉ đặt variant được qua API hoặc CI, bằng trường `"variants": ["chromium/desktop", "firefox/phone", "webkit/tablet"]` khi tạo run. Màn hình Auto test chưa có ô chọn này. Firefox không giả lập điện thoại đầy đủ: ở `firefox/phone` chỉ có cỡ màn hình và cảm ứng.
+
 ### 6.5 Quét site
 
 Vào tab **Site scan**, điền rồi bấm **Scan site**:
@@ -541,6 +549,7 @@ Chạy từ thư mục gốc repo, trên máy làm server. Máy cần Docker; n�
 Các tùy chọn trong `backend/deploy/.env`:
 - `URLCHECK=on`: bật URL check, quét site và Auto test. Thêm một service Chromium, image khoảng 1 GB.
 - `CHECKER_SESSIONS=4`: số trình duyệt Auto test mở cùng lúc, mỗi cái khoảng 150 MB.
+- `CHECKER_BROWSERS=chromium,firefox,webkit`: các trình duyệt mà run được phép yêu cầu (ma trận tương thích, QĐ-19). Image checker cài sẵn cả ba, nên nặng hơn image chỉ có Chromium vài trăm MB.
 - `URLCHECK_ALLOW_PRIVATE=on`: cho URL check mở địa chỉ trong mạng LAN.
 - `LLM_API_KEY=…`: key của server cho phần AI, thuộc provider `LLM_PROVIDER`. Provider mặc định là `anthropic`; có thể đặt `openai`, `gemini`, `xai`, `mistral`, `deepseek`, `groq`, `openrouter`, hoặc `openai-compatible` cho endpoint riêng tại `LLM_BASE_URL` (khi đó bắt buộc có `LLM_MODEL`). Organization vẫn chọn provider, model và key riêng trong **AI settings**. `LLM_MODEL` chỉ là model key của server dùng khi organization chưa chọn gì.
 - `MAIL=smtp`, kèm `SMTP_HOST`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD` và `PUBLIC_URL`: gửi email mời, quên mật khẩu và link đăng ký. Dùng được SES, Resend, Mailgun, Postmark, Gmail (mật khẩu ứng dụng) và Microsoft 365. Với Microsoft 365, tenant phải còn cho đăng nhập SMTP bằng mật khẩu; Microsoft đang tắt dần cách này, nên về lâu dài nên dùng một dịch vụ gửi mail.

@@ -219,14 +219,17 @@ async function signIn(context, url, login) {
   }
 }
 
-let ua = "";
+// One user agent per browser (engine) this process launched.
+const uas = new WeakMap();
 export async function defaultUA(browser) {
+  let ua = uas.get(browser);
   if (!ua) {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     // Some sites turn "HeadlessChrome" away; the suffix still names the checker.
     ua = (await page.evaluate(() => navigator.userAgent)).replace("HeadlessChrome", "Chrome");
     await ctx.close();
+    uas.set(browser, ua);
   }
   return ua;
 }

@@ -12,8 +12,12 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY package.json package-lock.json ./
+# Firefox and WebKit run the compatibility matrix (QĐ-19 tier 2); a
+# smaller image: build with --build-arg ENGINES= and set CHECKER_BROWSERS=chromium.
+ARG ENGINES="firefox webkit"
 RUN npm ci --omit=dev --no-audit --no-fund \
  && npx playwright install --with-deps --only-shell chromium \
+ && if [ -n "$ENGINES" ]; then npx playwright install --with-deps $ENGINES; fi \
  && rm -rf /root/.npm /var/lib/apt/lists/*
 COPY src ./src
 USER node

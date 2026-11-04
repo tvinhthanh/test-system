@@ -106,7 +106,7 @@ func (s *service) findLogin(ctx context.Context, orgID string, env tenancy.Envir
 			return nil, tell("sign-in page: %v", err)
 		}
 	}
-	sess, _, err := s.Browser.Open(ctx, env.BaseURL, nil)
+	sess, _, err := s.Browser.Open(ctx, env.BaseURL, nil, Variant{})
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func (s *service) findLogin(ctx context.Context, orgID string, env tenancy.Envir
 	if err != nil {
 		return nil, tell("%v", err)
 	}
-	proof, lr, err := s.Browser.Open(ctx, env.BaseURL, &Login{URL: start, Steps: steps, Vars: map[string]string{VarUsername: a.Username, VarPassword: pw}})
+	proof, lr, err := s.Browser.Open(ctx, env.BaseURL, &Login{URL: start, Steps: steps, Vars: map[string]string{VarUsername: a.Username, VarPassword: pw}}, Variant{})
 	if err != nil {
 		return nil, err
 	}
@@ -205,9 +205,10 @@ func (s *service) runLogin(ctx context.Context, job queue.Job) error {
 	return s.markLogin(ctx, a.ID, LoginOK, "", steps)
 }
 
-// open starts a session on the case's start page, signed in when account
+// open starts a session on the case's start page — on the variant's browser
+// and device (QĐ-19) — signed in when account
 // is set. vars gets the account's sign-in values.
-func (s *service) open(ctx context.Context, orgID string, env tenancy.Environment, target, account string, vars map[string]string) (Session, Outcome, error) {
+func (s *service) open(ctx context.Context, orgID string, env tenancy.Environment, target, account string, vars map[string]string, on Variant) (Session, Outcome, error) {
 	start, err := Substitute(target, vars)
 	if err == nil {
 		start, err = resolveTarget(env.BaseURL, start)
@@ -238,7 +239,7 @@ func (s *service) open(ctx context.Context, orgID string, env tenancy.Environmen
 	if s.Browser == nil {
 		return nil, Outcome{}, errors.New("autotest: no checker configured in this process")
 	}
-	sess, lr, err := s.Browser.Open(ctx, env.BaseURL, login)
+	sess, lr, err := s.Browser.Open(ctx, env.BaseURL, login, on)
 	if err != nil {
 		return nil, Outcome{}, err
 	}
@@ -310,7 +311,7 @@ func (s *service) runDraft(ctx context.Context, job queue.Job) error {
 	var view *View
 	if s.Browser != nil {
 		vars := withBuiltins(d.Inputs, nil)
-		sess, o, err := s.open(ctx, p.OrgID, env, d.Target, d.Account, vars)
+		sess, o, err := s.open(ctx, p.OrgID, env, d.Target, d.Account, vars, Variant{})
 		if err == nil {
 			if o.OK {
 				v, lerr := sess.Look(ctx, false)
@@ -381,6 +382,7 @@ func (s *service) runCaseJob(ctx context.Context, job queue.Job) error {
 	var p struct {
 		RunID     string `json:"runId"`
 		CaseID    string `json:"caseId"`
+		Variant   string `json:"variant"` // "" in every job queued before QĐ-19
 		ProjectID string `json:"projectId"`
 	}
 	if err := json.Unmarshal(job.Payload, &p); err != nil || !uuidRe.MatchString(p.RunID) || !uuidRe.MatchString(p.CaseID) || !uuidRe.MatchString(p.ProjectID) {
@@ -389,7 +391,7 @@ func (s *service) runCaseJob(ctx context.Context, job queue.Job) error {
 	q := s.DB.Q(ctx)
 	rc, err := scanRunCase(q.QueryRow(ctx, `SELECT `+runCaseColumns+` FROM auto_run_cases c
 		WHERE c.run_id = $1 AND c.case_id = $2 AND EXISTS (SELECT 1 FROM auto_runs r WHERE r.id = c.run_id AND r.project_id = $3)
-		FOR UPDATE`, p.RunID, p.CaseID, p.ProjectID), p.ProjectID)
+		  AND c.variant = $4 FOR UPDATE`, p.RunID, p.CaseID, p.ProjectID, p.Variant), p.ProjectID)
 	if errors.Is(err, ErrNotFound) {
 		return nil // pruned or purged
 	}
@@ -427,9 +429,9 @@ func (s *service) runCaseJob(ctx context.Context, job queue.Job) error {
 	results, _ := json.Marshal(out.results)
 	console, _ := json.Marshal(out.console)
 	if _, err := q.Exec(ctx, `UPDATE auto_run_cases SET status = $3, results = $4, console = $5, healed = $6, duration_ms = $7,
-		error = $8, final_shot = $9, failure_shot = $10, finished_at = clock_timestamp() WHERE run_id = $1 AND case_id = $2`,
+		error = $8, final_shot = $9, failure_shot = $10, finished_at = clock_timestamp() WHERE run_id = $1 AND case_id = $2 AND variant = $11`,
 		run.ID, rc.CaseID, out.status, results, console, out.healed, int(time.Since(started).Milliseconds()),
-		nullable(cut(out.err, 1000)), jpegOrNil(out.finalShot), jpegOrNil(out.failureShot)); err != nil {
+		nullable(cut(out.err, 1000)), jpegOrNil(out.finalShot), jpegOrNil(out.failureShot), rc.Variant); err != nil {
 		return err
 	}
 	if out.tokensIn > 0 || out.tokensOut > 0 {
@@ -439,7 +441,7 @@ func (s *service) runCaseJob(ctx context.Context, job queue.Job) error {
 		}
 	}
 	if s.Recorder != nil {
-		done, err := scanRunCase(q.QueryRow(ctx, `SELECT `+runCaseColumns+` FROM auto_run_cases WHERE run_id = $1 AND case_id = $2`, run.ID, rc.CaseID), p.ProjectID)
+		done, err := scanRunCase(q.QueryRow(ctx, `SELECT `+runCaseColumns+` FROM auto_run_cases WHERE run_id = $1 AND case_id = $2 AND variant = $3`, run.ID, rc.CaseID, rc.Variant), p.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -448,7 +450,7 @@ func (s *service) runCaseJob(ctx context.Context, job queue.Job) error {
 			return err
 		}
 		if execID != "" {
-			if _, err := q.Exec(ctx, `UPDATE auto_run_cases SET execution_id = $3 WHERE run_id = $1 AND case_id = $2`, run.ID, rc.CaseID, execID); err != nil {
+			if _, err := q.Exec(ctx, `UPDATE auto_run_cases SET execution_id = $3 WHERE run_id = $1 AND case_id = $2 AND variant = $4`, run.ID, rc.CaseID, execID, rc.Variant); err != nil {
 				return err
 			}
 		}
@@ -473,7 +475,11 @@ func (s *service) execute(ctx context.Context, run Run, rc RunCase) (caseOutcome
 	}
 	spec := rc.Spec
 	vars := withBuiltins(spec.Inputs, nil)
-	sess, opened, err := s.open(ctx, run.OrgID, env, spec.Target, spec.Account, vars)
+	on, err := ParseVariant(rc.Variant)
+	if err != nil {
+		return caseOutcome{status: CaseError, err: err.Error()}, nil
+	}
+	sess, opened, err := s.open(ctx, run.OrgID, env, spec.Target, spec.Account, vars, on)
 	if err != nil {
 		if msg, ok := told(err); ok {
 			return caseOutcome{status: CaseError, err: msg}, nil

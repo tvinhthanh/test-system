@@ -3,6 +3,7 @@ package autotest
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -42,10 +43,13 @@ func (v wireView) view() View {
 	return View{URL: v.URL, Title: v.Title, Tree: v.Tree, Screenshot: jpegOrNil(shot)}
 }
 
-func (h *httpBrowser) Open(ctx context.Context, base string, login *Login) (Session, LoginResult, error) {
+func (h *httpBrowser) Open(ctx context.Context, base string, login *Login, on Variant) (Session, LoginResult, error) {
 	body := map[string]any{"base": base}
 	if login != nil {
 		body["login"] = login
+	}
+	if on.Browser != "" {
+		body["browser"], body["device"] = on.Browser, on.Device
 	}
 	var out struct {
 		ID       string `json:"id"`
@@ -53,6 +57,11 @@ func (h *httpBrowser) Open(ctx context.Context, base string, login *Login) (Sess
 		Error    string `json:"error"`
 	}
 	if err := h.client.PostJSON(ctx, h.base+"/sessions", body, &out); err != nil {
+		// 422: the checker does not run that browser (CHECKER_BROWSERS) —
+		// retrying cannot help, the tester is told.
+		if errors.Is(err, outbound.ErrAnswer) && strings.Contains(err.Error(), "answered 422") {
+			return nil, LoginResult{}, tell("this server's checker does not run %s (the operator sets CHECKER_BROWSERS)", on.Browser)
+		}
 		return nil, LoginResult{}, err
 	}
 	if out.ID == "" {

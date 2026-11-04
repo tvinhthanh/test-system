@@ -7,27 +7,34 @@
 // a page that talks a model into "go to …" from going anywhere.
 import { randomUUID } from "node:crypto";
 import { defaultUA } from "./check.mjs";
+import { contextProxy, deviceOptions } from "./engines.mjs";
 import { startProxy } from "./proxy.mjs";
 import { lookAt, runStep, siteOf, StepError } from "./steps.mjs";
 
-const DESKTOP = { width: 1366, height: 768 };
 const USER_AGENT_SUFFIX = " ATP-Auto-Test/1";
 
 export class Session {
-  /** @param {import("playwright").Browser} browser */
-  static async open(browser, { base, policy }) {
+  /**
+   * @param {import("playwright").Browser} browser
+   * @param {{base: string, policy: object, engine?: string, device?: string}} opts
+   *   engine: the browser's engine name (chromium | firefox | webkit); device: desktop | phone | tablet
+   */
+  static async open(browser, { base, policy, engine = "chromium", device = "desktop" }) {
     const s = new Session();
     s.id = randomUUID();
     s.base = new URL(base);
     s.site = siteOf(s.base.hostname);
+    s.engine = engine;
+    s.device = device;
     s.proxy = await startProxy(policy);
+    const dev = deviceOptions(engine, device);
     s.ctx = await browser.newContext({
-      viewport: DESKTOP,
-      proxy: { server: s.proxy.url, bypass: "<-loopback>" },
+      ...dev,
+      proxy: contextProxy(engine, s.proxy.url),
       ignoreHTTPSErrors: true,
       serviceWorkers: "block",
       acceptDownloads: false,
-      userAgent: (await defaultUA(browser)) + USER_AGENT_SUFFIX,
+      userAgent: (dev.userAgent ?? (await defaultUA(browser))) + USER_AGENT_SUFFIX,
     });
     s.console = [];
     s.left = [];

@@ -4,7 +4,9 @@
 //   POST /check {url, login?}       the URL check report, two JPEG screenshots
 //                                   (base64) and the page's same-site links
 //   POST /outline {url}             the page's structure, for drafting cases
-//   POST /sessions {base, login?}   opens a browser session for test steps
+//   POST /sessions {base, login?, browser?, device?}  opens a browser session
+//                                   for test steps (browser: chromium | firefox |
+//                                   webkit; device: desktop | phone | tablet)
 //   POST /sessions/:id/steps        {steps, vars, look?, shot?} runs them
 //   POST /sessions/:id/look         {shot?} the page as a model reads it
 //   DELETE /sessions/:id
@@ -18,9 +20,10 @@
 // two minutes, or open for fifteen, is closed.
 //
 //   PORT=8090  URLCHECK_ALLOW_PRIVATE=off|on  CHECKER_CONCURRENCY=2  CHECKER_SESSIONS=4
+//   CHECKER_BROWSERS=chromium,firefox,webkit  (engines sessions may ask for; QĐ-19)
 import http from "node:http";
-import { chromium } from "playwright";
 import { readOutline, runCheck } from "./check.mjs";
+import { DEVICES, enabledEngines, ENGINES, launchOptions } from "./engines.mjs";
 import { startProxy } from "./proxy.mjs";
 import { Session } from "./session.mjs";
 import { invalidStep, MAX_STEPS } from "./steps.mjs";
@@ -40,16 +43,25 @@ const log = (msg, fields = {}) =>
 // The launch-level proxy refuses everything: a check's context brings its
 // own guarded proxy, and anything without one reaches nothing.
 const sink = await startProxy({ denyAll: true });
-let browser = null;
-async function getBrowser() {
-  if (browser?.isConnected()) return browser;
-  browser = await chromium.launch({
-    proxy: { server: sink.url, bypass: "<-loopback>" },
-    // WebRTC would open UDP around the proxy.
-    args: ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--disable-quic"],
+const engines = enabledEngines();
+/** @type {Map<string, Promise<import("playwright").Browser>>} */
+const browsers = new Map();
+// One browser per engine, launched on first use. URL checks and outlines
+// use Chromium; sessions the engine the run asks for (QĐ-19 tier 2).
+async function getBrowser(name = "chromium") {
+  const current = browsers.get(name);
+  if (current) {
+    const b = await current.catch(() => null);
+    if (b?.isConnected()) return b;
+  }
+  const launching = ENGINES[name].launch(launchOptions(name, sink.url));
+  browsers.set(name, launching);
+  const b = await launching.catch((err) => {
+    browsers.delete(name);
+    throw err;
   });
-  browser.on("disconnected", () => log("browser disconnected"));
-  return browser;
+  b.on("disconnected", () => log("browser disconnected", { engine: name }));
+  return b;
 }
 
 let running = 0;
@@ -153,10 +165,16 @@ async function handleSessions(req, res, parts) {
     }
     const badLogin = invalidLogin(body.login);
     if (badLogin) return send(res, 400, { error: badLogin });
+    const engine = body.browser || "chromium";
+    const device = body.device || "desktop";
+    if (!Object.hasOwn(ENGINES, engine) || !DEVICES.includes(device))
+      return send(res, 400, { error: `browser is chromium, firefox or webkit; device is ${DEVICES.join(", ")}` });
+    // 422: a well-formed ask this checker cannot serve — the worker tells the tester.
+    if (!engines.includes(engine)) return send(res, 422, { error: `this server does not run ${engine} (CHECKER_BROWSERS=${engines.join(",")})` });
     if (sessions.size >= maxSessions) return send(res, 503, { error: "busy" });
-    const s = await Session.open(await getBrowser(), { base: base.href, policy });
+    const s = await Session.open(await getBrowser(engine), { base: base.href, policy, engine, device });
     sessions.set(s.id, s);
-    log("session opened", { id: s.id, host: base.host, open: sessions.size });
+    log("session opened", { id: s.id, host: base.host, engine, device, open: sessions.size });
     if (body.login) {
       try {
         const r = await s.login({ url: body.login.url, steps: body.login.steps, vars: body.login.vars ?? {} });
@@ -211,7 +229,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.requestTimeout = 180_000;
-server.listen(port, "0.0.0.0", () => log("checker listening", { port, concurrency, maxSessions, allowPrivate }));
+server.listen(port, "0.0.0.0", () => log("checker listening", { port, concurrency, maxSessions, allowPrivate, engines }));
 
 const reaper = setInterval(async () => {
   const now = Date.now();
@@ -228,7 +246,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, async () => {
     server.close();
     for (const s of sessions.values()) await s.close();
-    await browser?.close().catch(() => {});
+    for (const b of browsers.values()) await (await b.catch(() => null))?.close().catch(() => {});
     await sink.close();
     process.exit(0);
   });

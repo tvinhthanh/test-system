@@ -33,6 +33,14 @@ draft was removed on 2026-09-18.
   - show `note` under a step's result on the run screen.
 
   Until then, a drafted case with a check step shows the raw action name.
+- Tier 2, the browser × device matrix, is also backend only so far.
+  - `POST …/auto-runs` (and the CI route) takes `variants: ["firefox/phone", …]`.
+  - `AutoRun` has `variants`. Each run case has a `variant` and appears once per variant.
+  - The screenshot URL takes `?variant=`; apply-heal takes `variant` in the body.
+- Frontend to do:
+  - a variant picker beside "Run selected";
+  - group or label the run screen's cases by variant;
+  - pass `variant` on screenshots and apply-heal. Without it, the default variant's screenshot is shown.
 
 ### Test-only dependency advisories (2026-11-01)
 

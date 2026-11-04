@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,9 +27,10 @@ const (
 // "s3cret"; the send button is "Gửi" (a case that still says "Send" finds
 // nothing); a message sent shows up on the page.
 type fakeBrowser struct {
-	mu     sync.Mutex
-	opened []string // base, and the login URL when signing in
-	vars   []map[string]string
+	mu       sync.Mutex
+	opened   []string // base, and the login URL when signing in
+	variants []string // browser/device of each session that asked for one
+	vars     []map[string]string
 }
 
 type fakeSession struct {
@@ -47,10 +49,13 @@ const chatTree = `- heading "Chat" [level=1]
 - textbox "Tin nhắn"
 - button "Gửi"`
 
-func (b *fakeBrowser) Open(_ context.Context, base string, login *Login) (Session, LoginResult, error) {
+func (b *fakeBrowser) Open(_ context.Context, base string, login *Login, on Variant) (Session, LoginResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.opened = append(b.opened, base)
+	if on.Browser != "" {
+		b.variants = append(b.variants, on.Browser+"/"+on.Device)
+	}
 	s := &fakeSession{b: b, url: base}
 	if login == nil {
 		return s, LoginResult{LoggedIn: true}, nil
@@ -409,24 +414,24 @@ func TestRunHealsRecordsAndFinishes(t *testing.T) {
 		}
 	}
 	// The repair goes into the case when asked, and only once.
-	sp, err := f.svc.ApplyHeal(ctx, f.project, run.ID, caseHeal, 1, "tia")
+	sp, err := f.svc.ApplyHeal(ctx, f.project, run.ID, caseHeal, "", 1, "tia")
 	if err != nil || sp.Steps[1].Name != "Gửi" || len(sp.Steps) != 3 {
 		t.Fatalf("apply heal: %+v %v", sp, err)
 	}
-	if _, err := f.svc.ApplyHeal(ctx, f.project, run.ID, caseHeal, 1, "tia"); !errors.Is(err, ErrInvalid) {
+	if _, err := f.svc.ApplyHeal(ctx, f.project, run.ID, caseHeal, "", 1, "tia"); !errors.Is(err, ErrInvalid) {
 		t.Errorf("applying twice: %v", err)
 	}
-	if _, err := f.svc.ApplyHeal(ctx, f.project, run.ID, caseSend, 0, "tia"); !errors.Is(err, ErrInvalid) {
+	if _, err := f.svc.ApplyHeal(ctx, f.project, run.ID, caseSend, "", 0, "tia"); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a step that was not repaired: %v", err)
 	}
 	last, err := f.svc.LastResults(ctx, f.project)
 	if err != nil || last[caseAssert].Status != CaseFailed || last[caseSend].RunID != run.ID {
 		t.Fatalf("last results: %+v %v", last, err)
 	}
-	if shot, err := f.svc.Shot(ctx, f.project, run.ID, caseAssert, "failure"); err != nil || len(shot) < 3 {
+	if shot, err := f.svc.Shot(ctx, f.project, run.ID, caseAssert, "", "failure"); err != nil || len(shot) < 3 {
 		t.Errorf("failure shot: %v", err)
 	}
-	if _, err := f.svc.Shot(ctx, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", run.ID, caseAssert, "failure"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.Shot(ctx, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", run.ID, caseAssert, "", "failure"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another project's shot: %v", err)
 	}
 	// Two runs at once at most.
@@ -578,5 +583,67 @@ func TestStepsAndAddresses(t *testing.T) {
 	log := stepLog(RunCase{Spec: Spec{Steps: []Step{st("check_security", "", "", "", "")}}, Results: []StepResult{{Status: "passed", Note: "medium: no Content-Security-Policy header"}}})
 	if !strings.Contains(log, "no Content-Security-Policy") {
 		t.Errorf("step log: %s", log)
+	}
+}
+
+// The compatibility matrix (QĐ-19 tier 2): each case runs once per variant,
+// on that browser and device; the default variant keeps the old identity.
+func TestRunMatrix(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := f.svc.SaveSpec(ctx, f.project, caseSend, SpecInput{Target: "/message?to=bob",
+		Steps: []Step{st("fill", "role", "textbox", "Tin nhắn", "hi"), st("click", "role", "button", "Gửi", ""), st("expect_text", "", "", "", "hi")}, Actor: "tia"}); err != nil {
+		t.Fatal(err)
+	}
+	newRun := func(variants ...string) (Run, error) {
+		return f.svc.CreateRun(ctx, NewRun{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, Cases: []string{caseSend},
+			Titles: map[string]string{caseSend: "Send"}, Trigger: TriggerDashboard, Variants: variants, Actor: "tia"})
+	}
+	for _, bad := range [][]string{{"edge/desktop"}, {"firefox/watch"}, {"firefox"}, slices.Repeat([]string{"webkit/phone"}, MaxVariants+1)} {
+		if _, err := newRun(bad...); !errors.Is(err, ErrInvalid) {
+			t.Errorf("variants %v: %v", bad, err)
+		}
+	}
+	// Repeats and the default spelled out collapse.
+	run, err := newRun("firefox/phone", "chromium/desktop", " FIREFOX/phone ", "webkit/tablet")
+	if err != nil || run.Total != 3 || !slices.Equal(run.Variants, []string{"firefox/phone", "", "webkit/tablet"}) {
+		t.Fatalf("create: %+v %v", run, err)
+	}
+	if n, err := f.svc.CaseWorker(1).Drain(ctx); err != nil || n != 3 {
+		t.Fatalf("drain: %d %v", n, err)
+	}
+	run, err = f.svc.GetRun(ctx, f.project, run.ID)
+	if err != nil || run.Status != RunDone || run.Passed != 3 || len(run.Cases) != 3 {
+		t.Fatalf("run: %+v %v", run, err)
+	}
+	got := []string{}
+	for _, c := range run.Cases {
+		got = append(got, c.Variant)
+	}
+	if !slices.Equal(got, []string{"", "firefox/phone", "webkit/tablet"}) {
+		t.Errorf("cases by variant: %v", got)
+	}
+	slices.Sort(f.browser.variants)
+	if !slices.Equal(f.browser.variants, []string{"chromium/desktop", "firefox/phone", "webkit/tablet"}) {
+		t.Errorf("sessions opened on %v", f.browser.variants)
+	}
+	junit := string(JUnit(run, "staging"))
+	if !strings.Contains(junit, `name="Send"`) || !strings.Contains(junit, `name="Send [firefox/phone]"`) || !strings.Contains(junit, `name="Send [webkit/tablet]"`) {
+		t.Errorf("junit names: %s", junit)
+	}
+	if b, err := f.svc.Shot(ctx, f.project, run.ID, caseSend, "webkit/tablet", "final"); err != nil || len(b) < 3 {
+		t.Errorf("a variant's shot: %v", err)
+	}
+	if _, err := f.svc.Shot(ctx, f.project, run.ID, caseSend, "firefox/desktop", "final"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a variant the run did not have: %v", err)
+	}
+	// cases × variants is capped.
+	many := []string{}
+	for i := 0; i < MaxRunRows/9+1; i++ {
+		many = append(many, caseSend)
+	}
+	if _, err := f.svc.CreateRun(ctx, NewRun{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, Cases: many, Trigger: TriggerDashboard,
+		Variants: []string{"chromium/desktop", "chromium/phone", "chromium/tablet", "firefox/desktop", "firefox/phone", "firefox/tablet", "webkit/desktop", "webkit/phone", "webkit/tablet"}, Actor: "tia"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("over the row cap: %v", err)
 	}
 }

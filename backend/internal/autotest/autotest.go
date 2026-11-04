@@ -209,6 +209,7 @@ type Run struct {
 	Trigger       string
 	RequestedBy   string
 	Heal          bool
+	Variants      []string // browser/device each case runs on; [""] = the default alone (QĐ-19)
 	Total         int
 	Passed        int
 	Failed        int
@@ -227,6 +228,7 @@ type Run struct {
 // RunCase is one case of a run.
 type RunCase struct {
 	CaseID         string
+	Variant        string // "" = chromium/desktop; else browser/device (QĐ-19)
 	Position       int
 	Title          string
 	Spec           Spec // as it was when the run started
@@ -268,6 +270,7 @@ type NewRun struct {
 	Titles        map[string]string // case id → title
 	Trigger       string
 	Heal          bool
+	Variants      []string // browser/device ("firefox/phone"); empty = the default alone (QĐ-19)
 	Actor         string
 }
 
@@ -275,7 +278,9 @@ type NewRun struct {
 
 // Browser opens sessions in the checker service (NewHTTPBrowser).
 type Browser interface {
-	Open(ctx context.Context, base string, login *Login) (Session, LoginResult, error)
+	// Open starts a session on the variant's browser and device (QĐ-19);
+	// the zero Variant is Chromium on a desktop.
+	Open(ctx context.Context, base string, login *Login, on Variant) (Session, LoginResult, error)
 }
 
 // Login is how a session signs in: the sign-in page, the steps, and the
@@ -384,7 +389,7 @@ type Service interface {
 	SaveSpec(ctx context.Context, projectID, caseID string, in SpecInput) (Spec, error)
 	DeleteSpec(ctx context.Context, projectID, caseID string) (bool, error)
 	// ApplyHeal puts a run's repair of step `index` into the case's spec.
-	ApplyHeal(ctx context.Context, projectID, runID, caseID string, index int, actor string) (Spec, error)
+	ApplyHeal(ctx context.Context, projectID, runID, caseID, variant string, index int, actor string) (Spec, error)
 
 	// Drafts.
 	RequestDraft(ctx context.Context, in NewDraft) (DraftRequest, error)
@@ -395,7 +400,7 @@ type Service interface {
 	Runs(ctx context.Context, projectID string, limit int) ([]Run, error)
 	GetRun(ctx context.Context, projectID, id string) (Run, error)
 	// Shot returns a case's screenshot (JPEG): which is "final" or "failure".
-	Shot(ctx context.Context, projectID, runID, caseID, which string) ([]byte, error)
+	Shot(ctx context.Context, projectID, runID, caseID, variant, which string) ([]byte, error)
 	// LastResults returns the newest finished status of each case with a
 	// spec, keyed by case id.
 	LastResults(ctx context.Context, projectID string) (map[string]LastResult, error)

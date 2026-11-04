@@ -886,3 +886,25 @@ Thêm ba action vào bước Auto test: `check_accessibility`, `check_performanc
   - **TestStepsAndAddresses** kiểm việc validate giá trị của ba bước, mô tả bằng lời, export Playwright (bước kiểm tra thành chú thích, không thành code) và log JUnit có `note`.
   - **TestRunHealsRecordsAndFinishes** kiểm `note` đi từ checker giả, qua run, vào DB.
 - **Chưa kiểm:** chạy trên Firefox và WebKit (tầng 2); WebKit không báo LCP và CLS, và bước kiểm tra ghi rõ điều đó chứ không fail. Chưa chạy trên site HTTPS thật từ server, vì laptop không có Docker.
+
+## QĐ-19 tầng 2 — ma trận trình duyệt và thiết bị — 04-11-2026
+
+Run có thêm `variants` dạng `trình duyệt/thiết bị` (Chromium, Firefox, WebKit × desktop, phone, tablet); mỗi case chạy một lần cho mỗi variant. Migration 0047 thêm `auto_runs.variants` và `auto_run_cases.variant`, và đưa `variant` vào khóa chính.
+
+- **Guard SSRF trên ba engine** (`checker/test/engines.test.mjs`):
+  - Policy không cho phép loopback, mở `127.0.0.1`, `localhost` và `[::1]` trên Chromium, Firefox và WebKit. Cả chín lần đều không tới được site, vì trang lỗi của trình duyệt thay cho nội dung.
+  - Đã thử Firefox của Playwright 1.63 khi không có hai pref `allow_hijacking_localhost` / `no_proxies_on`: vẫn bị chặn, vì bản build đã đặt sẵn. Code vẫn đặt hai pref đó, phòng khi Playwright đổi mặc định.
+- **Case chạy được trên mọi tổ hợp đã thử:** điền form, bấm, `expect_text` và `check_accessibility` đều pass trên desktop và phone của cả ba engine.
+  - Desktop có `innerWidth` 1366.
+  - Phone có bề rộng 3xx–4xx và `pointer: coarse`, kể cả trên Firefox, nơi phone chỉ có cỡ màn hình và cảm ứng.
+- **Kết quả kiểm thử:**
+  - `npm test` của checker: 27/27 pass.
+  - Backend: `go test -p 1 ./internal/autotest/ ./cmd/worker/ ./cmd/api/ ./test/arch/` pass.
+  - **TestRunMatrix** kiểm:
+    - variant lặp và `chromium/desktop` gộp lại;
+    - variant sai bị từ chối;
+    - 1 case × 3 variant thành 3 lần chạy, mở trên đúng trình duyệt và thiết bị;
+    - JUnit đặt tên `Send`, `Send [firefox/phone]`, `Send [webkit/tablet]`;
+    - ảnh chụp lấy theo variant;
+    - trần 300 dòng case × variant.
+- **Chưa kiểm:** image Docker có Firefox và WebKit (laptop không có Docker; CI job `checker` build image); WebRTC của WebKit (không có cờ tắt). Proxy chặn mọi TCP; UDP của WebRTC trên WebKit là rủi ro còn lại, nằm trong container `cap_drop: ALL` trên `checknet`. Giao diện chưa có ô chọn variant.
