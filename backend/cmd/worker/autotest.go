@@ -207,3 +207,33 @@ func (s scanLogins) Login(ctx context.Context, projectID, environmentID, account
 	}
 	return &urlcheck.Login{URL: l.URL, Steps: steps, Vars: l.Vars}, nil
 }
+
+// RecordReport imports a script run's JUnit report as a test run (QĐ-19
+// tier 4), under the script's own framework (playwright, k6), so its tests
+// keep their identity like any CI run's.
+func (r recorder) RecordReport(ctx context.Context, rep autotest.Report) (string, error) {
+	envs, err := r.tenancy.ListEnvironments(ctx, tenancy.ProjectID(rep.ProjectID))
+	if err != nil {
+		return "", err
+	}
+	key := ""
+	for _, e := range envs {
+		if string(e.ID) == rep.EnvironmentID {
+			key = e.Key
+		}
+	}
+	if key == "" {
+		return "", nil // the environment went
+	}
+	res, err := r.ingest.ImportJUnit(ctx, tenancy.ProjectID(rep.ProjectID), ingest.JUnitImport{
+		EnvironmentKey: key, Framework: rep.Framework, LocalRunID: rep.LocalRunID, StartedAt: rep.StartedAt, Source: rep.Source,
+	}, rep.JUnit)
+	if errors.Is(err, ingest.ErrJUnit) || errors.Is(err, ingest.ErrImportInvalid) || errors.Is(err, ingest.ErrImportConflict) {
+		r.logger.Error("script run not recorded as a test run", "run", rep.LocalRunID, "err", err)
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return res.RunID, nil
+}

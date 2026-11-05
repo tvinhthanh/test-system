@@ -91,6 +91,15 @@ type Config struct {
 	// (URLCHECK=on), only against a host its organization proved it owns.
 	LoadMaxVUs     int
 	LoadMaxSeconds int
+	// Script runs (QĐ-19 tier 4): SANDBOX=on|off (default off) lets testers run
+	// their own Playwright project or k6 script in sandboxd at SANDBOX_URL
+	// (default http://sandboxd:8091), authenticated by SANDBOX_TOKEN (at
+	// least 32 characters, the same in sandboxd); SCRIPT_MAX_SECONDS (default
+	// 900, 60 to 3600) is the longest one run may take.
+	Sandbox          bool
+	SandboxURL       string
+	SandboxToken     string
+	ScriptMaxSeconds int
 	// AI-drafted test cases (QĐ-15, QĐ-18): the server's own API key
 	// (LLM_API_KEY, "" = none — organizations may still bring theirs) for
 	// LLM_PROVIDER (default anthropic; any provider platform/llm lists, or
@@ -203,6 +212,26 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("LOAD_MAX_SECONDS: want 5 to 600")
 	} else {
 		c.LoadMaxSeconds = v
+	}
+	switch v := strings.ToLower(getenv("SANDBOX", "off")); v {
+	case "on", "true", "1":
+		c.Sandbox = true
+	case "off", "false", "0":
+	default:
+		return c, fmt.Errorf("SANDBOX=%q: want on|off", v)
+	}
+	c.SandboxURL = strings.TrimSuffix(getenv("SANDBOX_URL", "http://sandboxd:8091"), "/")
+	if u, err := url.Parse(c.SandboxURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return c, fmt.Errorf("SANDBOX_URL=%q: want http(s)://host[:port]", c.SandboxURL)
+	}
+	c.SandboxToken = os.Getenv("SANDBOX_TOKEN")
+	if c.Sandbox && len(c.SandboxToken) < 32 {
+		return c, fmt.Errorf("SANDBOX=on needs SANDBOX_TOKEN: at least 32 characters, the same in sandboxd")
+	}
+	if v, err := strconv.Atoi(getenv("SCRIPT_MAX_SECONDS", "900")); err != nil || v < 60 || v > 3600 {
+		return c, fmt.Errorf("SCRIPT_MAX_SECONDS: want 60 to 3600")
+	} else {
+		c.ScriptMaxSeconds = v
 	}
 	switch v := strings.ToLower(getenv("MAIL", "off")); v {
 	case "smtp":

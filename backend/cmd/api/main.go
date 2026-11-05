@@ -188,11 +188,11 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	}
 	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model,
 		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
-	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck,
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck, sandboxOn: cfg.Sandbox,
 		ai:           ai,
 		llmServerKey: cfg.LLMAPIKey != "",
 		auto: autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Keys: ai,
-			LoadCaps: autotest.LoadCaps{MaxVUs: cfg.LoadMaxVUs, MaxSeconds: cfg.LoadMaxSeconds}}),
+			LoadCaps: autotest.LoadCaps{MaxVUs: cfg.LoadMaxVUs, MaxSeconds: cfg.LoadMaxSeconds}, ScriptCaps: autotest.ScriptCaps{MaxSeconds: cfg.ScriptMaxSeconds}}),
 		db: db}).routes(mux)
 
 	// Order, outside in: request id → access log → browser policy (headers,

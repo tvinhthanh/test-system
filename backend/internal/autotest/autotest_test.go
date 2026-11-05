@@ -169,8 +169,14 @@ func (k fakeKeys) Credentials(context.Context, string) (llm.Account, string, boo
 }
 
 type fakeRecorder struct {
-	cases []RunCase
-	runs  []Run
+	cases   []RunCase
+	runs    []Run
+	reports []Report
+}
+
+func (r *fakeRecorder) RecordReport(_ context.Context, rep Report) (string, error) {
+	r.reports = append(r.reports, rep)
+	return "f0000000-0000-4000-8000-000000000002", nil
 }
 
 func (r *fakeRecorder) RecordCase(_ context.Context, _ Run, c RunCase, final, failure []byte) (string, error) {

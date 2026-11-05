@@ -4,10 +4,11 @@
 #   backend   gofmt · go vet · go test ./... on real Postgres 17 — unit,
 #             cmd/api contract + tenant walk (T4), test/failure (T1),
 #             test/observe (T3), test/restore (§11.5 drill, needs pg_dump 17)
-#             · go test -race on identity/queue/metric (N46)
+#             · go test -race on identity/queue/metric/sandbox (N46)
 #             · govulncheck · the image builds
 #   reporter  npm ci · test · npm audit
 #   frontend  npm ci · typecheck · unit · build (bundle gate) · npm audit
+#   sandbox   sandboxd on real Docker: Playwright + k6 scripts, the refusals (QĐ-19)
 #
 # test/load and test/soak are manual (LOAD_TEST=1 / SOAK_TEST=1): their
 # numbers only mean something on a quiet, known machine.
@@ -111,10 +112,10 @@ jobs:
       # fingerprint under 16 workers); -race proves the memory side, and only
       # runs where cgo has a C compiler. Limited to the packages that share
       # state across goroutines, so the detector's slowdown stays in minutes.
-      - name: go test -race (identity, queue, metric)
+      - name: go test -race (identity, queue, metric, sandbox)
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 -timeout 10m ./internal/identity/... ./internal/platform/queue/... ./internal/platform/metric/...
+        run: go test -race -count=1 -timeout 10m ./internal/identity/... ./internal/platform/queue/... ./internal/platform/metric/... ./internal/platform/sandbox/... ./cmd/sandboxd/...
 
       # Pinned and built with the toolchain go.mod names (GOTOOLCHAIN=local);
       # v1.8+ needs Go 1.26, so it moved off v1.1.4 with go1.26.9. Bump with
@@ -185,6 +186,24 @@ jobs:
         run: npm audit --audit-level=low
       - name: docker build
         run: docker build -t atp/checker:ci .
+
+  # Script runs (QĐ-19 tier 4): sandboxd on the runner's real Docker — a
+  # Playwright project (Chromium + Firefox) and a k6 script run against a
+  # fixture site, with the refusals a script meets inside (no DNS, no route
+  # out, unprivileged, read-only, the api closed to jobs), a run stopped at
+  # its limit, and nothing left behind.
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: sandboxd end to end
+        env:
+          E2E_LOGS: ${{ runner.temp }}
+        run: bash sandbox/test/e2e.sh
+      - name: sandboxd log on failure
+        if: failure()
+        run: cat "${{ runner.temp }}/sandboxd-e2e.log" || true
 
   frontend:
     runs-on: ubuntu-24.04

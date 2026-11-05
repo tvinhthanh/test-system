@@ -34,11 +34,15 @@ export MSYS_NO_PATHCONV=1
 # Paths handed to docker are native ones (C:/… on Windows): with path
 # conversion off, docker would read a Git Bash /c/… or /tmp/… literally.
 host_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi; }
-# URLCHECK=on in the config also runs the URL checker (compose profile).
+# URLCHECK=on in the config also runs the URL checker, SANDBOX=on sandboxd
+# and its two images (compose profiles).
 dc() {
 	local profile=()
 	if [ -f "$ENV_FILE" ] && [ "$(grep -E '^URLCHECK=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '\r')" = on ]; then
 		profile=(--profile urlcheck)
+	fi
+	if [ -f "$ENV_FILE" ] && [ "$(grep -E '^SANDBOX=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '\r')" = on ]; then
+		profile+=(--profile scripts)
 	fi
 	# ${a[@]+…}: an empty array under `set -u` is an error in macOS's bash 3.2.
 	docker compose -f "$(host_path "$DEPLOY/compose.yml")" --env-file "$(host_path "$ENV_FILE")" ${profile[@]+"${profile[@]}"} "$@"
@@ -114,6 +118,8 @@ cmd_init() {
 	}
 	set_kv POSTGRES_PASSWORD "$(secret 24)"
 	set_kv TOKEN_PEPPER "$(secret 32)"
+	# Ready for SANDBOX=on (script runs, QĐ-19): the worker and sandboxd share it.
+	set_kv SANDBOX_TOKEN "$(secret 32)"
 	set_kv DOMAIN "$host"
 	# The server itself may open the dashboard as localhost too.
 	local origins="https://$host"

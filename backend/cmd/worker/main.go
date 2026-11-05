@@ -34,6 +34,7 @@ import (
 	_ "github.com/vinh/automation-testing-platform/backend/internal/platform/objstore/s3"     // OBJSTORE=s3
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/sandbox"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
@@ -60,6 +61,9 @@ const (
 	// heaviest work, one at a time (CHECKER_LOADS on the checker side).
 	ownershipConcurrency = 2
 	loadConcurrency      = 1
+	// A script run holds one sandboxd slot (SANDBOX_CONCURRENCY, default 1)
+	// for up to SCRIPT_MAX_SECONDS; a busy sandboxd puts it back in the queue.
+	scriptConcurrency = 1
 )
 
 func main() {
@@ -143,8 +147,20 @@ func main() {
 			os.Exit(2)
 		}
 	}
+	// Script runs (QĐ-19 tier 4): a team's Playwright project or k6 script,
+	// run by sandboxd with SANDBOX=on.
+	var box sandbox.Runner
+	if cfg.Sandbox {
+		c, err := sandbox.NewClient(cfg.SandboxURL, cfg.SandboxToken, cfg.ScriptMaxSeconds)
+		if err != nil {
+			logger.Error("boot", "err", err)
+			os.Exit(2)
+		}
+		box = c
+	}
 	auto := autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Browser: browser, LLM: model, Keys: ai,
 		Loader: loader, LoadCaps: autotest.LoadCaps{MaxVUs: cfg.LoadMaxVUs, MaxSeconds: cfg.LoadMaxSeconds},
+		Sandbox: box, ScriptCaps: autotest.ScriptCaps{MaxSeconds: cfg.ScriptMaxSeconds},
 		Recorder: recorder{tm: tm, art: art, tenancy: ten, ingest: ingestDeps, jobs: jobs, results: res, logger: logger}})
 	// URL checks (QĐ-14) and site scans (QĐ-16): the pool only with
 	// URLCHECK=on; pruning and purging old checks always, so turning checks
@@ -188,6 +204,16 @@ func main() {
 			"server_provider", ai.ServerProvider(), "reads_pages", pages != nil)
 		w.Run(ctx)
 	}()
+	if cfg.Sandbox {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := auto.ScriptWorker(scriptConcurrency)
+			w.Logger, w.Metrics = logger, reg
+			logger.Info("worker pool started", "kind", autotest.JobScript, "concurrency", scriptConcurrency, "sandboxd", cfg.SandboxURL)
+			w.Run(ctx)
+		}()
+	}
 	if cfg.URLCheck {
 		pools := []struct {
 			w *queue.Worker

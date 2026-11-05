@@ -154,4 +154,18 @@ func TestLoadNeedsProofAndCaps(t *testing.T) {
 	if runs, _ := f.svc.LoadRuns(ctx, f.project, 10); len(runs) != 0 {
 		t.Errorf("purge left %d load runs", len(runs))
 	}
+	// The proof is the organization's: it outlives a project, not the org.
+	var proofs int
+	count := func() int {
+		if err := f.svc.DB.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM site_ownership WHERE org_id = $1`, f.org).Scan(&proofs); err != nil {
+			t.Fatal(err)
+		}
+		return proofs
+	}
+	if count() != 1 {
+		t.Fatalf("a project purge took the org's proof: %d", proofs)
+	}
+	if err := f.svc.PurgeOrganization(ctx, f.org); err != nil || count() != 0 {
+		t.Fatalf("org purge: %v, %d proofs left", err, proofs)
+	}
 }
