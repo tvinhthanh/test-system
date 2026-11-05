@@ -4,10 +4,7 @@ import { ApiClient, type Transport } from "../src/core/api/client";
 import { AutotestRepository } from "../src/features/autotest/autotestRepository";
 import StepsEditor from "../src/features/autotest/StepsEditor.vue";
 import InputsEditor from "../src/features/autotest/InputsEditor.vue";
-import {
-  describeStep,
-  type AutoStep,
-} from "../src/features/autotest/steps";
+import { describeStep, type AutoStep } from "../src/features/autotest/steps";
 
 // QĐ-16: the auto test repository speaks the api's shapes — runnable cases,
 // drafts, runs with step results and AI repairs, accounts without
@@ -50,7 +47,17 @@ it("creates a runnable case and reads a run with a repaired step", async () => {
           target: "/message?to={{to}}",
           account: "default",
           inputs: { to: "bob" },
-          steps: [{ do: "click", by: "role", role: "button", name: "Gửi", value: "", say: "", expected: "" }],
+          steps: [
+            {
+              do: "click",
+              by: "role",
+              role: "button",
+              name: "Gửi",
+              value: "",
+              say: "",
+              expected: "",
+            },
+          ],
           source: "ai",
           updatedBy: "tia",
           updatedAt: at,
@@ -66,6 +73,7 @@ it("creates a runnable case and reads a run with a repaired step", async () => {
       trigger: "ci",
       requestedBy: "token:t1",
       heal: true,
+      variants: ["firefox/phone"],
       total: 1,
       passed: 1,
       failed: 0,
@@ -79,19 +87,44 @@ it("creates a runnable case and reads a run with a repaired step", async () => {
       cases: [
         {
           caseId: "c1",
+          variant: "firefox/phone",
           position: 0,
           title: "<img src=x onerror=alert(1)>",
           target: "/message",
           account: "",
           inputs: {},
-          steps: [{ do: "click", by: "role", role: "button", name: "Send", value: "", say: "", expected: "" }],
+          steps: [
+            {
+              do: "click",
+              by: "role",
+              role: "button",
+              name: "Send",
+              value: "",
+              say: "",
+              expected: "",
+            },
+          ],
           status: "passed",
           results: [
             {
               status: "passed",
               ms: 120,
               error: "not found",
-              healed: { reason: "Send is now Gửi", steps: [{ do: "click", by: "role", role: "button", name: "Gửi", value: "", say: "", expected: "" }] },
+              note: "No serious accessibility problems.",
+              healed: {
+                reason: "Send is now Gửi",
+                steps: [
+                  {
+                    do: "click",
+                    by: "role",
+                    role: "button",
+                    name: "Gửi",
+                    value: "",
+                    say: "",
+                    expected: "",
+                  },
+                ],
+              },
             },
           ],
           console: ["console: <b>boom</b>"],
@@ -120,18 +153,30 @@ it("creates a runnable case and reads a run with a repaired step", async () => {
     signal(),
   );
   expect(made.source).toBe("ai");
-  expect(calls[0]).toMatchObject({ path: "/v1/projects/p1/auto-specs", method: "POST" });
+  expect(calls[0]).toMatchObject({
+    path: "/v1/projects/p1/auto-specs",
+    method: "POST",
+  });
   const run = await r.run("p1", "r1", signal());
   expect(run.cases[0]?.title).toBe("<img src=x onerror=alert(1)>");
+  expect(run.cases[0]?.variant).toBe("firefox/phone");
+  expect(run.cases[0]?.results[0]?.note).toBe(
+    "No serious accessibility problems.",
+  );
   expect(run.cases[0]?.results[0]?.healed?.steps[0]?.name).toBe("Gửi");
   expect(r.shotUrl("p1", "r1", "c1", "final")).toBe(
     "/v1/projects/p1/auto-runs/r1/cases/c1/screenshots/final",
   );
-  await r.applyHeal("p1", "r1", "c1", 0, signal()).catch(() => undefined);
+  expect(r.shotUrl("p1", "r1", "c1", "final", "firefox/phone")).toBe(
+    "/v1/projects/p1/auto-runs/r1/cases/c1/screenshots/final?variant=firefox%2Fphone",
+  );
+  await r
+    .applyHeal("p1", "r1", "c1", 0, signal(), "firefox/phone")
+    .catch(() => undefined);
   expect(calls.at(-1)).toMatchObject({
     path: "/v1/projects/p1/auto-runs/r1/cases/c1/apply-heal",
     method: "POST",
-    body: { step: 0 },
+    body: { step: 0, variant: "firefox/phone" },
   });
 });
 
@@ -151,26 +196,58 @@ it("never sends an empty password, and refuses an unknown step action", async ()
         updatedBy: "tia",
         updatedAt: at,
       });
-    return json({ items: [{ caseId: "c1", title: "x", priority: "p2", target: "/", account: "", inputs: {}, steps: [{ do: "eval" }], source: "manual", updatedBy: "t", updatedAt: at, last: null }], enabled: true });
+    return json({
+      items: [
+        {
+          caseId: "c1",
+          title: "x",
+          priority: "p2",
+          target: "/",
+          account: "",
+          inputs: {},
+          steps: [{ do: "eval" }],
+          source: "manual",
+          updatedBy: "t",
+          updatedAt: at,
+          last: null,
+        },
+      ],
+      enabled: true,
+    });
   });
   const a = await r.saveAccount(
     "p1",
     "e1",
-    { key: "default", username: "tester@example.com", password: "", loginUrl: "/login" },
+    {
+      key: "default",
+      username: "tester@example.com",
+      password: "",
+      loginUrl: "/login",
+    },
     signal(),
   );
   expect(a.loginSteps).toBeNull();
-  expect(bodies[0]).toEqual({ key: "default", username: "tester@example.com", loginUrl: "/login" });
-  await expect(r.specs("p1", signal())).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  expect(bodies[0]).toEqual({
+    key: "default",
+    username: "tester@example.com",
+    loginUrl: "/login",
+  });
+  await expect(r.specs("p1", signal())).rejects.toMatchObject({
+    code: "INVALID_RESPONSE",
+  });
 });
 
 it("words a step the way the server does", () => {
-  expect(describeStep(step({ do: "fill", by: "label", name: "Message", value: "hi" }))).toBe(
-    "Type “hi” into the field “Message”",
-  );
-  expect(describeStep(step({ do: "click", by: "role", role: "button", name: "Send" }))).toBe(
-    "Click button “Send”",
-  );
+  expect(
+    describeStep(
+      step({ do: "fill", by: "label", name: "Message", value: "hi" }),
+    ),
+  ).toBe("Type “hi” into the field “Message”");
+  expect(
+    describeStep(
+      step({ do: "click", by: "role", role: "button", name: "Send" }),
+    ),
+  ).toBe("Click button “Send”");
   expect(describeStep(step({ do: "expect_text", value: "Done" }))).toBe(
     "See the text “Done” on the page",
   );
@@ -180,7 +257,9 @@ it("keeps only the fields an action takes when the action changes", async () => 
   const wrapper = mount(StepsEditor, {
     props: {
       id: "s",
-      modelValue: [step({ do: "fill", by: "label", name: "Message", value: "hi" })],
+      modelValue: [
+        step({ do: "fill", by: "label", name: "Message", value: "hi" }),
+      ],
     },
   });
   const select = wrapper.find("select");
@@ -191,7 +270,9 @@ it("keeps only the fields an action takes when the action changes", async () => 
   ]);
   await wrapper.setProps({ modelValue: emitted.at(-1)![0] as AutoStep[] });
   await select.setValue("click");
-  expect((wrapper.emitted("update:modelValue")!.at(-1)![0] as AutoStep[])[0]).toMatchObject({
+  expect(
+    (wrapper.emitted("update:modelValue")!.at(-1)![0] as AutoStep[])[0],
+  ).toMatchObject({
     do: "click",
     by: "role",
     role: "button",
@@ -208,5 +289,7 @@ it("turns input rows into a name → value map", async () => {
   await fields[0]!.setValue("recipient");
   await fields[1]!.setValue("bob");
   await flushPromises();
-  expect(wrapper.emitted("update:modelValue")!.at(-1)![0]).toEqual({ recipient: "bob" });
+  expect(wrapper.emitted("update:modelValue")!.at(-1)![0]).toEqual({
+    recipient: "bob",
+  });
 });

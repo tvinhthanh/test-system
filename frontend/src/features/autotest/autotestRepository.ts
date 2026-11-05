@@ -2,6 +2,7 @@ import type { ApiClient } from "../../core/api/client";
 import * as d from "../../core/api/decode";
 import type { CheckStatus } from "../testmgmt/testmgmtRepository";
 import { locators, stepActions, type AutoStep } from "./steps";
+import { defaultVariant, runVariants } from "./matrix";
 export type { AutoStep, Locator, StepAction } from "./steps";
 
 // Auto test (QĐ-16): test cases the server runs by itself — the paths of
@@ -84,16 +85,23 @@ export interface DraftInput {
   count: number;
   testType: string;
 }
-export type FailureKind = "input" | "locator" | "assert" | "navigation" | "page";
+export type FailureKind =
+  | "input"
+  | "locator"
+  | "assert"
+  | "navigation"
+  | "page";
 export interface AutoStepResult {
   status: "passed" | "failed" | "skipped";
   kind: FailureKind | "";
   error: string;
+  note: string;
   ms: number;
   healed: { steps: AutoStep[]; reason: string } | null;
 }
 export interface AutoRunCase {
   caseId: string;
+  variant: string;
   position: number;
   title: string;
   target: string;
@@ -118,6 +126,7 @@ export interface AutoRun {
   trigger: "dashboard" | "ci";
   requestedBy: string;
   heal: boolean;
+  variants: string[];
   total: number;
   passed: number;
   failed: number;
@@ -163,6 +172,67 @@ export interface ScanInput {
   url: string;
   account: string;
   maxPages: number;
+}
+export interface SiteOwnership {
+  host: string;
+  token: string;
+  method: "" | "file" | "dns";
+  status: "unverified" | "checking" | "verified" | "failed";
+  error: string;
+  verifiedAt: string | null;
+  checkedAt: string | null;
+  fileUrl: string;
+  fileText: string;
+  dnsName: string;
+  dnsText: string;
+}
+export interface LoadRunInput {
+  environmentId: string;
+  paths: string[];
+  vus: number;
+  seconds: number;
+  rampSeconds: number;
+  maxP95Ms?: number;
+  maxErrorRate?: number;
+}
+export interface LoadResult {
+  requests: number;
+  errors: number;
+  clientErrors: number;
+  errorRate: number;
+  rps: number;
+  latencyMs: {
+    min: number;
+    p50: number;
+    p90: number;
+    p95: number;
+    p99: number;
+    max: number;
+  };
+  statuses: Record<string, number>;
+  errorSamples: string[];
+  timeline: { t: number; requests: number; errors: number; avgMs: number }[];
+  seconds: number;
+}
+export interface LoadRun {
+  id: string;
+  environmentId: string;
+  host: string;
+  paths: string[];
+  vus: number;
+  seconds: number;
+  rampSeconds: number;
+  maxP95Ms: number | null;
+  maxErrorRate: number | null;
+  status: "queued" | "running" | "done" | "error";
+  verdict: "" | "passed" | "failed";
+  reasons: string[];
+  result: LoadResult | null;
+  error: string;
+  requestedBy: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 export type Listing<T> = { items: T[]; enabled: boolean };
 
@@ -277,6 +347,7 @@ function stepResult(value: unknown): AutoStepResult {
       "page",
     ]),
     error: d.string(x.error ?? ""),
+    note: d.string(x.note ?? ""),
     ms: d.integer(x.ms ?? 0),
     healed: h ? { steps: steps(h.steps), reason: d.string(h.reason) } : null,
   };
@@ -285,6 +356,7 @@ function runCase(value: unknown): AutoRunCase {
   const x = d.record(value);
   return {
     caseId: d.string(x.caseId),
+    variant: oneOf(x.variant ?? "", ["", ...runVariants]),
     position: d.integer(x.position),
     title: d.string(x.title),
     target: d.string(x.target ?? ""),
@@ -316,6 +388,11 @@ function run(value: unknown): AutoRun {
     trigger: oneOf(x.trigger, ["dashboard", "ci"]),
     requestedBy: d.string(x.requestedBy),
     heal: d.boolean(x.heal),
+    variants: d.array(
+      x.variants ?? [defaultVariant],
+      (v) => oneOf(v, runVariants),
+      9,
+    ),
     total: d.integer(x.total),
     passed: d.integer(x.passed),
     failed: d.integer(x.failed),
@@ -369,6 +446,89 @@ function scan(value: unknown): SiteScan {
       },
       50,
     ),
+  };
+}
+function quantity(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : d.invalid();
+}
+function ownership(value: unknown): SiteOwnership {
+  const x = d.record(value);
+  return {
+    host: d.string(x.host),
+    token: d.string(x.token),
+    method: oneOf(x.method, ["", "file", "dns"]),
+    status: oneOf(x.status, ["unverified", "checking", "verified", "failed"]),
+    error: d.string(x.error),
+    verifiedAt: date(x.verifiedAt),
+    checkedAt: date(x.checkedAt),
+    fileUrl: d.string(x.fileUrl),
+    fileText: d.string(x.fileText),
+    dnsName: d.string(x.dnsName),
+    dnsText: d.string(x.dnsText),
+  };
+}
+function loadResult(value: unknown): LoadResult {
+  const x = d.record(value);
+  const latency = d.record(x.latencyMs);
+  const statuses = d.record(x.statuses);
+  if (Object.keys(statuses).length > 100) return d.invalid();
+  return {
+    requests: d.integer(x.requests),
+    errors: d.integer(x.errors),
+    clientErrors: d.integer(x.clientErrors),
+    errorRate: quantity(x.errorRate),
+    rps: quantity(x.rps),
+    latencyMs: {
+      min: d.integer(latency.min),
+      p50: d.integer(latency.p50),
+      p90: d.integer(latency.p90),
+      p95: d.integer(latency.p95),
+      p99: d.integer(latency.p99),
+      max: d.integer(latency.max),
+    },
+    statuses: Object.fromEntries(
+      Object.entries(statuses).map(([code, count]) => [code, d.integer(count)]),
+    ),
+    errorSamples: d.array(x.errorSamples, d.string, 10),
+    timeline: d.array(
+      x.timeline,
+      (value) => {
+        const point = d.record(value);
+        return {
+          t: d.integer(point.t),
+          requests: d.integer(point.requests),
+          errors: d.integer(point.errors),
+          avgMs: d.integer(point.avgMs),
+        };
+      },
+      600,
+    ),
+    seconds: d.integer(x.seconds),
+  };
+}
+function loadRun(value: unknown): LoadRun {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    environmentId: d.string(x.environmentId),
+    host: d.string(x.host),
+    paths: d.array(x.paths, d.string, 20),
+    vus: d.integer(x.vus),
+    seconds: d.integer(x.seconds),
+    rampSeconds: d.integer(x.rampSeconds),
+    maxP95Ms: x.maxP95Ms == null ? null : d.integer(x.maxP95Ms),
+    maxErrorRate: x.maxErrorRate == null ? null : quantity(x.maxErrorRate),
+    status: oneOf(x.status, ["queued", "running", "done", "error"]),
+    verdict: oneOf(x.verdict, ["", "passed", "failed"]),
+    reasons: d.array(x.reasons, d.string, 20),
+    result: x.result == null ? null : loadResult(x.result),
+    error: d.string(x.error),
+    requestedBy: d.string(x.requestedBy),
+    createdAt: d.date(x.createdAt),
+    startedAt: date(x.startedAt),
+    finishedAt: date(x.finishedAt),
   };
 }
 function listing<T>(
@@ -513,7 +673,12 @@ export class AutotestRepository {
   // Runs.
   async createRun(
     project: string,
-    input: { environmentId: string; caseIds?: string[]; heal: boolean },
+    input: {
+      environmentId: string;
+      caseIds?: string[];
+      heal: boolean;
+      variants?: string[];
+    },
     signal: AbortSignal,
   ) {
     return run(
@@ -542,8 +707,10 @@ export class AutotestRepository {
     runId: string,
     caseId: string,
     which: "final" | "failure",
+    variant?: string,
   ) {
-    return `${scope(project)}/auto-runs/${enc(runId)}/cases/${enc(caseId)}/screenshots/${which}`;
+    const path = `${scope(project)}/auto-runs/${enc(runId)}/cases/${enc(caseId)}/screenshots/${which}`;
+    return variant ? `${path}?variant=${enc(variant)}` : path;
   }
   async applyHeal(
     project: string,
@@ -551,11 +718,12 @@ export class AutotestRepository {
     caseId: string,
     stepIndex: number,
     signal: AbortSignal,
+    variant?: string,
   ) {
     return spec(
       await this.api.request(
         `${scope(project)}/auto-runs/${enc(runId)}/cases/${enc(caseId)}/apply-heal`,
-        { body: { step: stepIndex }, signal },
+        { body: { step: stepIndex, ...(variant ? { variant } : {}) }, signal },
       ),
     );
   }
@@ -579,6 +747,55 @@ export class AutotestRepository {
   async scan(project: string, id: string, signal: AbortSignal) {
     return scan(
       await this.api.request(`${scope(project)}/site-scans/${enc(id)}`, {
+        signal,
+      }),
+    );
+  }
+
+  // QĐ-19 tier 3: ownership proof and load tests.
+  async ownership(project: string, environment: string, signal: AbortSignal) {
+    return ownership(
+      await this.api.request(
+        `${scope(project)}/environments/${enc(environment)}/ownership`,
+        { signal },
+      ),
+    );
+  }
+  async checkOwnership(
+    project: string,
+    environment: string,
+    method: "file" | "dns",
+    signal: AbortSignal,
+  ) {
+    return ownership(
+      await this.api.request(
+        `${scope(project)}/environments/${enc(environment)}/ownership/check`,
+        { body: { method }, signal },
+      ),
+    );
+  }
+  async loadRuns(project: string, signal: AbortSignal) {
+    return listing(
+      await this.api.request(`${scope(project)}/load-runs`, { signal }),
+      loadRun,
+      50,
+    );
+  }
+  async createLoadRun(
+    project: string,
+    input: LoadRunInput,
+    signal: AbortSignal,
+  ) {
+    return loadRun(
+      await this.api.request(`${scope(project)}/load-runs`, {
+        body: input,
+        signal,
+      }),
+    );
+  }
+  async loadRun(project: string, id: string, signal: AbortSignal) {
+    return loadRun(
+      await this.api.request(`${scope(project)}/load-runs/${enc(id)}`, {
         signal,
       }),
     );

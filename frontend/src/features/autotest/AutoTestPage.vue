@@ -15,6 +15,7 @@ import {
   Plus,
   Radar,
   RefreshCw,
+  PanelsTopLeft,
   Sparkles,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
@@ -45,6 +46,8 @@ import AccountsPanel from "./AccountsPanel.vue";
 import CaseEditor from "./CaseEditor.vue";
 import GeneratePanel from "./GeneratePanel.vue";
 import { blankStep, type CaseForm } from "./steps";
+import { matrixSize, type RunVariant } from "./matrix";
+import VariantPicker from "./VariantPicker.vue";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -165,6 +168,19 @@ function toggleAll() {
     : new Set(specs.data.value?.items.map((s) => s.caseId));
 }
 const heal = ref(true);
+const variants = ref<RunVariant[]>([]);
+const showVariants = ref(false);
+const selectedCaseIds = computed(() =>
+  (specs.data.value?.items ?? [])
+    .filter((item) => picked.value.has(item.caseId))
+    .map((item) => item.caseId),
+);
+const selectedCaseCount = computed(
+  () => selectedCaseIds.value.length || specs.data.value?.items.length || 0,
+);
+const matrix = computed(() =>
+  matrixSize(selectedCaseCount.value, variants.value),
+);
 const blank = (): CaseForm => ({
   title: "",
   priority: "p2",
@@ -226,11 +242,21 @@ async function createCase() {
   }
 }
 async function run(caseIds?: string[]) {
-  if (!environmentId.value) return;
+  if (
+    !environmentId.value ||
+    !matrixSize(caseIds?.length ?? selectedCaseCount.value, variants.value)
+      .valid
+  )
+    return;
   const started = await mutation.run("run", (signal) =>
     autotest.createRun(
       project.value,
-      { environmentId: environmentId.value, caseIds, heal: heal.value },
+      {
+        environmentId: environmentId.value,
+        caseIds,
+        heal: heal.value,
+        variants: [...variants.value],
+      },
       signal,
     ),
   );
@@ -282,6 +308,9 @@ watch(
     scanUrl.value = "";
     scanAccount.value = "";
     panel.value = "";
+    picked.value = new Set();
+    variants.value = [];
+    showVariants.value = false;
   },
   { flush: "sync" },
 );
@@ -332,6 +361,9 @@ const counts = (r: AutoRun) =>
     title="Auto test"
     description="Cases the server runs by itself in a real browser on your site — written as steps, or drafted by AI from the page. Results land in a test plan and in Test runs."
   >
+    <Button as-child variant="outline" size="sm">
+      <RouterLink :to="`${base()}/auto/load-runs`">Load tests</RouterLink>
+    </Button>
     <Button
       variant="outline"
       size="icon-sm"
@@ -434,26 +466,58 @@ const counts = (r: AutoRun) =>
         @click="panel = panel === 'new' ? '' : 'new'"
         ><Plus />New case</Button
       >
-      <span class="ml-auto flex flex-wrap items-center gap-2">
-        <label
-          class="text-muted-foreground flex items-center gap-1.5 text-xs"
-          title="When a button or field moved or was renamed, AI may find it again for that one step. Checks are never repaired."
+      <div class="ml-auto flex flex-col gap-2 sm:items-end">
+        <span class="flex flex-wrap items-center gap-2">
+          <label
+            class="text-muted-foreground flex items-center gap-1.5 text-xs"
+            title="When a button or field moved or was renamed, AI may find it again for that one step. Checks are never repaired."
+          >
+            <input v-model="heal" type="checkbox" />AI repairs a step whose
+            element moved
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            :aria-expanded="showVariants"
+            aria-controls="auto-variants"
+            @click="showVariants = !showVariants"
+            ><PanelsTopLeft />Browser × device{{
+              variants.length ? ` (${variants.length})` : ""
+            }}</Button
+          >
+          <Button
+            :disabled="
+              mutation.busy.value !== null ||
+              !env?.baseUrl ||
+              !specs.data.value?.items.length ||
+              !matrix.valid
+            "
+            @click="run(selectedCaseIds.length ? selectedCaseIds : undefined)"
+            ><Play />{{
+              selectedCaseIds.length
+                ? `Run ${selectedCaseIds.length} selected`
+                : "Run all"
+            }}</Button
+          >
+        </span>
+        <div id="auto-variants" v-if="showVariants" class="w-full sm:w-96">
+          <VariantPicker v-model="variants" />
+        </div>
+        <p
+          class="text-xs"
+          :class="matrix.valid ? 'text-muted-foreground' : 'text-danger'"
+          role="status"
         >
-          <input v-model="heal" type="checkbox" />AI repairs a step whose
-          element moved
-        </label>
-        <Button
-          :disabled="
-            mutation.busy.value !== null ||
-            !env?.baseUrl ||
-            !specs.data.value?.items.length
-          "
-          @click="run(picked.size ? [...picked] : undefined)"
-          ><Play />{{
-            picked.size ? `Run ${picked.size} selected` : "Run all"
-          }}</Button
-        >
-      </span>
+          {{ selectedCaseCount }} case{{ selectedCaseCount === 1 ? "" : "s" }} ×
+          {{ matrix.variantCount }} variant{{
+            matrix.variantCount === 1 ? "" : "s"
+          }}
+          = {{ matrix.total }} case runs · limit 300
+          <template v-if="matrix.total > 300">
+            — select fewer cases or variants</template
+          >
+        </p>
+      </div>
     </div>
     <p
       v-if="!ai.data.value?.available && canWrite && enabled"
