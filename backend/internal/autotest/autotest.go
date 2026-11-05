@@ -16,8 +16,9 @@
 // is sealed (platform/secretbox), sent to the checker only, and never to a
 // model, which sees {{password}}.
 //
-// Owns environment_accounts, auto_specs, auto_drafts, auto_runs and
-// auto_run_cases (migrations 0042, 0046). Imports platform/* and tenancy (an
+// Owns environment_accounts, auto_specs, auto_drafts, auto_runs,
+// auto_run_cases, site_ownership, load_runs and script_runs (migrations 0042,
+// 0046–0049). Imports platform/* and tenancy (an
 // environment's address). This file is the module's whole contract
 // (§6.9.4).
 package autotest
@@ -31,6 +32,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/llm"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/sandbox"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 )
 
@@ -42,6 +44,8 @@ const (
 	// QĐ-19 tier 3.
 	JobOwnership = "autotest.ownership"
 	JobLoad      = "autotest.load"
+	// QĐ-19 tier 4.
+	JobScript = "autotest.script"
 )
 
 const (
@@ -354,19 +358,24 @@ type Recorder interface {
 	RecordCase(ctx context.Context, run Run, c RunCase, finalShot, failureShot []byte) (string, error)
 	// RecordRun records the finished run as a test run; it returns its id.
 	RecordRun(ctx context.Context, run Run) (string, error)
+	// RecordReport imports a script run's JUnit report as a test run (QĐ-19
+	// tier 4); it returns its id ("" when the report could not be read).
+	RecordReport(ctx context.Context, r Report) (string, error)
 }
 
 type Deps struct {
-	DB       *pg.DB
-	Pepper   []byte // TOKEN_PEPPER: seals test accounts' passwords
-	Tenancy  tenancy.Service
-	Browser  Browser   // nil in the api: it only queues
-	LLM      LLM       // nil: no drafting or repairs
-	Keys     Keys      // nil: no drafting or repairs
-	Recorder Recorder  // nil: results stay in auto_runs only
-	Loader   Loader    // nil in the api: it only queues (QĐ-19 tier 3)
-	TXT      TXTLookup // DNS TXT records for ownership; nil: net.DefaultResolver
-	LoadCaps LoadCaps  // what one load run may ask for
+	DB         *pg.DB
+	Pepper     []byte // TOKEN_PEPPER: seals test accounts' passwords
+	Tenancy    tenancy.Service
+	Browser    Browser        // nil in the api: it only queues
+	LLM        LLM            // nil: no drafting or repairs
+	Keys       Keys           // nil: no drafting or repairs
+	Recorder   Recorder       // nil: results stay in auto_runs only
+	Loader     Loader         // nil in the api: it only queues (QĐ-19 tier 3)
+	TXT        TXTLookup      // DNS TXT records for ownership; nil: net.DefaultResolver
+	LoadCaps   LoadCaps       // what one load run may ask for
+	Sandbox    sandbox.Runner // nil in the api: it only queues (QĐ-19 tier 4)
+	ScriptCaps ScriptCaps     // how long one script run may take
 }
 
 var (
@@ -424,6 +433,12 @@ type Service interface {
 	LoadRuns(ctx context.Context, projectID string, limit int) ([]LoadRun, error)
 	GetLoadRun(ctx context.Context, projectID, id string) (LoadRun, error)
 
+	// Script runs (QĐ-19 tier 4): CreateScriptRun checks the archive and
+	// queues it; a k6 script needs the ownership proof (ErrNotProved).
+	CreateScriptRun(ctx context.Context, in NewScriptRun) (ScriptRun, error)
+	ScriptRuns(ctx context.Context, projectID string, limit int) ([]ScriptRun, error)
+	GetScriptRun(ctx context.Context, projectID, id string) (ScriptRun, error)
+
 	// Logins hands the checker an account's sign-in for a site scan:
 	// nil when the account has no working steps yet.
 	LoginFor(ctx context.Context, projectID, environmentID, key string) (*Login, error)
@@ -434,9 +449,12 @@ type Service interface {
 	CaseWorker(concurrency int) *queue.Worker
 	OwnershipWorker(concurrency int) *queue.Worker
 	LoadWorker(concurrency int) *queue.Worker
+	ScriptWorker(concurrency int) *queue.Worker
 
 	Prune(ctx context.Context, before time.Time, limit int) (int, error)
 	PurgeProject(ctx context.Context, projectID string) error
+	// PurgeOrganization deletes the organization's ownership proofs (QĐ-19).
+	PurgeOrganization(ctx context.Context, orgID string) error
 }
 
 // LastResult is a case's newest finished result in a run.

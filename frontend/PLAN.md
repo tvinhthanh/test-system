@@ -51,6 +51,17 @@ draft was removed on 2026-09-18.
   - an ownership panel on the environment;
   - a load-run form that respects the server caps;
   - a result view: p50–p99, rps, errors, a timeline chart and the verdict.
+- Tier 4, the team's own scripts (2026-11-05), has three routes and no screen yet:
+  - `POST …/script-runs` takes multipart: `archive` (.tar.gz, at most 10 MB), `kind` (`playwright` or `k6`), `environmentId`, and optional `entry`, `project`, `grep`, `vus`, `seconds`, `timeoutSeconds`;
+  - `GET …/script-runs` lists runs with `enabled` (false when the server has `SANDBOX=off`);
+  - `GET …/script-runs/{id}` returns one run with its `log`.
+
+  The schema is openapi `ScriptRun`; `testRunId` links to the test run.
+- Frontend to do for tier 4:
+  - an upload form: file, kind, environment, and the k6 fields only for k6;
+  - k6 needs the tier 3 ownership proof, so link to the ownership panel when `OWNERSHIP_NOT_PROVED` comes back;
+  - a list and a detail view showing verdict, tests and failures, exit code or time-out, the log tail, and a link to the test run;
+  - hide the feature when `enabled` is false.
 
 ### Test-only dependency advisories (2026-11-01)
 

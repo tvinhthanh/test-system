@@ -183,6 +183,9 @@ func (p purger) org1(ctx context.Context, d tenancy.DeletedOrganization) error {
 	if err := p.ai.PurgeOrganization(ctx, string(d.ID)); err != nil {
 		return err
 	}
+	if err := p.auto.PurgeOrganization(ctx, string(d.ID)); err != nil {
+		return err
+	}
 	if err := p.authz.PurgeOrganization(ctx, string(d.ID), ws); err != nil {
 		return err
 	}

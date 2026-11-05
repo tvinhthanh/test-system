@@ -81,6 +81,9 @@ type dashboard struct {
 	// URLCHECK — off, old checks stay readable but no new one is queued.
 	urlcheck    urlcheck.Service
 	urlChecksOn bool
+	// sandboxOn is SANDBOX: script runs (scripts.go, QĐ-19 tier 4) are queued
+	// only when on; earlier ones stay readable.
+	sandboxOn bool
 	// ai drafts test cases (ai.go, QĐ-15); the server's own key is never
 	// shown, only whether there is one.
 	ai           aisuggest.Service
@@ -135,6 +138,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.aiRoutes(handle)
 	d.autotestRoutes(handle)
 	d.loadRoutes(handle)
+	d.scriptRoutes(handle)
 	d.orgDeleteRoutes(handle)
 	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).

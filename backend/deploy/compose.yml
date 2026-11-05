@@ -124,8 +124,9 @@ services:
     <<: *app
     entrypoint: ["/app/worker"]
     expose: ["9090"]
-    # checknet: the one network it shares with the URL checker (QĐ-14).
-    networks: [default, checknet]
+    # checknet: the one network it shares with the URL checker (QĐ-14);
+    # sbxapi: the one it shares with sandboxd (QĐ-19 tier 4).
+    networks: [default, checknet, sbxapi]
     healthcheck:
       test: ["CMD", "/app/healthcheck", "http://127.0.0.1:9090/healthz"]
       interval: 15s
@@ -162,6 +163,76 @@ services:
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "3" }
+
+  # Script runs (QĐ-19 tier 4): a team's Playwright project or k6 script,
+  # each in a throwaway container. Only with SANDBOX=on — server/atp.sh then
+  # adds `--profile scripts`. sandboxd is the one service with the Docker
+  # socket, which is root on this host: it takes no settings from the .env
+  # file but its own, holds no database secret, answers only the worker (on
+  # `sbxapi`, with SANDBOX_TOKEN) and only one kind of job. Each job gets an
+  # `internal` network of its own and a container with no capabilities, a
+  # read-only root, memory/CPU/process/time limits and uid 10001; its only
+  # way out is sandboxd's forwarder to the environment's host, past the
+  # same address guard as the checker (`sbxegress` is sandboxd's own route
+  # out). SANDBOX_RUNTIME=runsc adds gVisor where the host has it.
+  sandboxd:
+    image: ${ATP_IMAGE:-atp/backend:local}
+    entrypoint: ["/app/sandboxd"]
+    profiles: ["scripts"]
+    environment:
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
+      SANDBOX_PLAYWRIGHT_IMAGE: ${SANDBOX_PLAYWRIGHT_IMAGE:-atp/sandbox-playwright:local}
+      SANDBOX_K6_IMAGE: ${SANDBOX_K6_IMAGE:-grafana/k6:1.0.0}
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
+      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-2048}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
+      SANDBOX_CONCURRENCY: ${SANDBOX_CONCURRENCY:-1}
+      SANDBOX_ALLOW_PRIVATE: ${SANDBOX_ALLOW_PRIVATE:-off}
+      SCRIPT_MAX_SECONDS: ${SCRIPT_MAX_SECONDS:-900}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The socket's group on the host (`stat -c %g /var/run/docker.sock`).
+    group_add: ["${DOCKER_GID:-999}"]
+    # The forwarder listens on the environment's port (443, 80) on each
+    # job's network without any capability.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    networks: [sbxapi, sbxegress]
+    expose: ["8091"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "/app/healthcheck", "http://127.0.0.1:8091/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      sandbox-playwright:
+        condition: service_completed_successfully
+      sandbox-k6:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+
+  # The two images sandboxd runs jobs from: built or pulled with the stack,
+  # then each exits at once — they are images to start from, not services.
+  sandbox-playwright:
+    image: ${SANDBOX_PLAYWRIGHT_IMAGE:-atp/sandbox-playwright:local}
+    build:
+      context: ../../sandbox/playwright
+    profiles: ["scripts"]
+    network_mode: none
+    restart: "no"
+  sandbox-k6:
+    image: ${SANDBOX_K6_IMAGE:-grafana/k6:1.0.0}
+    entrypoint: ["k6", "version"]
+    profiles: ["scripts"]
+    network_mode: none
+    restart: "no"
 
   # Operator CLI (org/ws/project/user/token/identity/audit). Not a long-running
   # service: `docker compose run --rm admin <cmd>`.
@@ -229,6 +300,10 @@ services:
 
 networks:
   checknet: {} # worker ↔ URL checker only (QĐ-14)
+  # worker ↔ sandboxd only (QĐ-19 tier 4); no route out.
+  sbxapi: { internal: true }
+  # sandboxd's own way out, to the environments' hosts.
+  sbxegress: {}
 
 volumes:
   pgdata:

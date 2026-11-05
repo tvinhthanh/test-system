@@ -2023,6 +2023,105 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/script-runs:
+    post:
+      operationId: createScriptRun
+      tags: [dashboard]
+      summary: Run the team's own Playwright project or k6 script in a sandbox (QĐ-19)
+      description: |
+        Needs `testmgmt.write` and `SANDBOX=on`. `archive` is the project
+        or script as a `.tar.gz` (at most 10 MB, 100 MB and 5000 files
+        unpacked, only files and folders at relative paths). sandboxd runs
+        it in a fresh container — no capabilities, read-only root, memory,
+        CPU and time limits — on a network whose only way out is a
+        forwarder to the environment's host; the archive is dropped when the
+        run ends. The environment must be addressed by name.
+
+        `playwright`: the config is `entry`, or `playwright.config.*` at the
+        top; the image's `@playwright/test` replaces any the archive brings,
+        and the JUnit reporter is forced on. `BASE_URL` is the environment's
+        address; `project` and `grep` are passed as `--project` / `--grep`.
+
+        `k6`: `entry` is the script; `vus` and `seconds` replace its own
+        scenarios (caps `LOAD_MAX_VUS`, `LOAD_MAX_SECONDS`), and like a load
+        test it needs the organization's ownership proof for the host,
+        checked again right before it runs. Thresholds and checks become
+        tests; k6's exit code decides whether a threshold failed.
+
+        The report becomes a test run through the JUnit import
+        (`testRunId`). One script at a time per organization, 30 a day per
+        project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archive, kind, environmentId]
+              properties:
+                archive: { type: string, format: binary }
+                kind: { type: string, enum: [playwright, k6] }
+                environmentId: { type: string, format: uuid }
+                entry: { type: string, maxLength: 200, description: "k6: the script (required). Playwright: the config; omitted = playwright.config.* at the top." }
+                project: { type: string, maxLength: 100, description: "Playwright --project." }
+                grep: { type: string, maxLength: 100, description: "Playwright --grep." }
+                vus: { type: integer, minimum: 1, maximum: 200, description: "k6 only, required." }
+                seconds: { type: integer, minimum: 5, maximum: 600, description: "k6 only, required." }
+                timeoutSeconds: { type: integer, minimum: 30, maximum: 3600, description: "Omitted: the server's SCRIPT_MAX_SECONDS." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ScriptRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`SCRIPTS_OFF`, or `OWNERSHIP_NOT_PROVED` for k6."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: "`PAYLOAD_TOO_LARGE` with `details.maxBytes`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_SCRIPT_RUNS`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listScriptRuns
+      tags: [dashboard]
+      summary: The project's script runs, newest first (50), without logs
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The script runs; `enabled` is false when sandboxd is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor, enabled]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ScriptRun" } }
+                  nextCursor: { type: "null" }
+                  enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/script-runs/{scriptRunId}:
+    get:
+      operationId: getScriptRun
+      tags: [dashboard]
+      summary: One script run with the tail of its log
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: scriptRunId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The script run.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ScriptRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/site-scans:
     post:
       operationId: createSiteScan
@@ -5410,6 +5509,34 @@ components:
           description: "Once done: requests, errors (no answer or 5xx), clientErrors (4xx), errorRate (%), rps, latencyMs {min, p50, p90, p95, p99, max}, statuses {code: count}, errorSamples, timeline [{t, requests, errors, avgMs}], seconds."
           type: [object, "null"]
         error: { type: string }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    ScriptRun:
+      type: object
+      required: [id, environmentId, kind, base, entry, project, grep, vus, seconds, timeoutSeconds, archiveBytes, status, verdict, exitCode, timedOut, tests, failures, error, testRunId, requestedBy, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        kind: { type: string, enum: [playwright, k6] }
+        base: { type: string, description: "The environment's address when the run was asked for." }
+        entry: { type: string }
+        project: { type: string }
+        grep: { type: string }
+        vus: { type: [integer, "null"], description: "k6 only." }
+        seconds: { type: [integer, "null"], description: "k6 only." }
+        timeoutSeconds: { type: integer }
+        archiveBytes: { type: integer }
+        status: { type: string, enum: [queued, running, done, error] }
+        verdict: { type: string, enum: ["", passed, failed], description: "Failed when the script exited non-zero, timed out, or a test failed." }
+        exitCode: { type: [integer, "null"] }
+        timedOut: { type: boolean }
+        tests: { type: integer }
+        failures: { type: integer }
+        log: { type: string, description: "The last 64 KB of the script's output; on create and getScriptRun only." }
+        error: { type: string, description: "Why it could not run (status error)." }
+        testRunId: { type: [string, "null"], format: uuid, description: "The test run its report became." }
         requestedBy: { type: string }
         createdAt: { type: string, format: date-time }
         startedAt: { type: [string, "null"], format: date-time }

@@ -920,10 +920,10 @@ func (s *service) LastResults(ctx context.Context, projectID string) (map[string
 func (s *service) Prune(ctx context.Context, before time.Time, limit int) (int, error) {
 	q := s.DB.Q(ctx)
 	total := 0
-	for _, table := range []string{"auto_drafts", "auto_runs", "load_runs"} {
+	for _, table := range []string{"auto_drafts", "auto_runs", "load_runs", "script_runs"} {
 		// Runs still going are kept whatever their age.
 		extra := ""
-		if table == "auto_runs" || table == "load_runs" {
+		if table != "auto_drafts" {
 			extra = ` AND status NOT IN ('queued', 'running')`
 		}
 		tag, err := q.Exec(ctx, `DELETE FROM `+table+` WHERE id IN (
@@ -941,10 +941,18 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 		return nil
 	}
 	q := s.DB.Q(ctx)
-	for _, table := range []string{"auto_runs", "auto_drafts", "auto_specs", "environment_accounts", "load_runs"} {
+	for _, table := range []string{"auto_runs", "auto_drafts", "auto_specs", "environment_accounts", "load_runs", "script_runs"} {
 		if _, err := q.Exec(ctx, `DELETE FROM `+table+` WHERE project_id = $1`, projectID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *service) PurgeOrganization(ctx context.Context, orgID string) error {
+	if !uuidRe.MatchString(orgID) {
+		return nil
+	}
+	_, err := s.DB.Q(ctx).Exec(ctx, `DELETE FROM site_ownership WHERE org_id = $1`, orgID)
+	return err
 }

@@ -8,8 +8,8 @@ Nền tảng tổng hợp và triage kết quả test E2E, reporter-first cho Pl
 
 | | |
 |---|---|
-| Spec | **v3.55** (04-11-2026) — 19 ADR đã chốt, 65 phát hiện N đã xử lý; tiến độ build ở [`SPEC.md` §0.5](SPEC.md) |
-| Đã build | **P1-min** (ingest, identity, flaky, triage, dashboard, reporter, deploy), **P2 Test Management** (case/suite/requirement/plan/execution, release gate, importer CSV + JUnit, ROI), RBAC 6 role, member ba tầng, MFA, OAuth, mời qua email, tự đăng ký có duyệt, **Start testing**, **Auto test** (có bước kiểm tra accessibility, tốc độ, bảo mật — QĐ-19), URL check, AI của 8 nhà cung cấp |
+| Spec | **v3.56** (05-11-2026) — 19 ADR đã chốt, 65 phát hiện N đã xử lý; tiến độ build ở [`SPEC.md` §0.5](SPEC.md) |
+| Đã build | **P1-min** (ingest, identity, flaky, triage, dashboard, reporter, deploy), **P2 Test Management** (case/suite/requirement/plan/execution, release gate, importer CSV + JUnit, ROI), RBAC 6 role, member ba tầng, MFA, OAuth, mời qua email, tự đăng ký có duyệt, **Start testing**, **Auto test** (có bước kiểm tra accessibility, tốc độ, bảo mật; ma trận trình duyệt × thiết bị; load test có chứng minh sở hữu; chạy dự án Playwright hoặc script k6 của team trong sandbox — QĐ-19), URL check, AI của 8 nhà cung cấp |
 | Gate kỹ thuật | T0 T1 T3 T4 ✅ · T2 T5 còn phần cần server (soak 24–72 h, ingest 100 đồng thời) · pentest chưa làm — [`backend/GATES.md`](backend/GATES.md) |
 | Identity | precision **1,0000** · recall **0,9920** trên corpus tổng hợp (§9.6) |
 
@@ -41,7 +41,7 @@ go test ./...
 go run ./cmd/protoident          # phép đo §9.6
 ```
 
-Dựng cả stack trên một máy có Docker: `./server/atp.sh init`, rồi `up`, rồi `seed` — chi tiết ở [`server/README.md`](server/README.md). URL check và Auto test cần `URLCHECK=on`; AI cần `LLM_API_KEY` hoặc key do organization đặt trên giao diện.
+Dựng cả stack trên một máy có Docker: `./server/atp.sh init`, rồi `up`, rồi `seed` — chi tiết ở [`server/README.md`](server/README.md). URL check và Auto test cần `URLCHECK=on`; chạy script của team trong sandbox cần `SANDBOX=on` (xem [`sandbox/README.md`](sandbox/README.md)); AI cần `LLM_API_KEY` hoặc key do organization đặt trên giao diện.
 
 ## Luật của repo này
 
@@ -59,6 +59,7 @@ backend/deploy/      image distroless, compose (Caddy TLS, Prometheus, backup), 
 server/atp.sh        vận hành một máy làm server: init / up / seed / status / backup / ca / update / reset
 reporter/playwright/ npm reporter §7.5 — batch, retry, spool, artifact, fingerprint §9.2 khớp Go
 checker/             Chromium headless sau proxy chặn SSRF — URL check (QĐ-14) và bước Auto test (QĐ-16)
+sandbox/             Image Playwright cho script của team và bài e2e của sandboxd (QĐ-19 tầng 4); sandboxd ở backend/cmd/sandboxd
 frontend/            dashboard Vue 3 + Tailwind + shadcn-vue (PLAN.md, API_CONTRACT.md)
 prototype/identity/  thuật toán test identity §9, có loader Playwright thật
 docs/                ADR-001, so sánh đối thủ, kịch bản demo, ghi chú hợp đồng OpenAPI

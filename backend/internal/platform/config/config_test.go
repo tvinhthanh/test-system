@@ -15,7 +15,7 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("defaults must validate: %v", err)
 	}
 	if c.Env != "dev" || c.HTTPAddr != ":8080" || !strings.HasPrefix(c.MetricsAddr, "127.0.0.1:") || c.JobRetention != 168*time.Hour ||
-		c.LLMProvider != "anthropic" || c.LLMModel != "" {
+		c.LLMProvider != "anthropic" || c.LLMModel != "" || c.Sandbox || c.SandboxURL != "http://sandboxd:8091" || c.ScriptMaxSeconds != 900 {
 		t.Errorf("unexpected defaults: %+v", c)
 	}
 	// The provider's name is read as written in any case; platform/llm
@@ -51,6 +51,10 @@ func TestLoadDefaultsAndValidation(t *testing.T) {
 		{"smtp without public url", map[string]string{"MAIL": "smtp", "SMTP_HOST": "mail", "SMTP_FROM": "a@b.c"}, "PUBLIC_URL"},
 		{"smtp bad port", map[string]string{"SMTP_PORT": "smtp"}, "SMTP_PORT"},
 		{"smtp tls unknown", map[string]string{"MAIL": "smtp", "SMTP_HOST": "mail", "SMTP_FROM": "a@b.c", "PUBLIC_URL": "http://localhost:5173", "SMTP_TLS": "ssl3"}, "SMTP_TLS"},
+		{"sandbox switch not on/off", map[string]string{"SANDBOX": "docker"}, "SANDBOX="},
+		{"sandbox on without a token", map[string]string{"SANDBOX": "on", "SANDBOX_TOKEN": "short"}, "SANDBOX_TOKEN"},
+		{"sandbox url not http", map[string]string{"SANDBOX_URL": "unix:///var/run/docker.sock"}, "SANDBOX_URL"},
+		{"script timeout over the cap", map[string]string{"SCRIPT_MAX_SECONDS": "7200"}, "SCRIPT_MAX_SECONDS"},
 		{"signup switch not on/off", map[string]string{"SIGNUP": "yes"}, "SIGNUP="},
 		{"signup without mail", map[string]string{"SIGNUP": "on"}, "SIGNUP=on needs MAIL=smtp"},
 		{"oauth switch not on/off", map[string]string{"OAUTH_GOOGLE": "yes"}, "OAUTH_GOOGLE"},

@@ -433,6 +433,31 @@ Những điều cần biết:
 
 > **Hãy chạy load test trên staging.** Kể cả với site của chính bạn, tải lớn trên production có thể làm chậm người dùng thật.
 
+**Chạy script test của team (Playwright, k6).** Nếu team đã có sẵn dự án Playwright hoặc script k6, server chạy được chúng trong một sandbox, với điều kiện người vận hành đã bật `SANDBOX=on`. Kết quả hiện trong Test runs như một lần chạy CI.
+
+1. Nén dự án thành `.tar.gz`, đứng ở thư mục dự án: `tar -czf tests.tar.gz .`.
+   - Tối đa 10 MB. Với Playwright, `playwright.config.*` phải nằm ở gốc.
+   - Không cần `node_modules`: server dùng `@playwright/test` 1.63 của nó. Thư viện khác thì phải nén kèm.
+2. Gửi `POST /v1/projects/{project}/script-runs` dạng multipart, ví dụ:
+   `curl -F archive=@tests.tar.gz -F kind=playwright -F environmentId=… -F grep=@smoke …`
+   - **Playwright:** có thể thêm `entry` (đường dẫn config), `project`, `grep`.
+   - **k6:** cần `entry=load.js`, `vus`, `seconds`, và organization phải chứng minh sở hữu host trước, giống load test ở trên.
+3. Đọc kết quả bằng `GET …/script-runs/{id}`:
+   - `verdict`;
+   - số test và số fail;
+   - exit code;
+   - 64 KB cuối của log;
+   - `testRunId`: lần chạy trong Test runs.
+
+Những điều cần biết:
+- **Địa chỉ của site:** script đọc địa chỉ environment qua `BASE_URL` (`process.env.BASE_URL` với Playwright, `__ENV.BASE_URL` với k6). Script **chỉ** tới được đúng host đó: CDN, font hay API bên ngoài đều không tải được, và không cài được gì từ npm.
+- **Environment theo tên:** environment phải có địa chỉ theo tên, ví dụ `https://staging.example.com`, không theo IP.
+- **k6:** `vus` và `seconds` của lần chạy thay cho scenario trong script. Threshold và check của k6 thành các test trong Test runs.
+- **Thời gian:** một lần chạy dài tối đa `SCRIPT_MAX_SECONDS` (mặc định 15 phút); quá giờ thì bị dừng.
+- **Giới hạn số lần:** mỗi organization chạy một script một lúc, mỗi project 30 lần một ngày.
+- **File đã upload:** server xóa file nén khi chạy xong.
+- **Giao diện:** màn hình cho tính năng này chưa có, hiện chỉ dùng được qua API.
+
 ### 6.5 Quét site
 
 Vào tab **Site scan**, điền rồi bấm **Scan site**:

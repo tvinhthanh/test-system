@@ -119,3 +119,42 @@ func TestRecorder(t *testing.T) {
 		t.Errorf("closed plan: %q %v", id, err)
 	}
 }
+
+// QĐ-19 tier 4: a script run's report becomes a test run under the
+// script's framework; a report that is not JUnit is logged, not an error.
+func TestRecordReport(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ten, res, idn := tenancy.New(db), results.New(db), identity.New(db)
+	az := authz.New(db, []byte("test-pepper-test-pepper-test-pepper!"))
+	deps := ingest.Deps{DB: db, Queue: queue.New(db), Tenancy: ten, Authz: az, Results: res, Identity: idn, Metrics: metric.New(), Logger: logger}
+	rec := recorder{tenancy: ten, results: res, logger: logger, ingest: deps}
+	org, _ := ten.CreateOrganization(ctx, "Acme", "acme")
+	ws, _ := ten.CreateWorkspace(ctx, org.ID, "Chat")
+	project, _ := ten.CreateProject(ctx, ws.ID, "chat", "")
+	env, _ := ten.CreateEnvironment(ctx, project.ID, "staging", "https://chat.example.com")
+	rep := autotest.Report{ProjectID: string(project.ID), EnvironmentID: string(env.ID), Framework: "playwright",
+		LocalRunID: "b0000000-0000-4000-8000-000000000001", StartedAt: time.Now().UTC().Add(-time.Minute), Source: "script:tia",
+		JUnit: []byte(`<testsuites><testsuite name="inbox.spec.ts"><testcase name="shows inbox" classname="inbox.spec.ts"/>` +
+			`<testcase name="sends" classname="inbox.spec.ts"><failure message="no"/></testcase></testsuite></testsuites>`)}
+	id, err := rec.RecordReport(ctx, rep)
+	if err != nil || id == "" {
+		t.Fatalf("record: %q %v", id, err)
+	}
+	tr, err := res.GetRunByID(ctx, results.RunID(id))
+	if err != nil || tr.Status != results.RunFailed || tr.LocalRunID != rep.LocalRunID {
+		t.Fatalf("test run: %+v %v", tr, err)
+	}
+	if again, err := rec.RecordReport(ctx, rep); err != nil || again != id {
+		t.Errorf("again: %q %v", again, err)
+	}
+	rep.LocalRunID, rep.JUnit = "b0000000-0000-4000-8000-000000000002", []byte("not xml")
+	if id, err := rec.RecordReport(ctx, rep); err != nil || id != "" {
+		t.Errorf("not JUnit: %q %v", id, err)
+	}
+	rep.EnvironmentID = "c0000000-0000-4000-8000-000000000009"
+	if id, err := rec.RecordReport(ctx, rep); err != nil || id != "" {
+		t.Errorf("environment gone: %q %v", id, err)
+	}
+}

@@ -931,5 +931,54 @@ Migration 0048 thêm `site_ownership` và `load_runs`, cùng 5 route: `…/envir
 - **Chưa kiểm:**
   - load vào site HTTPS thật từ server;
   - tải lớn (200 VU) trên request API của Playwright, nên có thể phải chuyển sang client HTTP riêng nếu nó nghẽn;
-  - giao diện;
-  - xóa `site_ownership` khi xóa organization.
+  - giao diện.
+- **05-11:** `site_ownership` bị xóa khi purge organization (`PurgeOrganization`), purge project thì giữ lại; `TestLoadNeedsProofAndCaps` kiểm cả hai.
+
+## QĐ-19 tầng 4 — chạy dự án Playwright và script k6 của team trong sandbox — 05-11-2026
+
+`cmd/sandboxd` mới: service duy nhất có Docker socket. Package `internal/platform/sandbox` có archive, guard, forwarder, k6 → JUnit và client. Migration 0049 thêm `script_runs`. Có 3 route `…/script-runs` (`deploy/routes.txt` giờ 161 route), image `sandbox/playwright`, compose profile `scripts` và CI job `sandbox`. Thiết kế ở SPEC QĐ-19 mục 4 và `sandbox/README.md`.
+
+- **`internal/platform/sandbox`** (unit):
+  - **Archive bị từ chối trước khi chạy:** không phải gzip; thiếu config hoặc entry; `../` hoặc đường dẫn tuyệt đối trong tar; symlink; gzip bomb (dừng ở 100 MB, không đọc hết).
+  - **Guard:** chặn loopback, metadata, `::ffff:127.0.0.1`, NAT64, và private khi chưa bật. Một tên phân giải ra loopback và metadata thì không đi tới đâu cả.
+  - **Forwarder:** request ghi Host `metadata.google.internal` vẫn chỉ tới site đã xét. `Close` cắt cả kết nối đang mở.
+  - **k6 → JUnit:** đọc được cả dạng export cũ (bool) và mới (`{ok}`). Exit 0 thì không threshold nào fail, dù bool trong summary nói gì. Exit 99 mà không có threshold nào bị đánh dấu thì vẫn fail.
+  - **Client:** token sai → 401; sandboxd bận → `ErrBusy`.
+- **`cmd/sandboxd`** (Docker giả qua TCP):
+  - **Một job Playwright đủ vòng:** tạo mạng `Internal`; container nhận đúng archive qua stdin; "container" giả gọi site theo tên qua forwarder trên 127.0.0.2 và lấy được trang. `HostConfig` có `ReadonlyRootfs`, `CapDrop ALL`, `no-new-privileges`, RAM = swap, PID, CPU, `Dns` = forwarder, user 10001; không có `Binds`, `Mounts`, `Devices`, `CapAdd` hay `PortBindings`. `grep` chỉ nằm trong env, không nằm trong lệnh. Xong thì container, mạng và subnet đều được dọn.
+  - **Trong lúc chạy:** api từ chối request đến từ subnet của job (403) và request không có token (401). Container bị kill vẫn còn log, nhờ log được stream ra stderr.
+  - **Bị từ chối trước khi gọi Docker:** environment theo IP, 500 VU, timeout quá trần, id lạ, `$(id)` trong grep, host không phân giải được.
+  - **Script thật:** `sh -n` cả hai script. Script k6 chạy thật trong `sh` (Git Bash), không có k6: archive giải nén từ stdin, exit 127, `collect` đọc được log.
+- **`internal/autotest`** (`TestScriptRuns`, Postgres thật, sandboxd giả):
+  - 10 dạng input sai → `ErrInvalid`; k6 chưa có chứng minh → `ErrNotProved`; mỗi organization một script cùng lúc.
+  - sandboxd bận thì run quay lại `queued`, lần sau chạy được.
+  - Playwright exit 1 với JUnit 2 test, 1 fail → `failed` 2/1, có `testRunId`, archive về NULL.
+  - k6 nhận đúng `vus`/`seconds`/`timeout`; summary exit 99 → `failed`.
+  - Chứng minh bị gỡ thì không gửi gì cho sandboxd.
+  - sandboxd từ chối, hoặc không có sandboxd: lý do hiện nguyên văn.
+  - Purge project xóa script run.
+- **`cmd/worker`** (`TestRecordReport`): report thành test run `failed`, ghi lại lần hai vẫn là cùng run. Report không phải JUnit, hoặc environment đã bị xóa: ghi log, không lỗi. Lỗi `localRunId` phải là UUID đã được test này bắt.
+- **`cmd/api`** (`TestScriptRunsAPI`):
+  - `SANDBOX=off` → 409 `SCRIPTS_OFF`; viewer → 403.
+  - Thiếu archive, archive không phải tar.gz, thiếu config, `vus` không phải số, thiếu environment, environment theo IP → 400.
+  - k6 chưa chứng minh → 409; trên 10 MB → 413.
+  - Hợp lệ → 202; chạy cái thứ hai cùng lúc → 429.
+  - Danh sách không kèm log, chi tiết có log.
+  - Tenant walk đi qua cả 3 route; openapi khớp 161 route.
+- **Config:** `SANDBOX` không phải on/off, `SANDBOX=on` với token ngắn, `SANDBOX_URL` không phải http, `SCRIPT_MAX_SECONDS` 7200 → đều bị từ chối.
+- **Toàn bộ backend** `go test -count=1 -p 1 ./...` trên Postgres 17 local: 36 package pass. gofmt và vet sạch.
+- **Kiểm trên Docker thật: CI job `sandbox`** (`sandbox/test/e2e.sh`). Laptop này không có Docker.
+  - Dự án Playwright chạy trên Chromium và Firefox tới site fixture theo tên.
+  - Từ bên trong, test kiểm:
+    - `example.com` không phân giải được;
+    - không route tới 1.1.1.1:443, 169.254.169.254 hay 172.17.0.1:2375;
+    - `page.goto` ra ngoài thất bại;
+    - api của sandboxd từ chối job;
+    - job chạy với uid 10001, `/etc` và `/usr` không ghi được.
+  - JUnit có 8 testcase, trong đó 2 fail cố ý.
+  - k6 đòi 500 VU nhưng chạy 2.
+  - Run treo bị dừng ở 45 giây.
+  - IP và 5000 VU bị từ chối.
+  - Không còn container hay mạng nào có nhãn `atp.sandbox`.
+  - **Kết quả của job này là bằng chứng của tầng 4.** Nó chạy khi mở PR.
+- **Chưa kiểm:** gVisor (`SANDBOX_RUNTIME=runsc`); compose profile `scripts` dựng bằng `atp.sh up` trên server thật (e2e chạy sandboxd bằng `docker run` với cùng cờ); giao diện.
