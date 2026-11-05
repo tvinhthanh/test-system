@@ -1,5 +1,6 @@
 // What a script in the sandbox can and cannot do (QĐ-19 tier 4). The e2e
-// run greps "sandbox"; "hangs" is the time-limit run.
+// run greps "sandbox", and Playwright matches --grep against the file path
+// too, so every test here runs: the time-limit test lives in limit.spec.js.
 const { test, expect } = require("@playwright/test");
 const dns = require("node:dns").promises;
 const fs = require("node:fs");
@@ -46,9 +47,4 @@ test("sandbox reaches nothing else", async ({ page }) => {
 
 test("sandbox reports a failing test as failed", async () => {
   expect(1, "this test fails on purpose").toBe(2);
-});
-
-test("hangs past the time limit", async () => {
-  test.setTimeout(0);
-  await new Promise(() => {});
 });
