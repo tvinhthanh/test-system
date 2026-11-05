@@ -1588,6 +1588,125 @@ function createAutoFixture() {
       updatedAt: stamp,
     },
   ];
+  type OwnershipProof = {
+    host: string;
+    token: string;
+    method: "" | "file" | "dns";
+    status: "unverified" | "checking" | "verified" | "failed";
+    error: string;
+    verifiedAt: string | null;
+    checkedAt: string | null;
+    fileUrl: string;
+    fileText: string;
+    dnsName: string;
+    dnsText: string;
+    polls: number;
+    dnsAttempts: number;
+  };
+  const ownershipProofs = new Map<string, OwnershipProof>();
+  const ownershipAnswer = (proof: OwnershipProof) => {
+    const { polls: _polls, dnsAttempts: _dnsAttempts, ...answer } = proof;
+    return answer;
+  };
+  const loadMeasurements = {
+    requests: 186,
+    errors: 2,
+    clientErrors: 4,
+    errorRate: 1.08,
+    rps: 6.2,
+    latencyMs: { min: 92, p50: 185, p90: 410, p95: 520, p99: 870, max: 1200 },
+    statuses: { "200": 180, "404": 4, "503": 2 },
+    errorSamples: ["GET /checkout: 503 Service Unavailable"],
+    timeline: Array.from({ length: 30 }, (_, t) => ({
+      t,
+      requests: 5 + (t % 4),
+      errors: t === 17 || t === 22 ? 1 : 0,
+      avgMs: 160 + t * 8,
+    })),
+    seconds: 30,
+  };
+  type FixtureLoadRun = {
+    id: string;
+    environmentId: string;
+    host: string;
+    paths: string[];
+    vus: number;
+    seconds: number;
+    rampSeconds: number;
+    maxP95Ms: number | null;
+    maxErrorRate: number | null;
+    status: "queued" | "running" | "done" | "error";
+    verdict: "" | "passed" | "failed";
+    reasons: string[];
+    result: typeof loadMeasurements | null;
+    error: string;
+    requestedBy: string;
+    createdAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+  };
+  let loadRuns: FixtureLoadRun[] = [
+    {
+      id: "load-run-preview",
+      environmentId: "env-preview",
+      host: "example.com",
+      paths: ["/", "/checkout"],
+      vus: 5,
+      seconds: 30,
+      rampSeconds: 5,
+      maxP95Ms: 800,
+      maxErrorRate: 2,
+      status: "done",
+      verdict: "passed",
+      reasons: [],
+      result: loadMeasurements,
+      error: "",
+      requestedBy: user.email,
+      createdAt: iso(720),
+      startedAt: iso(719),
+      finishedAt: iso(718),
+    },
+    {
+      id: "load-run-failed",
+      environmentId: "env-preview",
+      host: "example.com",
+      paths: ["/checkout"],
+      vus: 10,
+      seconds: 30,
+      rampSeconds: 3,
+      maxP95Ms: 300,
+      maxErrorRate: 0.5,
+      status: "done",
+      verdict: "failed",
+      reasons: ["p95 520 ms exceeds 300 ms", "error rate 1.08% exceeds 0.5%"],
+      result: loadMeasurements,
+      error: "",
+      requestedBy: user.email,
+      createdAt: iso(1440),
+      startedAt: iso(1439),
+      finishedAt: iso(1438),
+    },
+    {
+      id: "load-run-error",
+      environmentId: "env-preview",
+      host: "example.com",
+      paths: ["/"],
+      vus: 5,
+      seconds: 30,
+      rampSeconds: 0,
+      maxP95Ms: null,
+      maxErrorRate: null,
+      status: "error",
+      verdict: "",
+      reasons: [],
+      result: null,
+      error: "The ownership proof no longer holds.",
+      requestedBy: user.email,
+      createdAt: iso(2160),
+      startedAt: null,
+      finishedAt: iso(2159),
+    },
+  ];
   let accounts: Account[] = [
     {
       key: "shopper",
@@ -1622,6 +1741,7 @@ function createAutoFixture() {
   ];
   const seedCase = {
     caseId: "case-0",
+    variant: "chromium/desktop",
     position: 0,
     title: specs[0]!.title,
     target: "/",
@@ -1634,6 +1754,7 @@ function createAutoFixture() {
         status: "passed",
         kind: "",
         error: "",
+        note: "The page title is available to assistive technology.",
         ms: 420,
         healed: null as { steps: Step[]; reason: string } | null,
       },
@@ -1655,6 +1776,7 @@ function createAutoFixture() {
       trigger: "dashboard",
       requestedBy: user.email,
       heal: true,
+      variants: ["chromium/desktop"],
       total: 1,
       passed: 1,
       failed: 0,
@@ -1756,7 +1878,7 @@ function createAutoFixture() {
     if (
       write &&
       empty &&
-      /^(environments|auto-specs|auto-drafts|auto-runs|site-scans|url-checks|test-cases\/[^/]+\/auto-spec)/.test(
+      /^(environments|auto-specs|auto-drafts|auto-runs|site-scans|url-checks|load-runs|test-cases\/[^/]+\/auto-spec)/.test(
         path,
       )
     )
@@ -1844,6 +1966,162 @@ function createAutoFixture() {
         e.id === current.id ? updated : e,
       );
       return { body: updated };
+    }
+    const ownership = path.match(
+      /^environments\/([^/]+)\/ownership(?:\/(check))?$/,
+    );
+    if (ownership) {
+      const environment = environments.find((item) => item.id === ownership[1]);
+      if (!environment) return missing;
+      if (!environment.baseUrl) return invalid("baseUrl");
+      let proof = ownershipProofs.get(environment.id);
+      if (!proof) {
+        const url = new URL(environment.baseUrl);
+        const token = `preview-${environment.id}-proof`;
+        proof = {
+          host: url.host,
+          token,
+          method: "",
+          status: "unverified",
+          error: "",
+          verifiedAt: null,
+          checkedAt: null,
+          fileUrl: `${url.origin}/.well-known/atp-verification.txt`,
+          fileText: `atp-verification=${token}`,
+          dnsName: `_atp-verification.${url.host}`,
+          dnsText: `atp-verification=${token}`,
+          polls: 0,
+          dnsAttempts: 0,
+        };
+        ownershipProofs.set(environment.id, proof);
+      }
+      if (ownership[2] === "check" && method === "POST") {
+        if (body.method !== "file" && body.method !== "dns")
+          return invalid("method");
+        proof.method = body.method;
+        proof.status = "checking";
+        proof.error = "";
+        proof.polls = 1;
+        if (body.method === "dns") proof.dnsAttempts++;
+        return { body: ownershipAnswer(proof), status: 202 };
+      }
+      if (ownership[2] || write) return missing;
+      if (proof.status === "checking" && --proof.polls <= 0) {
+        proof.checkedAt = stamp;
+        if (proof.method === "dns" && proof.dnsAttempts === 1) {
+          proof.status = "failed";
+          proof.error =
+            "The TXT record has not propagated. Publish the shown value and check again.";
+        } else {
+          proof.status = "verified";
+          proof.error = "";
+          proof.verifiedAt = stamp;
+        }
+      }
+      return { body: ownershipAnswer(proof) };
+    }
+    if (path === "load-runs") {
+      if (!write) return listed(empty ? [] : loadRuns, !empty);
+      const environment = environments.find(
+        (item) => item.id === body.environmentId,
+      );
+      if (!environment?.baseUrl) return invalid("environmentId");
+      const proof = ownershipProofs.get(environment.id);
+      if (proof?.status !== "verified")
+        return {
+          body: {
+            error: {
+              code: "OWNERSHIP_NOT_PROVED",
+              message: "Prove this host before sending load.",
+            },
+          },
+          status: 409,
+        };
+      const v = Number(body.vus),
+        duration = Number(body.seconds),
+        ramp = Number(body.rampSeconds ?? 0);
+      if (!Number.isInteger(v) || v < 1 || v > 20)
+        return {
+          body: {
+            error: {
+              code: "INVALID_PAYLOAD",
+              message: "vus: 1 to 20 on this server (LOAD_MAX_VUS)",
+            },
+          },
+          status: 400,
+        };
+      if (!Number.isInteger(duration) || duration < 5 || duration > 60)
+        return {
+          body: {
+            error: {
+              code: "INVALID_PAYLOAD",
+              message: "seconds: 5 to 60 on this server (LOAD_MAX_SECONDS)",
+            },
+          },
+          status: 400,
+        };
+      if (!Number.isInteger(ramp) || ramp < 0 || ramp >= duration)
+        return invalid("rampSeconds");
+      if (
+        loadRuns.some(
+          (item) => item.status === "queued" || item.status === "running",
+        )
+      )
+        return {
+          body: {
+            error: {
+              code: "TOO_MANY_LOAD_RUNS",
+              message:
+                "the organization has a load test running, or the project reached today's limit",
+            },
+          },
+          status: 429,
+        };
+      const paths = Array.isArray(body.paths) ? body.paths.map(String) : [];
+      if (
+        paths.length > 20 ||
+        paths.some((item) => !item.startsWith("/") || item.startsWith("//"))
+      )
+        return invalid("paths");
+      const made: FixtureLoadRun = {
+        id: crypto.randomUUID(),
+        environmentId: environment.id,
+        host: new URL(environment.baseUrl).host,
+        paths: paths.length ? paths : ["/"],
+        vus: v,
+        seconds: duration,
+        rampSeconds: ramp,
+        maxP95Ms: Number(body.maxP95Ms) || null,
+        maxErrorRate:
+          body.maxErrorRate === undefined ? null : Number(body.maxErrorRate),
+        status: "queued",
+        verdict: "",
+        reasons: [],
+        result: null,
+        error: "",
+        requestedBy: user.email,
+        createdAt: stamp,
+        startedAt: null,
+        finishedAt: null,
+      };
+      loadRuns = [made, ...loadRuns].slice(0, 50);
+      return { body: made, status: 202 };
+    }
+    const loadRun = path.match(/^load-runs\/([^/]+)$/);
+    if (loadRun && !write) {
+      const found = loadRuns.find((item) => item.id === loadRun[1]);
+      if (!found) return missing;
+      const answer = { ...found };
+      if (found.status === "queued") {
+        found.status = "running";
+        found.startedAt = stamp;
+      } else if (found.status === "running") {
+        found.status = "done";
+        found.verdict = "passed";
+        found.result = loadMeasurements;
+        found.finishedAt = stamp;
+      }
+      return { body: answer };
     }
     const account = path.match(
       /^environments\/([^/]+)\/accounts(?:\/([^/]+))?(?:\/(find-login))?$/,
@@ -2021,29 +2299,59 @@ function createAutoFixture() {
       const selected = specs.filter((s) => ids.includes(s.caseId));
       if (!selected.length) return invalid("caseIds");
       const id = crypto.randomUUID();
-      const cases = selected.map((s, position) => ({
-        ...seedCase,
-        caseId: s.caseId,
-        position,
-        title: s.title,
-        target: s.target,
-        account: s.account,
-        inputs: s.inputs,
-        steps: s.steps,
-        results: s.steps.map(() => ({
-          status: "passed",
-          kind: "",
-          error: "",
-          ms: 420,
-          healed: null,
+      const requestedVariants = Array.isArray(body.variants)
+        ? body.variants.map(String)
+        : [];
+      const variants = requestedVariants.length
+        ? requestedVariants
+        : ["chromium/desktop"];
+      const allowedVariants = new Set([
+        "chromium/desktop",
+        "chromium/phone",
+        "chromium/tablet",
+        "firefox/desktop",
+        "firefox/phone",
+        "firefox/tablet",
+        "webkit/desktop",
+        "webkit/phone",
+        "webkit/tablet",
+      ]);
+      if (
+        variants.length > 9 ||
+        variants.some((variant) => !allowedVariants.has(variant)) ||
+        selected.length * variants.length > 300
+      )
+        return invalid("variants");
+      const cases = variants.flatMap((variant) =>
+        selected.map((s, position) => ({
+          ...seedCase,
+          caseId: s.caseId,
+          variant,
+          position,
+          title: s.title,
+          target: s.target,
+          account: s.account,
+          inputs: s.inputs,
+          steps: s.steps,
+          results: s.steps.map((step) => ({
+            status: "passed",
+            kind: "",
+            error: "",
+            note: String(step.do).startsWith("check_")
+              ? "No findings exceeded this check's threshold."
+              : "",
+            ms: 420,
+            healed: null,
+          })),
         })),
-      }));
+      );
       const made = {
         ...runs[0]!,
         id,
         environmentId: String(body.environmentId),
         planId: "",
         heal: body.heal !== false,
+        variants,
         total: cases.length,
         passed: cases.length,
         failed: 0,

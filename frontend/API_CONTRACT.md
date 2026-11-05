@@ -616,6 +616,48 @@ have separate typed forms; server owns assessment. These records neither
 create automation Runs/Attempts nor change flaky/TTRC or release-gate rules.
 Native vendor adapters and human operational acceptance remain separate scope.
 
+### QĐ-19 Auto checks, browser matrix, and load tests (2026-11-05)
+
+The source of truth for these shapes is `backend/deploy/openapi.yaml`. The
+existing Auto test case create/update routes accept three more `AutoStep.do`
+values: `check_accessibility`, `check_performance`, and `check_security`.
+They take no element. Their optional `value` is respectively an impact
+(`minor|moderate|serious|critical`, default serious), a metric budget such as
+`lcp=2500 cls=0.1 ttfb=800` (empty uses Core Web Vitals good thresholds), or
+`strict` (empty fails on high security findings). `GET …/auto-runs/{id}` can
+return `AutoStepResult.note` on passed and failed check steps.
+
+- `POST /v1/projects/{projectId}/auto-runs` takes `{environmentId,caseIds?,
+  heal,variants?}`. Each variant is `chromium|firefox|webkit` joined with
+  `desktop|phone|tablet` by `/`. Empty selection means `chromium/desktop`;
+  at most 9 variants and 300 case runs. `GET …/auto-runs` and
+  `GET …/auto-runs/{id}` return `variants`; each detailed run case has a
+  `variant` (empty means the default). Cases repeat once per variant.
+- `GET …/auto-runs/{id}/cases/{caseId}/screenshots/{final|failure}` takes
+  optional `?variant=`. `POST …/cases/{caseId}/apply-heal` takes
+  `{step,variant?}`. The variant identifies the case run to read or repair.
+- `GET /v1/projects/{projectId}/environments/{environmentId}/ownership`
+  returns `SiteOwnership` including `host`, `token`, `fileUrl`, `fileText`,
+  `dnsName`, `dnsText`, `method`, `status`, `error`, and timestamps. It needs
+  `testmgmt.write`. `POST …/ownership/check {method:"file"|"dns"}` returns
+  202; poll the GET while status is `checking`, until `verified` or `failed`.
+  A failed proof carries `error`. The POST can return `AUTO_TEST_OFF` (409).
+- `POST /v1/projects/{projectId}/load-runs` takes `{environmentId,paths?,
+  vus,seconds,rampSeconds?,maxP95Ms?,maxErrorRate?}`. Paths start with `/`;
+  `maxErrorRate` is percent. The API requires ownership proof and checks it
+  again before load begins. `OWNERSHIP_NOT_PROVED` (409) points to the
+  environment proof; `TOO_MANY_LOAD_RUNS` (429) means one active run per
+  organization or 20 daily per project. `INVALID_PAYLOAD` (400) includes the
+  server's effective caps in its message. `AUTO_TEST_OFF` (409) means the
+  checker is off.
+- `GET /v1/projects/{projectId}/load-runs` returns the 50 newest runs as
+  `{items,nextCursor:null,enabled}`; `enabled:false` hides creation. `GET
+  …/load-runs/{id}` returns one `LoadRun`. Poll queued/running details. A
+  finished result carries requests, errors (no response or 5xx), clientErrors
+  (4xx separately), errorRate (%), rps, latencyMs (min, p50, p90, p95,
+  p99, max), statuses, errorSamples, a per-second timeline, and verdict with
+  reasons.
+
 ## Backend status (16-09-2026)
 
 Implemented by `backend/` as the single dashboard contract — the earlier
