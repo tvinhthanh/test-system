@@ -8,6 +8,8 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from "@lucide/vue";
 import NativeSelect from "../../shared/NativeSelect.vue";
 import {
   blankStep,
+  checkActions,
+  checkValueError,
   commonRoles,
   describeStep,
   mayHaveElement,
@@ -43,6 +45,9 @@ const actionLabel: Record<StepAction, string> = {
   expect_url: "Check: address contains",
   expect_value: "Check: field holds",
   expect_title: "Check: title contains",
+  check_accessibility: "Check: accessibility",
+  check_performance: "Check: page speed",
+  check_security: "Check: security",
 };
 const locatorLabel: Record<Exclude<Locator, "">, string> = {
   role: "Role and name",
@@ -69,7 +74,15 @@ function update(i: number, patch: Partial<AutoStep>) {
   let s: AutoStep = { ...next[i]!, ...patch };
   // Keep the fields the action takes; the server refuses the rest.
   if (patch.do) {
-    if (needsElement.has(s.do) && !s.by) s = { ...s, by: "role", role: "button" };
+    // A prior action's value cannot be interpreted as a check threshold or
+    // budget, nor should a check setting become another action's value.
+    if (
+      patch.do !== next[i]!.do &&
+      (checkActions.has(patch.do) || checkActions.has(next[i]!.do))
+    )
+      s = { ...s, value: "" };
+    if (needsElement.has(s.do) && !s.by)
+      s = { ...s, by: "role", role: "button" };
     if (!needsElement.has(s.do) && !mayHaveElement.has(s.do))
       s = { ...s, by: "", role: "", name: "" };
     if (!takesValue.has(s.do)) s = { ...s, value: "" };
@@ -83,7 +96,8 @@ function update(i: number, patch: Partial<AutoStep>) {
   steps.value = next;
 }
 function add() {
-  if (steps.value.length < props.max) steps.value = [...steps.value, blankStep()];
+  if (steps.value.length < props.max)
+    steps.value = [...steps.value, blankStep()];
 }
 function remove(i: number) {
   steps.value = steps.value.filter((_, j) => j !== i);
@@ -95,7 +109,12 @@ function move(i: number, by: -1 | 1) {
   [next[i], next[j]] = [next[j]!, next[i]!];
   steps.value = next;
 }
-const isCheck = (a: StepAction) => a.startsWith("expect_");
+const isCheck = (a: StepAction) =>
+  a.startsWith("expect_") || checkActions.has(a);
+function validateBudgetInput(event: Event) {
+  const input = event.target as HTMLInputElement;
+  input.setCustomValidity(checkValueError("check_performance", input.value));
+}
 </script>
 <template>
   <div class="steps-editor space-y-2">
@@ -110,7 +129,9 @@ const isCheck = (a: StepAction) => a.startsWith("expect_");
           <span class="text-muted-foreground w-6 pt-2 text-xs tabular-nums"
             >{{ i + 1 }}.</span
           >
-          <div class="grid min-w-0 flex-1 gap-2 sm:grid-cols-[12rem_10rem_minmax(0,1fr)]">
+          <div
+            class="grid min-w-0 flex-1 gap-2 sm:grid-cols-[12rem_10rem_minmax(0,1fr)]"
+          >
             <NativeSelect
               :id="`${id}-do-${i}`"
               :model-value="s.do"
@@ -150,7 +171,10 @@ const isCheck = (a: StepAction) => a.startsWith("expect_");
                   @update:model-value="update(i, { role: $event })"
                 >
                   <option
-                    v-if="s.role && !(commonRoles as readonly string[]).includes(s.role)"
+                    v-if="
+                      s.role &&
+                      !(commonRoles as readonly string[]).includes(s.role)
+                    "
                     :value="s.role"
                   >
                     {{ s.role }}
@@ -163,7 +187,11 @@ const isCheck = (a: StepAction) => a.startsWith("expect_");
                   :model-value="s.name"
                   :disabled="disabled"
                   maxlength="2000"
-                  :placeholder="s.by === 'role' ? 'Name, e.g. Send' : locatorLabel[s.by as Exclude<Locator, ''>]"
+                  :placeholder="
+                    s.by === 'role'
+                      ? 'Name, e.g. Send'
+                      : locatorLabel[s.by as Exclude<Locator, ''>]
+                  "
                   :aria-label="`Step ${i + 1}: ${s.by === 'role' ? 'name' : locatorLabel[s.by as Exclude<Locator, ''>]}`"
                   @update:model-value="update(i, { name: String($event) })"
                 />
@@ -203,15 +231,87 @@ const isCheck = (a: StepAction) => a.startsWith("expect_");
           </div>
         </div>
         <div class="mt-2 grid gap-2 pl-8 sm:grid-cols-3">
-          <Input
-            v-if="takesValue.has(s.do)"
-            :model-value="s.value"
-            :disabled="disabled"
-            maxlength="2000"
-            :placeholder="valueHint[s.do] ?? 'Value'"
-            :aria-label="`Step ${i + 1}: value`"
-            @update:model-value="update(i, { value: String($event) })"
-          />
+          <div v-if="takesValue.has(s.do)" class="min-w-0 space-y-1">
+            <NativeSelect
+              v-if="s.do === 'check_accessibility'"
+              :model-value="s.value"
+              :disabled="disabled"
+              class="w-full"
+              :aria-label="`Step ${i + 1}: lowest failing impact`"
+              @update:model-value="update(i, { value: $event })"
+            >
+              <option value="">Serious (default)</option>
+              <option value="minor">Minor</option>
+              <option value="moderate">Moderate</option>
+              <option value="serious">Serious</option>
+              <option value="critical">Critical</option>
+            </NativeSelect>
+            <NativeSelect
+              v-else-if="s.do === 'check_security'"
+              :model-value="s.value"
+              :disabled="disabled"
+              class="w-full"
+              :aria-label="`Step ${i + 1}: security threshold`"
+              @update:model-value="update(i, { value: $event })"
+            >
+              <option value="">High findings (default)</option>
+              <option value="strict">Medium and high (strict)</option>
+            </NativeSelect>
+            <Input
+              v-else
+              :key="s.do"
+              :model-value="s.value"
+              :disabled="disabled"
+              maxlength="2000"
+              :placeholder="
+                s.do === 'check_performance'
+                  ? 'lcp=2500 cls=0.1 ttfb=800'
+                  : (valueHint[s.do] ?? 'Value')
+              "
+              :aria-label="`Step ${i + 1}: ${s.do === 'check_performance' ? 'performance budget' : 'value'}`"
+              :aria-invalid="
+                s.do === 'check_performance' && !!checkValueError(s.do, s.value)
+              "
+              :aria-describedby="
+                s.do === 'check_performance'
+                  ? `${id}-budget-help-${i}`
+                  : undefined
+              "
+              @input="
+                s.do === 'check_performance' && validateBudgetInput($event)
+              "
+              @update:model-value="update(i, { value: String($event) })"
+            />
+            <p
+              v-if="s.do === 'check_accessibility'"
+              class="text-muted-foreground text-xs"
+            >
+              WCAG A/AA; fails at this impact or worse.
+            </p>
+            <p
+              v-else-if="s.do === 'check_security'"
+              class="text-muted-foreground text-xs"
+            >
+              Checks headers, cookies and mixed content.
+            </p>
+            <p
+              v-else-if="s.do === 'check_performance'"
+              :id="`${id}-budget-help-${i}`"
+              class="text-muted-foreground text-xs"
+            >
+              Leave blank for Core Web Vitals good thresholds. LCP, FCP, TTFB
+              and load are milliseconds.
+            </p>
+            <p
+              v-if="
+                s.do === 'check_performance' && checkValueError(s.do, s.value)
+              "
+              class="text-danger text-xs"
+              role="alert"
+            >
+              {{ checkValueError(s.do, s.value) }}
+            </p>
+          </div>
           <Input
             :model-value="s.say"
             :disabled="disabled"

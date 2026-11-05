@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 // and layout regressions on the main routes without claiming live API coverage.
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.argv[2] || "playwright-core");
+const baseUrl = process.env.FIXTURE_URL || "http://127.0.0.1:5173";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const routes = [
@@ -28,6 +29,9 @@ const routes = [
   "/p/commerce/auto",
   "/p/commerce/auto/runs/auto-run-preview",
   "/p/commerce/auto/scans/scan-preview",
+  "/p/commerce/load-runs",
+  "/p/commerce/load-runs/load-run-preview",
+  "/p/commerce/auto/ownership/env-preview",
   "/p/commerce/specialized-results",
   "/p/commerce/url-checks",
   "/p/commerce/url-checks/url-check-preview",
@@ -45,7 +49,7 @@ try {
     await page.setViewportSize({ width, height: 900 });
     for (const route of routes) {
       current = `${width}px ${route}`;
-      await page.goto(`http://127.0.0.1:5173${route}`);
+      await page.goto(`${baseUrl}${route}`);
       await page.waitForTimeout(1000);
       const state = await page.evaluate(() => ({
         overflow: document.documentElement.scrollWidth > innerWidth + 1,

@@ -144,8 +144,20 @@ export function makeRouter(
           },
           {
             path: "p/:project/auto/scans/:scan",
+            component: () => import("../../features/autotest/SiteScanPage.vue"),
+          },
+          {
+            path: "p/:project/auto/ownership/:environment",
             component: () =>
-              import("../../features/autotest/SiteScanPage.vue"),
+              import("../../features/autotest/OwnershipPage.vue"),
+          },
+          {
+            path: "p/:project/load-runs",
+            component: () => import("../../features/autotest/LoadRunsPage.vue"),
+          },
+          {
+            path: "p/:project/load-runs/:loadRun",
+            component: () => import("../../features/autotest/LoadRunPage.vue"),
           },
           {
             path: "p/:project/guide",

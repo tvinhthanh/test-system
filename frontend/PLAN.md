@@ -23,34 +23,34 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
-### Check steps in Auto test (QĐ-19, 2026-11-04) — backend only, frontend to do
+### Check steps, browser matrix and load tests (QĐ-19, 2026-11-05) — frontend tiers 1–3 complete
 
-- The backend and the checker have three new step actions with no element: `check_accessibility`, `check_performance` and `check_security`. The value says how strict each one is (openapi `AutoStep`). AI drafts already use them for the accessibility, performance and security test types.
-- A step result can now carry `note`: the check's details, passed or failed. These are the axe problems, the timings against the budget, or the security findings by level (openapi `AutoStepResult.note`).
-- Frontend to do (not changed by Claude, per the backend-only split):
-  - add the three actions to `features/autotest/steps.ts`: they need no element and an optional value;
-  - offer them in `StepsEditor.vue`;
-  - show `note` under a step's result on the run screen.
-
-  Until then, a drafted case with a check step shows the raw action name.
-- Tier 2, the browser × device matrix, is also backend only so far.
-  - `POST …/auto-runs` (and the CI route) takes `variants: ["firefox/phone", …]`.
-  - `AutoRun` has `variants`. Each run case has a `variant` and appears once per variant.
-  - The screenshot URL takes `?variant=`; apply-heal takes `variant` in the body.
-- Frontend to do:
-  - a variant picker beside "Run selected";
-  - group or label the run screen's cases by variant;
-  - pass `variant` on screenshots and apply-heal. Without it, the default variant's screenshot is shown.
-- Tier 3, load tests, has five routes and no screen yet:
-  - `GET …/environments/{id}/ownership`: the token and the two ways to prove the host;
-  - `POST …/ownership/check {method}`;
-  - `POST/GET …/load-runs` and `GET …/load-runs/{id}`.
-
-  Schemas are openapi `SiteOwnership` and `LoadRun`.
-- Frontend to do for tier 3:
-  - an ownership panel on the environment;
-  - a load-run form that respects the server caps;
-  - a result view: p50–p99, rps, errors, a timeline chart and the verdict.
+- Tier 1: the step editor offers `check_accessibility`, `check_performance` and
+  `check_security` with readable labels, no locator, backend-matching defaults
+  and immediate value validation. Auto run details show multi-line `note` text
+  for passed and failed steps; long notes collapse and can be copied.
+- Tier 2: Auto test has a Chromium/Firefox/WebKit × desktop/phone/tablet picker.
+  Empty means Chromium desktop. The UI shows cases × variants and blocks more
+  than 9 variants or 300 case runs. Run details label every repeated case by
+  variant and send it on screenshots and apply-heal.
+- Tier 3: Auto test links to Load tests. The environment ownership page shows
+  file and DNS TXT proofs with copy actions, checks either method and polls to
+  verified/failed. Load tests have a guarded form, feature-off state,
+  ownership/rate/cap error branches, staging warning, bounded list and polling
+  detail. Results show verdict/reasons, requests/rps, 4xx separately, p50–p99,
+  status counts, error samples and a per-second timeline.
+- Fixture mode covers check notes, matrix runs, ownership states, successful /
+  failed / error load results and empty/feature-off project states. New routes
+  are lazy-loaded; lists are server-bounded to 50 rows.
+- Verified 05-11-2026: `npm run typecheck`; Vitest 141/141; production build
+  and bundle gate (61.8 KiB initial JS gzip, 40 lazy modules, no fixture data);
+  `npm audit` 0; 31 fixture routes at 1440px and 360px with no resource,
+  console or overflow failures; fixture Auto matrix workflow passed. These are
+  fixture/mock checks, not a new live-backend acceptance run.
+- Tier 4 remains open. Its backend is still only on
+  `claude/qd19-script-runner` (`d9761f2`), while `origin/main` is `c87fbd3`.
+  Implement the script-run frontend last after that branch/PR reaches main,
+  then rebase this frontend branch as requested.
 
 ### Test-only dependency advisories (2026-11-01)
 
