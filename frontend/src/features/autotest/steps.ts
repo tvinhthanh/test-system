@@ -19,8 +19,16 @@ export const stepActions = [
   "expect_url",
   "expect_value",
   "expect_title",
+  "check_accessibility",
+  "check_performance",
+  "check_security",
 ] as const;
 export type StepAction = (typeof stepActions)[number];
+export const checkActions = new Set<StepAction>([
+  "check_accessibility",
+  "check_performance",
+  "check_security",
+]);
 export const locators = [
   "",
   "role",
@@ -79,7 +87,44 @@ export function describeStep(s: AutoStep): string {
       return `${el.charAt(0).toUpperCase()}${el.slice(1)} holds “${s.value}”`;
     case "expect_title":
       return `The page title contains “${s.value}”`;
+    case "check_accessibility":
+      return `Check accessibility (WCAG A/AA, fail at ${s.value.trim() || "serious"} or worse)`;
+    case "check_performance":
+      return s.value.trim()
+        ? `Check page speed (${s.value.trim()})`
+        : "Check page speed (LCP ≤ 2.5 s, CLS ≤ 0.1, first byte ≤ 800 ms)";
+    case "check_security":
+      return s.value.trim() === "strict"
+        ? "Check security headers and cookies (fail on medium findings too)"
+        : "Check security headers and cookies";
   }
+}
+
+// Mirrors the server's QĐ-19 check value rules (checks.go). The API remains
+// authoritative; this gives an immediate, actionable error while editing.
+export function checkValueError(action: StepAction, value: string): string {
+  const v = value.trim();
+  if (action === "check_accessibility")
+    return v === "" || ["minor", "moderate", "serious", "critical"].includes(v)
+      ? ""
+      : "Choose minor, moderate, serious or critical.";
+  if (action === "check_security")
+    return v === "" || v === "strict"
+      ? ""
+      : "Choose the default or strict threshold.";
+  if (action !== "check_performance" || v === "") return "";
+  for (const part of v.split(/[\s,;]+/)) {
+    const match = /^([a-z]+)(?:=|<=|<)([0-9]+(?:\.[0-9]+)?)$/i.exec(part);
+    if (!match)
+      return "Use metric=number, for example lcp=2500 cls=0.1 ttfb=800.";
+    const key = match[1]!.toLowerCase();
+    if (!["lcp", "fcp", "ttfb", "load", "cls"].includes(key))
+      return "Metrics are lcp, fcp, ttfb, load (ms) or cls.";
+    const n = Number(match[2]);
+    if ((key === "cls" && n > 10) || (key !== "cls" && (n < 1 || n > 120_000)))
+      return `${key.toUpperCase()} budget is out of range.`;
+  }
+  return "";
 }
 function element(s: AutoStep) {
   switch (s.by) {
@@ -122,6 +167,9 @@ export const takesValue = new Set<StepAction>([
   "expect_url",
   "expect_value",
   "expect_title",
+  "check_accessibility",
+  "check_performance",
+  "check_security",
 ]);
 export const blankStep = (): AutoStep => ({
   do: "click",
