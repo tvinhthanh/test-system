@@ -62,6 +62,34 @@ draft was removed on 2026-09-18.
   - k6 needs the tier 3 ownership proof, so link to the ownership panel when `OWNERSHIP_NOT_PROVED` comes back;
   - a list and a detail view showing verdict, tests and failures, exit code or time-out, the log tail, and a link to the test run;
   - hide the feature when `enabled` is false.
+### Check steps, browser matrix and load tests (QĐ-19, 2026-11-05) — frontend tiers 1–3 complete
+
+- Tier 1: the step editor offers `check_accessibility`, `check_performance` and
+  `check_security` with readable labels, no locator, backend-matching defaults
+  and immediate value validation. Auto run details show multi-line `note` text
+  for passed and failed steps; long notes collapse and can be copied.
+- Tier 2: Auto test has a Chromium/Firefox/WebKit × desktop/phone/tablet picker.
+  Empty means Chromium desktop. The UI shows cases × variants and blocks more
+  than 9 variants or 300 case runs. Run details label every repeated case by
+  variant and send it on screenshots and apply-heal.
+- Tier 3: Auto test links to Load tests. The environment ownership page shows
+  file and DNS TXT proofs with copy actions, checks either method and polls to
+  verified/failed. Load tests have a guarded form, feature-off state,
+  ownership/rate/cap error branches, staging warning, bounded list and polling
+  detail. Results show verdict/reasons, requests/rps, 4xx separately, p50–p99,
+  status counts, error samples and a per-second timeline.
+- Fixture mode covers check notes, matrix runs, ownership states, successful /
+  failed / error load results and empty/feature-off project states. New routes
+  are lazy-loaded; lists are server-bounded to 50 rows.
+- Verified 05-11-2026: `npm run typecheck`; Vitest 141/141; production build
+  and bundle gate (61.8 KiB initial JS gzip, 40 lazy modules, no fixture data);
+  `npm audit` 0; 31 fixture routes at 1440px and 360px with no resource,
+  console or overflow failures; fixture Auto matrix workflow passed. These are
+  fixture/mock checks, not a new live-backend acceptance run.
+- Tier 4 remains open. Its backend is still only on
+  `claude/qd19-script-runner` (`d9761f2`), while `origin/main` is `c87fbd3`.
+  Implement the script-run frontend last after that branch/PR reaches main,
+  then rebase this frontend branch as requested.
 
 ### Test-only dependency advisories (2026-11-01)
 
