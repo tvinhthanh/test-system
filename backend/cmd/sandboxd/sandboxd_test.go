@@ -268,10 +268,11 @@ func TestRunPlaywright(t *testing.T) {
 	if _, ok := res.Files["other.txt"]; ok {
 		t.Error("a file sandboxd does not read came back")
 	}
-	if !bytes.Equal(fd.stdin, archive) {
+	s := fd.snap()
+	if !bytes.Equal(s.stdin, archive) {
 		t.Error("the container did not get the archive on stdin")
 	}
-	cfg := fd.created
+	cfg := s.created
 	hc := cfg["HostConfig"].(map[string]any)
 	for k, want := range map[string]any{"ReadonlyRootfs": true, "Privileged": false, "NetworkMode": "atp-sbx-" + jobID, "Memory": float64(1 << 30),
 		"MemorySwap": float64(1 << 30), "PidsLimit": float64(256), "NanoCpus": float64(1e9), "IpcMode": "private"} {
@@ -297,9 +298,26 @@ func TestRunPlaywright(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(cfg["Env"]), "ATP_GREP=inbox") {
 		t.Errorf("env: %v", cfg["Env"])
 	}
-	if len(fd.removed) != 1 || len(fd.nets) != 0 || len(r.subnets) != 0 {
-		t.Errorf("left behind: removed %v, nets %v, subnets %v", fd.removed, fd.nets, r.subnets)
+	r.mu.Lock()
+	subnets := len(r.subnets)
+	r.mu.Unlock()
+	if s.removed != 1 || s.nets != 0 || subnets != 0 {
+		t.Errorf("left behind: removed %d, nets %d, subnets %d", s.removed, s.nets, subnets)
 	}
+}
+
+// fakeState is the fake's state, copied under its lock: its handlers run
+// on the server's goroutines, so tests read it only through snap.
+type fakeState struct {
+	stdin                []byte
+	created              map[string]any
+	removed, nets, calls int
+}
+
+func (f *fakeDocker) snap() fakeState {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return fakeState{stdin: f.stdin, created: f.created, removed: len(f.removed), nets: len(f.nets), calls: len(f.calls)}
 }
 
 func TestRunTimeoutAndRefusals(t *testing.T) {
@@ -340,9 +358,6 @@ func TestRunTimeoutAndRefusals(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("no token: %d", rec.Code)
 	}
-	if cmd := fmt.Sprint(fd.created["Cmd"]); !strings.Contains(cmd, `--vus "$ATP_VUS"`) || fd.created["Image"] != "grafana/k6:test" {
-		t.Errorf("k6 command: %s", cmd)
-	}
 	// The container never ends: the test's deadline is the job's.
 	select {
 	case <-done:
@@ -359,8 +374,15 @@ func TestRunTimeoutAndRefusals(t *testing.T) {
 	if res.ExitCode != 137 || !strings.Contains(res.Log, "✓ login") {
 		t.Errorf("killed run: %+v", res)
 	}
-	if len(fd.removed) != 1 || len(fd.nets) != 0 {
-		t.Errorf("left behind: %v %v", fd.removed, fd.nets)
+	// The container is checked after the run, not when the subnet shows
+	// up: the subnet is tracked before the container is created, and
+	// reading it then raced the fake's handler (go test -race in CI).
+	s := fd.snap()
+	if cmd := fmt.Sprint(s.created["Cmd"]); !strings.Contains(cmd, `--vus "$ATP_VUS"`) || s.created["Image"] != "grafana/k6:test" {
+		t.Errorf("k6 command: %s", cmd)
+	}
+	if s.removed != 1 || s.nets != 0 {
+		t.Errorf("left behind: %d %d", s.removed, s.nets)
 	}
 
 	// Refused before anything is created.
@@ -372,12 +394,12 @@ func TestRunTimeoutAndRefusals(t *testing.T) {
 		"unknown host":  {ID: jobID, Kind: sandbox.KindK6, Base: "https://nowhere.example.test", Archive: archive, Entry: "load.js", VUs: 1, Seconds: 5, TimeoutSeconds: 60},
 		"shell in grep": {ID: jobID, Kind: sandbox.KindPlaywright, Base: base, Archive: targz(t, map[string]string{"playwright.config.js": ""}), Grep: "$(id)", TimeoutSeconds: 60},
 	} {
-		before := len(fd.calls)
+		before := fd.snap().calls
 		res, err := r.run(ctx, bad)
 		if err != nil || res.Error == "" {
 			t.Errorf("%s: %+v %v", name, res, err)
 		}
-		if len(fd.calls) != before {
+		if fd.snap().calls != before {
 			t.Errorf("%s: docker was called", name)
 		}
 	}
