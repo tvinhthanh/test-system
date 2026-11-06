@@ -28,7 +28,7 @@ dashboard or treat service structs as HTTP DTOs.
 `GET /v1/session` returns 200 even for anonymous bootstrap:
 
 ```json
-{"user":null,"csrfToken":"server-issued-token"}
+{ "user": null, "csrfToken": "server-issued-token" }
 ```
 
 `POST /v1/session` takes `{email,password}`. It returns the same session shape,
@@ -51,7 +51,7 @@ the server session. UI clears state only after server confirmation or a 401.
     opens the code step and posts `POST /v1/session/mfa {code}` with an empty
     challenge (the api holds it in an HttpOnly cookie);
   - `/sign-in?oauth=<reason>`, reason in `denied|state|provider|no_account|
-    conflict|disabled|unavailable`, each shown in plain words.
+conflict|disabled|unavailable`, each shown in plain words.
 - No account is created: the provider's verified email must match an existing
   verified account here (the first sign-in links them).
 - Security page, "Connected accounts": `GET /v1/session/identities` →
@@ -74,7 +74,7 @@ the server session. UI clears state only after server confirmation or a 401.
 - The mail links to `/invite#<token>`. The page reads the fragment, removes
   it from the address bar and history, and posts it in a body:
   `POST /v1/invitations/lookup {token}` → `{email,role,level,scopeName,
-  invitedBy,expiresAt}`; `POST /v1/invitations/accept {token,password}` →
+invitedBy,expiresAt}`; `POST /v1/invitations/accept {token,password}` →
   session (signed in). `404 INVITATION_NOT_FOUND` (used, withdrawn,
   expired), `409 ACCOUNT_EXISTS` (the role was added; sign in),
   `400 INVALID_PASSWORD` (12+ characters), `429` after repeated bad tokens.
@@ -124,7 +124,7 @@ account: use forgot password), `429` after five wrong tries. Security page →
   `GET /v1/{projects|workspaces|organizations}/{id}/access-requests` →
   `{items:[{id,userId,email,requestedRole,level,note,createdAt}]}` (pending,
   newest first, at most 200); `POST …/{requestId}/decide
-  {decision: approved|denied, role?}` → 204. `role` overrides the requested
+{decision: approved|denied, role?}` → 204. `role` overrides the requested
   one; the owner role needs an owner (`403 OWNER_ONLY`), also when it is the
   one requested; `404 NOT_FOUND` when another admin decided first.
 
@@ -164,10 +164,17 @@ internal Run ID, not reporter `localRunId`.
 
 ```json
 {
-  "id":"uuid", "branch":"main", "commitSha":"abc123",
-  "status":"passed", "environmentName":"Staging",
-  "startedAt":"2026-09-14T09:00:00Z", "durationMs":92400,
-  "totalCount":128, "passedCount":126, "failedCount":0, "flakyCount":2
+  "id": "uuid",
+  "branch": "main",
+  "commitSha": "abc123",
+  "status": "passed",
+  "environmentName": "Staging",
+  "startedAt": "2026-09-14T09:00:00Z",
+  "durationMs": 92400,
+  "totalCount": 128,
+  "passedCount": 126,
+  "failedCount": 0,
+  "flakyCount": 2
 }
 ```
 
@@ -186,9 +193,18 @@ CSRF like any mutation. Needs `project.configure` in the project's
 run, `200` the same report again (`created: false`, nothing added):
 
 ```json
-{ "runId":"uuid", "localRunId":"uuid", "created":true, "tests":3, "attempts":5,
-  "duplicates":0, "status":"failed", "flakyCount":1,
-  "startedAt":"2026-03-02T09:15:00Z", "finishedAt":"2026-03-02T09:15:04Z" }
+{
+  "runId": "uuid",
+  "localRunId": "uuid",
+  "created": true,
+  "tests": 3,
+  "attempts": 5,
+  "duplicates": 0,
+  "status": "failed",
+  "flakyCount": 1,
+  "startedAt": "2026-03-02T09:15:00Z",
+  "finishedAt": "2026-03-02T09:15:04Z"
+}
 ```
 
 Errors the form explains in its own words: `INVALID_JUNIT` (the server's
@@ -224,7 +240,19 @@ flakyInvestigationMinutes?, periodFrom, periodTo, note?}` → 201 baseline with
 `GET /v1/projects/{projectId}/runs/{runId}/results?limit=50&cursor=...` returns:
 
 ```json
-{"items":[{"id":"uuid","displayName":"Checkout succeeds","filePath":"tests/checkout.spec.ts","finalStatus":"passed","attemptCount":1,"durationMs":1234}],"nextCursor":null}
+{
+  "items": [
+    {
+      "id": "uuid",
+      "displayName": "Checkout succeeds",
+      "filePath": "tests/checkout.spec.ts",
+      "finalStatus": "passed",
+      "attemptCount": 1,
+      "durationMs": 1234
+    }
+  ],
+  "nextCursor": null
+}
 ```
 
 `GET /v1/projects/{projectId}/results/{resultId}` returns a bounded result
@@ -288,17 +316,17 @@ role.
 
 - `GET /v1/projects/{projectId}/review?limit=100` → `{items:[ReviewItem]}` —
   pending pairs, oldest first: `{id, createdAt, identity:{id, canonicalTitle,
-  canonicalFilePath, status}, candidate:{…}, fingerprint, score, runnerUpId,
-  runnerUpScore, gap, breakdown, runId}`.
+canonicalFilePath, status}, candidate:{…}, fingerprint, score, runnerUpId,
+runnerUpScore, gap, breakdown, runId}`.
 - `POST /v1/projects/{projectId}/review/{itemId}` `{decision: "merged"|"kept"}`
   → `{id, status, decidedBy, decidedAt}`; `409 CONFLICT` once decided.
 - `GET /v1/projects/{projectId}/identities/{identityId}/aliases` →
   `{items:[{id, fingerprint, source, matchScore, createdBy, validFrom,
-  validTo}]}` (`validTo: null` = in force).
+validTo}]}` (`validTo: null` = in force).
 - `POST …/identities/{identityId}/merge` `{into}` → `{mergedInto}`;
   `POST …/identities/{identityId}/undo-merge` `{}` → `{restored}`;
   `POST …/identities/{identityId}/split` `{fingerprint, at}` → `201
-  {newIdentityId}` (the fingerprint must be an alias of that identity).
+{newIdentityId}` (the fingerprint must be an alias of that identity).
 - `Identity` DTO gained `status` (`active|merged|retired`) and `mergedIntoId`
   (nullable): merged and retired identities stay readable by id but leave the
   active list; the history page shows a notice and offers Undo for merged ones.
@@ -313,18 +341,18 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - Suites: `GET|POST /suites` → `{id, parentId, name, cases, createdAt}`.
 - Requirements: `GET|POST /requirements`, `PATCH /requirements/{id}`
   `{title?, priority?, status?}` → `{id, externalKey, title, priority
-  (p0..p3), status (draft|active|done|dropped), coveredBy, createdAt,
-  updatedAt}`.
+(p0..p3), status (draft|active|done|dropped), coveredBy, createdAt,
+updatedAt}`.
 - Test cases: `GET /test-cases?suite=&automation=&critical=true|false&q=`,
   `POST /test-cases`, `GET|PATCH /test-cases/{id}` → `{id, suiteId,
-  suiteName, externalKey, title, steps:[{action, expected}], expected,
-  priority, isCritical, automationStatus
-  (manual_only|automation_candidate|automated|obsolete), ownerId, links?,
-  requirements?, createdAt, updatedAt}` — `links`/`requirements` only on a
+suiteName, externalKey, title, steps:[{action, expected}], expected,
+priority, isCritical, automationStatus
+(manual_only|automation_candidate|automated|obsolete), ownerId, links?,
+requirements?, createdAt, updatedAt}` — `links`/`requirements` only on a
   single case. Steps are text; render with interpolation only.
 - Automation link (§6.8.1): `POST /test-cases/{id}/links` `{stableTestId,
-  linkType?}` → `201 {id, testCaseId, stableTestId, linkType, createdBy,
-  createdAt}`; `409` for a merged/retired identity, `404` for an identity
+linkType?}` → `201 {id, testCaseId, stableTestId, linkType, createdBy,
+createdAt}`; `409` for a merged/retired identity, `404` for an identity
   of another project. `DELETE /test-cases/{id}/links/{linkId}` → 204.
 - Coverage: `POST|DELETE /test-cases/{id}/requirements/{requirementId}` → 204.
 - Import: `POST /test-cases/import` with `text/csv` or JSON `{csv}` →
@@ -332,9 +360,9 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - Plans: `GET|POST /test-plans`, `GET /test-plans/{id}` (with
   `executions`: latest per case), `PATCH /test-plans/{id}` `{status}`,
   `POST /test-plans/{id}/executions` `{testCaseId, status
-  (passed|failed|blocked|skipped), note?, executedAt?}` → 201; `409` on a
+(passed|failed|blocked|skipped), note?, executedAt?}` → 201; `409` on a
   closed plan. Every execution carries `evidence: [{id, name, kind
-  ("manual_evidence"), contentType, sizeBytes, expiresAt}]`.
+("manual_evidence"), contentType, sizeBytes, expiresAt}]`.
 - Evidence (§6.8.2): `POST /test-plans/{id}/executions/{executionId}/evidence`
   as `multipart/form-data` with one `file` part (the only non-JSON body in
   the contract; the client sends `FormData` and no `Content-Type` of its
@@ -346,10 +374,10 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
   artifact (`inline` for images/video/text).
 - Releases: `GET|POST /releases`, `GET /releases/{id}`,
   `POST /releases/{id}/evaluate` → release with `gate: {verdict
-  (approved|warn|blocked|no_evidence), evaluatedAt, runId, branch,
-  rules:[{id, level (blocked|warn), passed, applies, summary, details}],
-  p0Coverage}`; `POST /releases/{id}/decision` `{status
-  (blocked|approved|shipped), note?}` → release with `decidedBy` (the
+(approved|warn|blocked|no_evidence), evaluatedAt, runId, branch,
+rules:[{id, level (blocked|warn), passed, applies, summary, details}],
+p0Coverage}`; `POST /releases/{id}/decision` `{status
+(blocked|approved|shipped), note?}` → release with `decidedBy` (the
   session user). `status` is the human decision and is independent of
   `gate.verdict`; an `approved` next to a `blocked` gate is an override to
   show as such. `shipped` is terminal (`409` afterwards).
@@ -628,7 +656,7 @@ They take no element. Their optional `value` is respectively an impact
 return `AutoStepResult.note` on passed and failed check steps.
 
 - `POST /v1/projects/{projectId}/auto-runs` takes `{environmentId,caseIds?,
-  heal,variants?}`. Each variant is `chromium|firefox|webkit` joined with
+heal,variants?}`. Each variant is `chromium|firefox|webkit` joined with
   `desktop|phone|tablet` by `/`. Empty selection means `chromium/desktop`;
   at most 9 variants and 300 case runs. `GET …/auto-runs` and
   `GET …/auto-runs/{id}` return `variants`; each detailed run case has a
@@ -643,7 +671,7 @@ return `AutoStepResult.note` on passed and failed check steps.
   202; poll the GET while status is `checking`, until `verified` or `failed`.
   A failed proof carries `error`. The POST can return `AUTO_TEST_OFF` (409).
 - `POST /v1/projects/{projectId}/load-runs` takes `{environmentId,paths?,
-  vus,seconds,rampSeconds?,maxP95Ms?,maxErrorRate?}`. Paths start with `/`;
+vus,seconds,rampSeconds?,maxP95Ms?,maxErrorRate?}`. Paths start with `/`;
   `maxErrorRate` is percent. The API requires ownership proof and checks it
   again before load begins. `OWNERSHIP_NOT_PROVED` (409) points to the
   environment proof; `TOO_MANY_LOAD_RUNS` (429) means one active run per
@@ -652,11 +680,23 @@ return `AutoStepResult.note` on passed and failed check steps.
   checker is off.
 - `GET /v1/projects/{projectId}/load-runs` returns the 50 newest runs as
   `{items,nextCursor:null,enabled}`; `enabled:false` hides creation. `GET
-  …/load-runs/{id}` returns one `LoadRun`. Poll queued/running details. A
+…/load-runs/{id}` returns one `LoadRun`. Poll queued/running details. A
   finished result carries requests, errors (no response or 5xx), clientErrors
   (4xx separately), errorRate (%), rps, latencyMs (min, p50, p90, p95,
   p99, max), statuses, errorSamples, a per-second timeline, and verdict with
   reasons.
+- `POST /v1/projects/{projectId}/script-runs` is multipart with `archive`
+  (`.tar.gz`, at most 10 MB), `kind`, `environmentId`, and optional `entry`,
+  `project`, `grep`, `vus`, `seconds`, and `timeoutSeconds`. K6 requires
+  `entry`, `vus` (1–200), `seconds` (5–600), and verified host ownership.
+  `OWNERSHIP_NOT_PROVED` (409), `SCRIPTS_OFF` (409), `PAYLOAD_TOO_LARGE`
+  (413), and `TOO_MANY_SCRIPT_RUNS` (429) are stable UI branches. Other 400
+  responses show the server message so archive validation remains actionable.
+- `GET /v1/projects/{projectId}/script-runs` returns the newest 50 runs as
+  `{items,nextCursor:null,enabled}` without logs. `enabled:false` hides the
+  upload action. `GET …/script-runs/{id}` includes the log tail, verdict,
+  test/failure counts, exit code, timeout flag, error, and optional
+  `testRunId`. Poll details while queued or running.
 
 ## Backend status (16-09-2026)
 

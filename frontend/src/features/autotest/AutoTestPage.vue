@@ -362,7 +362,10 @@ const counts = (r: AutoRun) =>
     description="Cases the server runs by itself in a real browser on your site — written as steps, or drafted by AI from the page. Results land in a test plan and in Test runs."
   >
     <Button as-child variant="outline" size="sm">
-      <RouterLink :to="`${base()}/auto/load-runs`">Load tests</RouterLink>
+      <RouterLink :to="`${base()}/load-runs`">Load tests</RouterLink>
+    </Button>
+    <Button as-child variant="outline" size="sm">
+      <RouterLink :to="`${base()}/script-runs`">Script runs</RouterLink>
     </Button>
     <Button
       variant="outline"

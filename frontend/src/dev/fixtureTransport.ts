@@ -1707,6 +1707,86 @@ function createAutoFixture() {
       finishedAt: iso(2159),
     },
   ];
+  type FixtureScriptRun = {
+    id: string;
+    environmentId: string;
+    kind: "playwright" | "k6";
+    base: string;
+    entry: string;
+    project: string;
+    grep: string;
+    vus: number | null;
+    seconds: number | null;
+    timeoutSeconds: number;
+    archiveBytes: number;
+    status: "queued" | "running" | "done" | "error";
+    verdict: "" | "passed" | "failed";
+    exitCode: number | null;
+    timedOut: boolean;
+    tests: number;
+    failures: number;
+    log: string;
+    error: string;
+    testRunId: string | null;
+    requestedBy: string;
+    createdAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+  };
+  let scriptRuns: FixtureScriptRun[] = [
+    {
+      id: "script-run-preview",
+      environmentId: "env-preview",
+      kind: "playwright",
+      base: "https://example.com",
+      entry: "playwright.config.ts",
+      project: "chromium",
+      grep: "",
+      vus: null,
+      seconds: null,
+      timeoutSeconds: 600,
+      archiveBytes: 24576,
+      status: "done",
+      verdict: "passed",
+      exitCode: 0,
+      timedOut: false,
+      tests: 8,
+      failures: 0,
+      log: "Running 8 tests using 2 workers\n8 passed (12.4s)",
+      error: "",
+      testRunId: "run-preview",
+      requestedBy: user.email,
+      createdAt: iso(600),
+      startedAt: iso(599),
+      finishedAt: iso(598),
+    },
+    {
+      id: "script-run-failed",
+      environmentId: "env-preview",
+      kind: "k6",
+      base: "https://example.com",
+      entry: "load.js",
+      project: "",
+      grep: "",
+      vus: 10,
+      seconds: 30,
+      timeoutSeconds: 120,
+      archiveBytes: 8192,
+      status: "done",
+      verdict: "failed",
+      exitCode: 1,
+      timedOut: false,
+      tests: 1,
+      failures: 1,
+      log: "checks.........................: 92.00%",
+      error: "",
+      testRunId: null,
+      requestedBy: user.email,
+      createdAt: iso(1200),
+      startedAt: iso(1199),
+      finishedAt: iso(1198),
+    },
+  ];
   let accounts: Account[] = [
     {
       key: "shopper",
@@ -1878,7 +1958,7 @@ function createAutoFixture() {
     if (
       write &&
       empty &&
-      /^(environments|auto-specs|auto-drafts|auto-runs|site-scans|url-checks|load-runs|test-cases\/[^/]+\/auto-spec)/.test(
+      /^(environments|auto-specs|auto-drafts|auto-runs|site-scans|url-checks|load-runs|script-runs|test-cases\/[^/]+\/auto-spec)/.test(
         path,
       )
     )
@@ -2119,6 +2199,97 @@ function createAutoFixture() {
         found.status = "done";
         found.verdict = "passed";
         found.result = loadMeasurements;
+        found.finishedAt = stamp;
+      }
+      return { body: answer };
+    }
+    if (path === "script-runs") {
+      if (!write)
+        return listed(
+          empty ? [] : scriptRuns.map((item) => ({ ...item, log: "" })),
+          !empty,
+        );
+      const form = init?.body instanceof FormData ? init.body : null;
+      if (!form) return invalid("archive");
+      const file = form.get("archive"),
+        kind = String(form.get("kind") ?? "");
+      const environmentId = String(form.get("environmentId") ?? "");
+      const environment = environments.find(
+        (item) => item.id === environmentId,
+      );
+      if (!(file instanceof File) || !file.name.endsWith(".tar.gz"))
+        return invalid("archive");
+      if (file.size > 10 * 1024 * 1024)
+        return {
+          body: {
+            error: {
+              code: "PAYLOAD_TOO_LARGE",
+              message: "archive exceeds 10 MB",
+            },
+          },
+          status: 413,
+        };
+      if (!environment?.baseUrl || (kind !== "playwright" && kind !== "k6"))
+        return invalid(!environment?.baseUrl ? "environmentId" : "kind");
+      if (
+        kind === "k6" &&
+        ownershipProofs.get(environmentId)?.status !== "verified"
+      )
+        return {
+          body: {
+            error: {
+              code: "OWNERSHIP_NOT_PROVED",
+              message: "prove this host before k6",
+            },
+          },
+          status: 409,
+        };
+      const made: FixtureScriptRun = {
+        id: crypto.randomUUID(),
+        environmentId,
+        kind,
+        base: environment.baseUrl,
+        entry: String(form.get("entry") ?? ""),
+        project: String(form.get("project") ?? ""),
+        grep: String(form.get("grep") ?? ""),
+        vus: kind === "k6" ? Number(form.get("vus")) : null,
+        seconds: kind === "k6" ? Number(form.get("seconds")) : null,
+        timeoutSeconds: Number(form.get("timeoutSeconds") ?? 600),
+        archiveBytes: file.size,
+        status: "queued",
+        verdict: "",
+        exitCode: null,
+        timedOut: false,
+        tests: 0,
+        failures: 0,
+        log: "Archive accepted. Waiting for sandbox…",
+        error: "",
+        testRunId: null,
+        requestedBy: user.email,
+        createdAt: stamp,
+        startedAt: null,
+        finishedAt: null,
+      };
+      scriptRuns = [made, ...scriptRuns].slice(0, 50);
+      return { body: made, status: 202 };
+    }
+    const scriptRun = path.match(/^script-runs\/([^/]+)$/);
+    if (scriptRun && !write) {
+      const found = scriptRuns.find((item) => item.id === scriptRun[1]);
+      if (!found) return missing;
+      const answer = { ...found };
+      if (found.status === "queued") {
+        found.status = "running";
+        found.startedAt = stamp;
+        found.log += "\nStarting runner…";
+      } else if (found.status === "running") {
+        found.status = "done";
+        found.verdict = "passed";
+        found.exitCode = 0;
+        found.tests = 3;
+        found.failures = 0;
+        found.log += "\n3 passed";
+        found.testRunId = "run-preview";
         found.finishedAt = stamp;
       }
       return { body: answer };
