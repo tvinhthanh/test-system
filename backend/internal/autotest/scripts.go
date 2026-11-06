@@ -302,7 +302,7 @@ func (s *service) runScriptJob(ctx context.Context, job queue.Job) error {
 	}
 	fail := func(msg string) error {
 		_, err := q.Exec(ctx, `UPDATE script_runs SET status = 'error', error = $2, archive = NULL, report = NULL, started_at = coalesce(started_at, clock_timestamp()),
-			finished_at = clock_timestamp() WHERE id = $1`, r.ID, cut(msg, 1000))
+			finished_at = clock_timestamp() WHERE id = $1`, r.ID, cut(sandbox.Clean(msg), 1000))
 		return err
 	}
 	finishReport := func(report []byte, started time.Time) error {
@@ -382,6 +382,18 @@ func (s *service) runScriptJob(ctx context.Context, job queue.Job) error {
 		_, _ = s.DB.Q(octx).Exec(octx, `UPDATE script_runs SET status = 'queued', started_at = NULL WHERE id = $1`, r.ID)
 		cancel()
 		return err // tried again after the backoff
+	}
+	if err != nil && ctx.Err() != nil {
+		// The worker is stopping: sandboxd removes the container when the
+		// request ends; end the run now on a context of its own, or it
+		// holds the organization's one slot until the lease runs out.
+		octx, cancel := outside()
+		defer cancel()
+		if _, uerr := s.DB.Q(octx).Exec(octx, `UPDATE script_runs SET status = 'error', error = $2, archive = NULL, report = NULL, finished_at = clock_timestamp()
+			WHERE id = $1 AND status = 'running'`, r.ID, "the worker stopped while the script ran; run it again"); uerr != nil {
+			return uerr
+		}
+		return ctx.Err()
 	}
 	if err != nil {
 		return fail("sandboxd could not run the script: " + err.Error())

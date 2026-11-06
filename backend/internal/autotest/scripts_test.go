@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/sandbox"
 )
@@ -246,5 +247,66 @@ func TestCountJUnit(t *testing.T) {
 	}
 	if tests, failures := countJUnit([]byte(`<testsuite><testcase name="a"><failure/><error/></testcase></testsuite>`)); tests != 1 || failures != 1 {
 		t.Errorf("both in one case: %d %d", tests, failures)
+	}
+}
+
+// Whatever a script prints is stored: a NUL byte, or a tail cut inside a
+// character, used to fail the final UPDATE (Postgres text), leaving the
+// run "running" — the organization blocked — until the lease ran out.
+func TestScriptRunLogStored(t *testing.T) {
+	for name, log := range map[string]string{
+		"nul":      "before\x00after",
+		"cut rune": strings.Repeat("✓", 30000), // 90 KB on one line: the tail starts mid-character
+	} {
+		f := setup(t)
+		ctx := context.Background()
+		f.svc.Sandbox = &fakeSandbox{results: []sandbox.Result{{ExitCode: 0, Log: log, Files: map[string][]byte{"junit.xml": []byte(pwJUnit)}}}}
+		f.svc.ScriptCaps = ScriptCaps{MaxSeconds: 600}
+		pw := targz(t, map[string]string{"playwright.config.ts": "export default {}"})
+		r, err := f.svc.CreateScriptRun(ctx, NewScriptRun{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, Actor: "tia", Kind: "playwright", Archive: pw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.svc.ScriptWorker(1).Drain(ctx); err != nil {
+			t.Fatal(err)
+		}
+		r, _ = f.svc.GetScriptRun(ctx, f.project, r.ID)
+		if r.Status != RunDone || !utf8.ValidString(r.Log) || strings.Contains(r.Log, "\x00") || len(r.Log) > sandbox.MaxLogBytes+4 || r.Log == "" {
+			t.Errorf("%s: status %s, error %q, log %d bytes", name, r.Status, r.Error, len(r.Log))
+		}
+	}
+}
+
+// blockingSandbox holds the run until the worker's context ends.
+type blockingSandbox struct{ started chan struct{} }
+
+func (b blockingSandbox) Run(ctx context.Context, _ sandbox.Job) (sandbox.Result, error) {
+	close(b.started)
+	<-ctx.Done()
+	return sandbox.Result{}, ctx.Err()
+}
+
+// The worker stops mid-run (a deploy): the run ends as an error at once,
+// so the organization's one slot is free again — not "running" until the
+// lease (SCRIPT_MAX_SECONDS + 10 min) runs out.
+func TestScriptRunWorkerStops(t *testing.T) {
+	f := setup(t)
+	box := blockingSandbox{started: make(chan struct{})}
+	f.svc.Sandbox = box
+	f.svc.ScriptCaps = ScriptCaps{MaxSeconds: 600}
+	pw := targz(t, map[string]string{"playwright.config.ts": "export default {}"})
+	r, err := f.svc.CreateScriptRun(context.Background(), NewScriptRun{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, Actor: "tia", Kind: "playwright", Archive: pw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-box.started; cancel() }()
+	_, _ = f.svc.ScriptWorker(1).Drain(ctx)
+	r, _ = f.svc.GetScriptRun(context.Background(), f.project, r.ID)
+	if r.Status != RunError || !strings.Contains(r.Error, "worker stopped") {
+		t.Errorf("after the worker stopped: status %s, error %q", r.Status, r.Error)
+	}
+	if _, err := f.svc.CreateScriptRun(context.Background(), NewScriptRun{ProjectID: f.project, OrgID: f.org, EnvironmentID: f.env, Actor: "tia", Kind: "playwright", Archive: pw}); err != nil {
+		t.Errorf("the organization is still blocked: %v", err)
 	}
 }

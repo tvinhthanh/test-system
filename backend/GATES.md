@@ -999,3 +999,20 @@ Migration 0048 thêm `site_ownership` và `load_runs`, cùng 5 route: `…/envir
   - Không còn container hay mạng nào có nhãn `atp.sandbox`.
   - **Kết quả của job này là bằng chứng của tầng 4.** Nó chạy khi mở PR.
 - **Chưa kiểm:** gVisor (`SANDBOX_RUNTIME=runsc`); compose profile `scripts` dựng bằng `atp.sh up` trên server thật (e2e chạy sandboxd bằng `docker run` với cùng cờ); giao diện.
+
+### Rà soát tầng 4 — 06-11-2026
+
+Rà lại backend tầng 4 trên `main`. Tìm ra ba lỗi; mỗi lỗi có test tái hiện, test này đỏ trên code cũ và xanh sau khi sửa:
+
+- **Archive bom bằng header** (`CheckArchive`). Thư mục và bản ghi pax không có nội dung, nên trước đây không bị tính vào giới hạn file hay 100 MB. Một upload 8,7 MB chứa 4 triệu entry thư mục (2 GB tar) vẫn được nhận, và api đọc mất 15 giây CPU mỗi request. Bước này còn chạy trước giới hạn mỗi org. Giờ tối đa `MaxEntries` = 10 000 file và thư mục, và cả luồng tar đã giải nén (kể cả header) tối đa 100 MB + 80 MB. Test: `TestCheckArchive` (folder bomb, pax padding, 5001 file).
+- **Log không lưu được** (`Tail`, `runScriptJob`). Một byte NUL trong output, hoặc phần đuôi log cắt giữa một ký tự UTF-8, làm UPDATE cuối cùng hỏng. Run kẹt ở `running` và chặn org tới khi hết lease, dù test run đã được ghi. Giờ `sandbox.Clean` làm sạch log và lỗi, còn `Tail` không cắt giữa ký tự. Test: `TestScriptRunLogStored`.
+- **Worker dừng giữa run.** Lỗi được ghi bằng context đã huỷ nên không lưu được. Run giữ chỗ duy nhất của org khoảng SCRIPT_MAX_SECONDS + 10 phút. Giờ run kết thúc `error` ngay ("the worker stopped…"). Test: `TestScriptRunWorkerStops`. Phía sandboxd, request bị huỷ thì container và mạng vẫn được dọn: `TestRunCancelCleansUp`.
+- **Contract api có thêm test** (`TestScriptRunsAPI`):
+  - path traversal, đường dẫn tuyệt đối, symlink, hard link → 400 kèm lý do;
+  - body 12 MB → 413;
+  - thiếu CSRF → 403;
+  - environment của project khác → 400;
+  - org đã có run ở project khác → 429;
+  - k6 có chứng minh → 202 kèm `vus`/`seconds`;
+  - lần thứ 31 trong 24 giờ → 429 `perDay: 30`, hôm sau chạy lại được.
+- **Chưa chạy được trên laptop này:** `go test -race` (không có trình biên dịch C) và e2e Docker thật (không có Docker). Cả hai do CI chạy: bước `-race` và job `sandbox`.

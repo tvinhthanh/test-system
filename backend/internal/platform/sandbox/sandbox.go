@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/outbound"
 )
@@ -34,8 +35,9 @@ const (
 	MaxArchiveBytes = 10 << 20  // the .tar.gz as uploaded
 	MaxUnpacked     = 100 << 20 // its files, unpacked
 	MaxFiles        = 5000
-	MaxLogBytes     = 64 << 10 // the tail of the script's output kept
-	MaxReportBytes  = 8 << 20  // one report file
+	MaxEntries      = 2 * MaxFiles // files and folders together
+	MaxLogBytes     = 64 << 10     // the tail of the script's output kept
+	MaxReportBytes  = 8 << 20      // one report file
 )
 
 // Job is one script run.
@@ -126,8 +128,10 @@ func (c *Client) Run(ctx context.Context, job Job) (Result, error) {
 	return out, nil
 }
 
-// Tail keeps the last n bytes of s, on a line start when it can.
+// Tail keeps the last n bytes of s, on a line start when it can, as text
+// Postgres stores (Clean): a script's output is whatever it printed.
 func Tail(s string, n int) string {
+	s = Clean(s)
 	if len(s) <= n {
 		return s
 	}
@@ -135,5 +139,14 @@ func Tail(s string, n int) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 && i < 200 {
 		s = s[i+1:]
 	}
+	for len(s) > 0 && !utf8.RuneStart(s[0]) { // never half a character
+		s = s[1:]
+	}
 	return "…\n" + s
+}
+
+// Clean makes s storable as Postgres text: valid UTF-8, no NUL bytes
+// (either one fails the whole UPDATE). It never grows s.
+func Clean(s string) string {
+	return strings.ReplaceAll(strings.ToValidUTF8(s, ""), "\x00", "")
 }

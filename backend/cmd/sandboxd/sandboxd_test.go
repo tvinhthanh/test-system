@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -463,5 +464,46 @@ func TestScriptRoundTrip(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(work, "src", "load.js")); err != nil || !strings.Contains(string(b), "export default") {
 		t.Errorf("the archive did not unpack: %v", err)
+	}
+}
+
+// The worker gives up mid-run (shutdown, its own timeout): the request's
+// context ends, and the container and the job's network still go — the
+// cleanup runs on a context of its own.
+func TestRunCancelCleansUp(t *testing.T) {
+	r, fd, base := setupRunner(t, true)
+	archive := targz(t, map[string]string{"load.js": "export default function(){}"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type answer struct {
+		res sandbox.Result
+		err error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		res, err := r.run(ctx, sandbox.Job{ID: jobID, Kind: sandbox.KindK6, Base: base, Archive: archive, Entry: "load.js", VUs: 1, Seconds: 5, TimeoutSeconds: 60})
+		done <- answer{res, err}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for fd.snap().created == nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if fd.snap().created == nil {
+		t.Fatal("the container was not created")
+	}
+	time.Sleep(100 * time.Millisecond) // started and waiting
+	cancel()
+	var a answer
+	select {
+	case a = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return after the cancel")
+	}
+	if !errors.Is(a.err, context.Canceled) {
+		t.Errorf("cancelled run: %+v %v", a.res, a.err)
+	}
+	s := fd.snap()
+	if s.removed != 1 || s.nets != 0 || r.fromJob(netip.MustParseAddr("10.99.0.7")) {
+		t.Errorf("left behind after a cancel: removed %d, nets %d, subnet tracked %v", s.removed, s.nets, r.fromJob(netip.MustParseAddr("10.99.0.7")))
 	}
 }
