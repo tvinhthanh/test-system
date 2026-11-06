@@ -234,6 +234,32 @@ export interface LoadRun {
   startedAt: string | null;
   finishedAt: string | null;
 }
+export interface ScriptRun {
+  id: string;
+  environmentId: string;
+  kind: "playwright" | "k6";
+  base: string;
+  entry: string;
+  project: string;
+  grep: string;
+  vus: number | null;
+  seconds: number | null;
+  timeoutSeconds: number;
+  archiveBytes: number;
+  status: "queued" | "running" | "done" | "error";
+  verdict: "" | "passed" | "failed";
+  exitCode: number | null;
+  timedOut: boolean;
+  tests: number;
+  failures: number;
+  log: string;
+  error: string;
+  testRunId: string | null;
+  requestedBy: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
 export type Listing<T> = { items: T[]; enabled: boolean };
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
@@ -531,6 +557,35 @@ function loadRun(value: unknown): LoadRun {
     finishedAt: date(x.finishedAt),
   };
 }
+function scriptRun(value: unknown): ScriptRun {
+  const x = d.record(value);
+  return {
+    id: d.string(x.id),
+    environmentId: d.string(x.environmentId),
+    kind: oneOf(x.kind, ["playwright", "k6"]),
+    base: d.string(x.base),
+    entry: d.string(x.entry ?? ""),
+    project: d.string(x.project ?? ""),
+    grep: d.string(x.grep ?? ""),
+    vus: x.vus == null ? null : d.integer(x.vus),
+    seconds: x.seconds == null ? null : d.integer(x.seconds),
+    timeoutSeconds: d.integer(x.timeoutSeconds),
+    archiveBytes: d.integer(x.archiveBytes),
+    status: oneOf(x.status, ["queued", "running", "done", "error"]),
+    verdict: oneOf(x.verdict, ["", "passed", "failed"]),
+    exitCode: x.exitCode == null ? null : d.integer(x.exitCode),
+    timedOut: d.boolean(x.timedOut),
+    tests: d.integer(x.tests),
+    failures: d.integer(x.failures),
+    log: d.string(x.log ?? ""),
+    error: d.string(x.error ?? ""),
+    testRunId: x.testRunId == null ? null : d.string(x.testRunId),
+    requestedBy: d.string(x.requestedBy),
+    createdAt: d.date(x.createdAt),
+    startedAt: date(x.startedAt),
+    finishedAt: date(x.finishedAt),
+  };
+}
 function listing<T>(
   value: unknown,
   parse: (v: unknown) => T,
@@ -796,6 +851,29 @@ export class AutotestRepository {
   async loadRun(project: string, id: string, signal: AbortSignal) {
     return loadRun(
       await this.api.request(`${scope(project)}/load-runs/${enc(id)}`, {
+        signal,
+      }),
+    );
+  }
+  async scriptRuns(project: string, signal: AbortSignal) {
+    return listing(
+      await this.api.request(`${scope(project)}/script-runs`, { signal }),
+      scriptRun,
+      50,
+    );
+  }
+  async createScriptRun(project: string, data: FormData, signal: AbortSignal) {
+    return scriptRun(
+      await this.api.request(`${scope(project)}/script-runs`, {
+        body: data,
+        signal,
+        timeoutMs: 60000,
+      }),
+    );
+  }
+  async scriptRun(project: string, id: string, signal: AbortSignal) {
+    return scriptRun(
+      await this.api.request(`${scope(project)}/script-runs/${enc(id)}`, {
         signal,
       }),
     );

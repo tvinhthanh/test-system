@@ -160,6 +160,16 @@ export function makeRouter(
             component: () => import("../../features/autotest/LoadRunPage.vue"),
           },
           {
+            path: "p/:project/script-runs",
+            component: () =>
+              import("../../features/autotest/ScriptRunsPage.vue"),
+          },
+          {
+            path: "p/:project/script-runs/:scriptRun",
+            component: () =>
+              import("../../features/autotest/ScriptRunPage.vue"),
+          },
+          {
             path: "p/:project/guide",
             component: () => import("../../features/guide/TesterGuidePage.vue"),
           },
