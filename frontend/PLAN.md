@@ -23,50 +23,7 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
-### Check steps in Auto test (QĐ-19, 2026-11-04) — superseded by completed slices below
-
-- The backend and the checker have three new step actions with no element: `check_accessibility`, `check_performance` and `check_security`. The value says how strict each one is (openapi `AutoStep`). AI drafts already use them for the accessibility, performance and security test types.
-- A step result can now carry `note`: the check's details, passed or failed. These are the axe problems, the timings against the budget, or the security findings by level (openapi `AutoStepResult.note`).
-- Frontend to do (not changed by Claude, per the backend-only split):
-  - add the three actions to `features/autotest/steps.ts`: they need no element and an optional value;
-  - offer them in `StepsEditor.vue`;
-  - show `note` under a step's result on the run screen.
-
-  Until then, a drafted case with a check step shows the raw action name.
-
-- Tier 2, the browser × device matrix, is also backend only so far.
-  - `POST …/auto-runs` (and the CI route) takes `variants: ["firefox/phone", …]`.
-  - `AutoRun` has `variants`. Each run case has a `variant` and appears once per variant.
-  - The screenshot URL takes `?variant=`; apply-heal takes `variant` in the body.
-- Frontend to do:
-  - a variant picker beside "Run selected";
-  - group or label the run screen's cases by variant;
-  - pass `variant` on screenshots and apply-heal. Without it, the default variant's screenshot is shown.
-- Tier 3, load tests, has five routes and no screen yet:
-  - `GET …/environments/{id}/ownership`: the token and the two ways to prove the host;
-  - `POST …/ownership/check {method}`;
-  - `POST/GET …/load-runs` and `GET …/load-runs/{id}`.
-
-  Schemas are openapi `SiteOwnership` and `LoadRun`.
-
-- Frontend to do for tier 3:
-  - an ownership panel on the environment;
-  - a load-run form that respects the server caps;
-  - a result view: p50–p99, rps, errors, a timeline chart and the verdict.
-- Tier 4, the team's own scripts (2026-11-05), has three routes and no screen yet:
-  - `POST …/script-runs` takes multipart: `archive` (.tar.gz, at most 10 MB), `kind` (`playwright` or `k6`), `environmentId`, and optional `entry`, `project`, `grep`, `vus`, `seconds`, `timeoutSeconds`;
-  - `GET …/script-runs` lists runs with `enabled` (false when the server has `SANDBOX=off`);
-  - `GET …/script-runs/{id}` returns one run with its `log`.
-
-  The schema is openapi `ScriptRun`; `testRunId` links to the test run.
-
-- Frontend to do for tier 4:
-  - an upload form: file, kind, environment, and the k6 fields only for k6;
-  - k6 needs the tier 3 ownership proof, so link to the ownership panel when `OWNERSHIP_NOT_PROVED` comes back;
-  - a list and a detail view showing verdict, tests and failures, exit code or time-out, the log tail, and a link to the test run;
-  - hide the feature when `enabled` is false.
-
-### Check steps, browser matrix and load tests (QĐ-19, 2026-11-05) — frontend tiers 1–3 complete
+### Check steps, browser matrix, load tests and script runs (QĐ-19, 2026-11-07) — frontend tiers 1–4 complete
 
 - Tier 1: the step editor offers `check_accessibility`, `check_performance` and
   `check_security` with readable labels, no locator, backend-matching defaults
@@ -97,11 +54,13 @@ draft was removed on 2026-09-18.
   Feature-off hides upload while keeping prior results readable. Detail polls
   queued/running runs and shows verdict, counts, exit/timeout, selectable log
   output, error, and the resulting test-run link. Fixture mode includes
-  passed Playwright, failed k6, upload, polling, empty and feature-off states.
+  passed Playwright, failed k6, timeout, sandbox error, upload, polling, empty
+  and feature-off states. A project without a site address gets a setup action
+  instead of an unusable upload form.
   Unit coverage includes multipart construction, bounds, and every stable
-  error-code branch. Verified 06-11-2026: typecheck; Vitest 144/144;
+  error-code branch. Reverified 07-11-2026: typecheck; Vitest 144/144;
   production build and bundle gate (62.2 KiB initial JS gzip, 42 lazy
-  modules, no fixture data); `npm audit` 0; 34 fixture routes at 1440px and
+  modules, no fixture data); `npm audit` 0; 36 fixture routes at 1440px and
   360px with no page, console or overflow failures; multipart upload, detail
   navigation and polling browser workflow passed. These are fixture/mock
   checks, not a new live-backend acceptance run.

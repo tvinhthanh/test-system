@@ -33,6 +33,8 @@ const routes = [
   "/p/commerce/load-runs/load-run-preview",
   "/p/commerce/script-runs",
   "/p/commerce/script-runs/script-run-preview",
+  "/p/commerce/script-runs/script-run-timeout",
+  "/p/commerce/script-runs/script-run-error",
   "/p/platform/script-runs",
   "/p/commerce/auto/ownership/env-preview",
   "/p/commerce/specialized-results",

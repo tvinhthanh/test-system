@@ -129,6 +129,33 @@ func TestScriptRuns(t *testing.T) {
 	if rep := f.recorder.reports[0]; rep.Framework != "playwright" || rep.LocalRunID != r.ID || string(rep.JUnit) != pwJUnit {
 		t.Errorf("recorded: %+v", rep)
 	}
+
+	// A transient results-plane failure resumes report import from the durable
+	// checkpoint. It must not run the team's script twice or discard its result.
+	r, err = run(NewScriptRun{Kind: "playwright", Archive: pw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	box.results = []sandbox.Result{{ExitCode: 0, Log: "2 passed", Files: map[string][]byte{"junit.xml": []byte(pwJUnit)}}}
+	f.recorder.errors = []error{errors.New("results temporarily unavailable")}
+	beforeJobs := len(box.jobs)
+	if _, err := f.svc.ScriptWorker(1).Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, _ := f.svc.GetScriptRun(ctx, f.project, r.ID)
+	if checkpoint.Status != RunRunning || checkpoint.Verdict != "passed" || checkpoint.Tests != 2 {
+		t.Fatalf("checkpoint: %+v", checkpoint)
+	}
+	if _, err := f.svc.DB.Q(ctx).Exec(ctx, `UPDATE jobs SET run_at = now() - interval '1 hour' WHERE kind = $1`, JobScript); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ScriptWorker(1).Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = f.svc.GetScriptRun(ctx, f.project, r.ID)
+	if r.Status != RunDone || r.TestRunID == "" || len(box.jobs) != beforeJobs+1 {
+		t.Fatalf("resumed report without rerunning sandbox: %+v jobs=%d before=%d", r, len(box.jobs), beforeJobs)
+	}
 	var left int
 	if err := f.svc.DB.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM script_runs WHERE archive IS NOT NULL`).Scan(&left); err != nil || left != 0 {
 		t.Errorf("an archive outlived its run: %d %v", left, err)

@@ -429,7 +429,8 @@ Những điều cần biết:
 - Load test không theo chuyển hướng, nên chỉ gửi tới đúng host đã chứng minh.
 - Người vận hành đặt trần bằng `LOAD_MAX_VUS` (mặc định 20) và `LOAD_MAX_SECONDS` (mặc định 60).
 - Mỗi organization chạy một load test một lúc. Mỗi project chạy tối đa 20 lần một ngày.
-- Màn hình cho load test chưa có, hiện chỉ dùng được qua API.
+- Trên giao diện, vào **Auto test → Load tests** để chứng minh ownership, tạo
+  lần chạy và xem biểu đồ kết quả. Các API trên dùng cho tích hợp tự động.
 
 > **Hãy chạy load test trên staging.** Kể cả với site của chính bạn, tải lớn trên production có thể làm chậm người dùng thật.
 
@@ -438,7 +439,9 @@ Những điều cần biết:
 1. Nén dự án thành `.tar.gz`, đứng ở thư mục dự án: `tar -czf tests.tar.gz .`.
    - Tối đa 10 MB. Với Playwright, `playwright.config.*` phải nằm ở gốc.
    - Không cần `node_modules`: server dùng `@playwright/test` 1.63 của nó. Thư viện khác thì phải nén kèm.
-2. Gửi `POST /v1/projects/{project}/script-runs` dạng multipart, ví dụ:
+2. Trên giao diện, vào **Auto test → Script runs**, chọn environment và runner,
+   rồi tải archive lên. Hoặc gửi `POST /v1/projects/{project}/script-runs`
+   dạng multipart, ví dụ:
    `curl -F archive=@tests.tar.gz -F kind=playwright -F environmentId=… -F grep=@smoke …`
    - **Playwright:** có thể thêm `entry` (đường dẫn config), `project`, `grep`.
    - **k6:** cần `entry=load.js`, `vus`, `seconds`, và organization phải chứng minh sở hữu host trước, giống load test ở trên.
@@ -456,7 +459,8 @@ Những điều cần biết:
 - **Thời gian:** một lần chạy dài tối đa `SCRIPT_MAX_SECONDS` (mặc định 15 phút); quá giờ thì bị dừng.
 - **Giới hạn số lần:** mỗi organization chạy một script một lúc, mỗi project 30 lần một ngày.
 - **File đã upload:** server xóa file nén khi chạy xong.
-- **Giao diện:** màn hình cho tính năng này chưa có, hiện chỉ dùng được qua API.
+- **Giao diện:** danh sách giữ các lần chạy cũ khi sandbox đang tắt; trang chi
+  tiết tự cập nhật khi queued/running và cho sao chép log.
 
 ### 6.5 Quét site
 
