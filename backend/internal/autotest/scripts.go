@@ -301,14 +301,44 @@ func (s *service) runScriptJob(ctx context.Context, job queue.Job) error {
 		return err
 	}
 	fail := func(msg string) error {
-		_, err := q.Exec(ctx, `UPDATE script_runs SET status = 'error', error = $2, archive = NULL, started_at = coalesce(started_at, clock_timestamp()),
+		_, err := q.Exec(ctx, `UPDATE script_runs SET status = 'error', error = $2, archive = NULL, report = NULL, started_at = coalesce(started_at, clock_timestamp()),
 			finished_at = clock_timestamp() WHERE id = $1`, r.ID, cut(msg, 1000))
 		return err
+	}
+	finishReport := func(report []byte, started time.Time) error {
+		testRunID := ""
+		if s.Recorder != nil {
+			var err error
+			testRunID, err = s.Recorder.RecordReport(ctx, Report{ProjectID: r.ProjectID, EnvironmentID: r.EnvironmentID, Framework: r.Kind,
+				LocalRunID: r.ID, StartedAt: started, Source: "script:" + r.RequestedBy, JUnit: report})
+			if err != nil {
+				return err
+			}
+		}
+		_, err := q.Exec(ctx, `UPDATE script_runs SET status = 'done', test_run_id = $2, archive = NULL, report = NULL, finished_at = clock_timestamp() WHERE id = $1`,
+			r.ID, nullable(testRunID))
+		return err
+	}
+	recordOrRetry := func(report []byte, started time.Time) error {
+		if err := finishReport(report, started); err != nil {
+			if job.Attempts >= job.MaxAttempts {
+				return fail("the test report could not be recorded; run the script again")
+			}
+			return err
+		}
+		return nil
 	}
 	switch r.Status {
 	case RunQueued:
 	case RunRunning: // the worker stopped mid-run, and the lease ran out
-		return fail("the worker stopped while the script ran; run it again")
+		var report []byte
+		if err := q.QueryRow(ctx, `SELECT report FROM script_runs WHERE id = $1`, r.ID).Scan(&report); err != nil {
+			return err
+		}
+		if len(report) == 0 {
+			return fail("the worker stopped while the script ran; run it again")
+		}
+		return recordOrRetry(report, r.StartedAt)
 	default:
 		return nil
 	}
@@ -336,8 +366,14 @@ func (s *service) runScriptJob(ctx context.Context, job queue.Job) error {
 		return fail("the script's archive is gone")
 	}
 	octx, cancel := outside()
-	_, _ = s.DB.Q(octx).Exec(octx, `UPDATE script_runs SET status = 'running', started_at = clock_timestamp() WHERE id = $1`, r.ID)
+	tag, startErr := s.DB.Q(octx).Exec(octx, `UPDATE script_runs SET status = 'running', started_at = clock_timestamp() WHERE id = $1 AND status = 'queued'`, r.ID)
 	cancel()
+	if startErr != nil {
+		return startErr
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("script run %s did not enter running", r.ID)
+	}
 	started := s.now().UTC()
 	res, err := s.Sandbox.Run(ctx, sandbox.Job{ID: r.ID, Kind: r.Kind, Base: r.Base, Archive: archive, Entry: r.Entry, Project: r.Project, Grep: r.Grep,
 		VUs: r.VUs, Seconds: r.Seconds, TimeoutSeconds: r.TimeoutSeconds})
@@ -353,7 +389,7 @@ func (s *service) runScriptJob(ctx context.Context, job queue.Job) error {
 	if res.Error != "" {
 		return fail(res.Error)
 	}
-	framework, report := r.Kind, res.Files["junit.xml"]
+	report := res.Files["junit.xml"]
 	if r.Kind == sandbox.KindK6 {
 		report = sandbox.K6JUnit(r.Entry, res.Files["summary.json"], res.ExitCode, res.Log)
 	} else if len(report) == 0 {
@@ -368,18 +404,21 @@ func (s *service) runScriptJob(ctx context.Context, job queue.Job) error {
 	if res.ExitCode != 0 || res.TimedOut || failures > 0 {
 		verdict = "failed"
 	}
-	testRunID := ""
-	if s.Recorder != nil {
-		testRunID, err = s.Recorder.RecordReport(ctx, Report{ProjectID: r.ProjectID, EnvironmentID: r.EnvironmentID, Framework: framework,
-			LocalRunID: r.ID, StartedAt: started, Source: "script:" + r.RequestedBy, JUnit: report})
-		if err != nil {
-			return err
-		}
+	// Checkpoint the sandbox result outside the queue transaction. If report
+	// import or the final update fails, the retry resumes here without running
+	// the team's script a second time.
+	octx, cancel = outside()
+	tag, err = s.DB.Q(octx).Exec(octx, `UPDATE script_runs SET verdict = $2, exit_code = $3, timed_out = $4, tests = $5, failures = $6, log = $7,
+		report = $8, archive = NULL WHERE id = $1 AND status = 'running'`,
+		r.ID, verdict, res.ExitCode, res.TimedOut, tests, failures, sandbox.Tail(res.Log, sandbox.MaxLogBytes), report)
+	cancel()
+	if err != nil {
+		return err
 	}
-	_, err = q.Exec(ctx, `UPDATE script_runs SET status = 'done', verdict = $2, exit_code = $3, timed_out = $4, tests = $5, failures = $6, log = $7,
-		test_run_id = $8, archive = NULL, finished_at = clock_timestamp() WHERE id = $1`,
-		r.ID, verdict, res.ExitCode, res.TimedOut, tests, failures, sandbox.Tail(res.Log, sandbox.MaxLogBytes), nullable(testRunID))
-	return err
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("script run %s did not save its sandbox result", r.ID)
+	}
+	return recordOrRetry(report, started)
 }
 
 // countJUnit counts testcases and those that failed or erred.

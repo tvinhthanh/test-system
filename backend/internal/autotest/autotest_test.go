@@ -172,10 +172,16 @@ type fakeRecorder struct {
 	cases   []RunCase
 	runs    []Run
 	reports []Report
+	errors  []error
 }
 
 func (r *fakeRecorder) RecordReport(_ context.Context, rep Report) (string, error) {
 	r.reports = append(r.reports, rep)
+	if len(r.errors) > 0 {
+		err := r.errors[0]
+		r.errors = r.errors[1:]
+		return "", err
+	}
 	return "f0000000-0000-4000-8000-000000000002", nil
 }
 

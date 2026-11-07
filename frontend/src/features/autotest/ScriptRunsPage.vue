@@ -148,8 +148,23 @@ async function submit() {
             )
           "
         >
+          <EmptyState
+            v-if="
+              environments.data.value &&
+              !environments.data.value.some((item) => item.baseUrl)
+            "
+            :icon="FileArchive"
+            title="No site address yet"
+            description="Add an environment with a site address in Auto test before uploading a script."
+          >
+            <RouterLink
+              :to="`${base}/auto`"
+              class="text-primary text-sm underline"
+              >Set up an environment</RouterLink
+            >
+          </EmptyState>
           <form
-            v-if="environments.data.value"
+            v-else-if="environments.data.value"
             class="space-y-4"
             @submit.prevent="submit"
           >

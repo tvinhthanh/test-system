@@ -16,6 +16,23 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | **T4** security + tenant isolation | ✅ tenant isolation (mọi route) 16-09; security §11.6 có bằng chứng từng dòng 17-09 (govulncheck, npm audit, CORS/headers, rate limit dashboard, SSRF rule, route inventory); **restore drill ✅** (`test/restore/`: dump → DB mới → 24/24 bảng checksum bằng nhau, api trả đúng byte, worker tiếp job pending, RTO ≈ 2 s ở cỡ test); audit revoke ✅ (`authz_audit`); còn mở: pentest | 17-09-2026 | §T4 |
 | **T5** soak 24–72 h | ⏳ harness `test/soak/` chạy **2 giờ** trên laptop 18-09: 5 400 run, 545k result, 87k request, **0 lỗi**, mọi trend phẳng (worker heap, goroutine, pool, backlog, `jobs`, latency), heap api chỉ lớn theo payload của store dev; tìm ra và sửa: `jobs` không bao giờ dọn, gauge backlog quét cả bảng, grant store dev không xóa; heap api đã profile: chỉ payload của store dev lớn lên (`io.ReadAll` ← `memory.Store.serve`), không có holder khác. **24–72 h cần host riêng + S3 staging** | 17-09-2026 | §T5 |
 
+## QĐ-19 final reliability review — 07-11-2026
+
+- Migration 0050 keeps the completed sandbox report only while its JUnit
+  import is pending. A transient recorder failure now retries the import from
+  that checkpoint without executing the team's Playwright/k6 archive again.
+  The checkpoint and archive are cleared on `done` or terminal `error`.
+- Regression: `TestScriptRuns` makes `RecordReport` fail once, confirms the
+  run remains `running` with its passed counts, retries, reaches `done` with a
+  `testRunId`, and confirms sandbox received exactly one job.
+- Local checks: `go test ./internal/autotest ./internal/platform/sandbox
+  ./internal/platform/queue ./cmd/api ./cmd/worker ./cmd/sandboxd
+  ./internal/testmgmt`; frontend Vitest 144/144; typecheck, production build,
+  bundle gate (62.2 KiB initial JS gzip, 42 lazy modules) and `npm audit` 0.
+- The preceding merged CI run 68 supplied the Linux-only evidence: real
+  PostgreSQL/S3 backend tests, race for queue/metric/sandbox, Docker sandbox
+  end-to-end, checker browsers, frontend, and live dashboard E2E all passed.
+
 ## T0 — reporter đẩy run thật, dashboard hiện đúng ✅ 16-09-2026
 
 **Ba lớp bằng chứng, mỗi lớp thật hơn lớp trước:**
