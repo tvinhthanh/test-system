@@ -136,14 +136,17 @@ func TestScriptRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	box.results = []sandbox.Result{{ExitCode: 0, Log: "2 passed", Files: map[string][]byte{"junit.xml": []byte(pwJUnit)}}}
+	passing := `<testsuites><testsuite name="inbox.spec.ts">
+<testcase name="shows inbox" classname="inbox.spec.ts"/><testcase name="sends a message" classname="inbox.spec.ts"/>
+</testsuite></testsuites>`
+	box.results = []sandbox.Result{{ExitCode: 0, Log: "2 passed", Files: map[string][]byte{"junit.xml": []byte(passing)}}}
 	f.recorder.errors = []error{errors.New("results temporarily unavailable")}
 	beforeJobs := len(box.jobs)
 	if _, err := f.svc.ScriptWorker(1).Drain(ctx); err != nil {
 		t.Fatal(err)
 	}
 	checkpoint, _ := f.svc.GetScriptRun(ctx, f.project, r.ID)
-	if checkpoint.Status != RunRunning || checkpoint.Verdict != "passed" || checkpoint.Tests != 2 {
+	if checkpoint.Status != RunRunning || checkpoint.Verdict != "passed" || checkpoint.Tests != 2 || checkpoint.Failures != 0 {
 		t.Fatalf("checkpoint: %+v", checkpoint)
 	}
 	if _, err := f.svc.DB.Q(ctx).Exec(ctx, `UPDATE jobs SET run_at = now() - interval '1 hour' WHERE kind = $1`, JobScript); err != nil {
@@ -153,8 +156,13 @@ func TestScriptRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ = f.svc.GetScriptRun(ctx, f.project, r.ID)
-	if r.Status != RunDone || r.TestRunID == "" || len(box.jobs) != beforeJobs+1 {
+	if r.Status != RunDone || r.Verdict != "passed" || r.TestRunID == "" || len(box.jobs) != beforeJobs+1 {
 		t.Fatalf("resumed report without rerunning sandbox: %+v jobs=%d before=%d", r, len(box.jobs), beforeJobs)
+	}
+	// Both tries sent the same report under the run's id (the import is idempotent on it).
+	if n := len(f.recorder.reports); n < 2 || f.recorder.reports[n-2].LocalRunID != r.ID || f.recorder.reports[n-1].LocalRunID != r.ID ||
+		!bytes.Equal(f.recorder.reports[n-2].JUnit, f.recorder.reports[n-1].JUnit) {
+		t.Errorf("the retry sent another report: %d reports", n)
 	}
 	var left int
 	if err := f.svc.DB.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM script_runs WHERE archive IS NOT NULL`).Scan(&left); err != nil || left != 0 {
@@ -189,7 +197,7 @@ func TestScriptRuns(t *testing.T) {
 	if j := box.jobs[len(box.jobs)-1]; j.VUs != 4 || j.Seconds != 20 || j.Entry != "load.js" || j.TimeoutSeconds != 120 {
 		t.Errorf("k6 job: %+v", j)
 	}
-	if rep := f.recorder.reports[1]; rep.Framework != "k6" || !strings.Contains(string(rep.JUnit), "crossed p(95)&lt;500") {
+	if rep := f.recorder.reports[len(f.recorder.reports)-1]; rep.Framework != "k6" || !strings.Contains(string(rep.JUnit), "crossed p(95)&lt;500") {
 		t.Errorf("k6 report: %s", rep.JUnit)
 	}
 
@@ -221,7 +229,7 @@ func TestScriptRuns(t *testing.T) {
 	if r, _ = f.svc.GetScriptRun(ctx, f.project, r.ID); r.Status != RunError || !strings.Contains(r.Error, "SANDBOX=on") {
 		t.Errorf("no sandboxd: %+v", r)
 	}
-	if runs, err := f.svc.ScriptRuns(ctx, f.project, 10); err != nil || len(runs) != 5 {
+	if runs, err := f.svc.ScriptRuns(ctx, f.project, 10); err != nil || len(runs) != 6 {
 		t.Errorf("list: %d %v", len(runs), err)
 	}
 	if err := f.svc.PurgeProject(ctx, f.project); err != nil {
