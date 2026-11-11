@@ -188,7 +188,8 @@ func buildHandler(cfg config.Config, db *pg.DB, store objstore.Store, reg *metri
 	}
 	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model,
 		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
-	(&dashboard{tenancy: ten, authz: az, query: qry, triage: triage.New(db, res), idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck, sandboxOn: cfg.Sandbox,
+	tri := triage.New(db, res, triage.WithInvestigation(triage.InvestigationDeps{Evidence: qry, Keys: ai, LLM: model}))
+	(&dashboard{tenancy: ten, authz: az, query: qry, triage: tri, idents: idn, tm: tm, artifact: art, store: store, logger: logger, ratePerMinute: cfg.DashboardRatePerMinute, mailer: mailer, publicURL: cfg.PublicURL, imports: ingestDeps, meter: billing.New(db, meterSource{qry}), runStore: res, flaky: flaky.New(db, res), urlcheck: urlcheck.New(db, nil), urlChecksOn: cfg.URLCheck, sandboxOn: cfg.Sandbox,
 		ai:           ai,
 		llmServerKey: cfg.LLMAPIKey != "",
 		auto: autotest.New(autotest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), Tenancy: ten, Keys: ai,

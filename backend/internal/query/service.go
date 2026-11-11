@@ -2,6 +2,9 @@ package query
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -314,6 +317,110 @@ func (s *service) ResultDetail(ctx context.Context, projectID, resultID string) 
 		d.Events = append(d.Events, ev)
 	}
 	return d, rows.Err()
+}
+
+func (s *service) InvestigationEvidence(ctx context.Context, projectID, resultID string) (json.RawMessage, string, string, error) {
+	d, err := s.ResultDetail(ctx, projectID, resultID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	var run struct {
+		Branch, CommitSHA, Environment string
+	}
+	if err := s.db.Q(ctx).QueryRow(ctx, `SELECT coalesce(r.branch, ''), coalesce(r.commit_sha, ''), coalesce(e.key, '') FROM runs r LEFT JOIN environments e ON e.id = r.environment_id
+		WHERE r.project_id = $1 AND r.id = $2 AND r.deleted_at IS NULL`, projectID, d.RunID).Scan(&run.Branch, &run.CommitSHA, &run.Environment); err != nil {
+		return nil, "", "", mapErr(err)
+	}
+	type historyItem struct {
+		Status      string    `json:"status"`
+		DurationMs  int       `json:"durationMs"`
+		Branch      string    `json:"branch"`
+		CommitSHA   string    `json:"commitSha"`
+		Environment string    `json:"environment"`
+		StartedAt   time.Time `json:"startedAt"`
+	}
+	history := []historyItem{}
+	decisions := []map[string]any{}
+	if d.Result.StableTestID != nil {
+		rows, err := s.db.Q(ctx).Query(ctx, `SELECT t.final_status, t.duration_ms, coalesce(r.branch, ''), coalesce(r.commit_sha, ''), coalesce(e.key, ''), r.started_at
+			FROM test_results t JOIN runs r ON r.id = t.run_id LEFT JOIN environments e ON e.id = r.environment_id
+			WHERE r.project_id = $1 AND t.stable_test_id = $2 AND t.id <> $3 AND r.deleted_at IS NULL
+			ORDER BY r.started_at DESC, t.id LIMIT 20`, projectID, *d.Result.StableTestID, resultID)
+		if err != nil {
+			return nil, "", "", err
+		}
+		for rows.Next() {
+			var h historyItem
+			if err := rows.Scan(&h.Status, &h.DurationMs, &h.Branch, &h.CommitSHA, &h.Environment, &h.StartedAt); err != nil {
+				rows.Close()
+				return nil, "", "", err
+			}
+			h.StartedAt = h.StartedAt.UTC()
+			history = append(history, h)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, "", "", err
+		}
+		rows, err = s.db.Q(ctx).Query(ctx, `SELECT e.type, e.payload->>'category', e.occurred_at
+			FROM triage_events e JOIN test_results t ON t.id = e.test_result_id JOIN runs r ON r.id = t.run_id
+			WHERE e.project_id = $1 AND t.stable_test_id = $2 AND e.type IN ('HYPOTHESIS_ACCEPTED','HYPOTHESIS_REJECTED')
+			ORDER BY e.occurred_at DESC LIMIT 20`, projectID, *d.Result.StableTestID)
+		if err != nil {
+			return nil, "", "", err
+		}
+		for rows.Next() {
+			var typ string
+			var category *string
+			var at time.Time
+			if err := rows.Scan(&typ, &category, &at); err != nil {
+				rows.Close()
+				return nil, "", "", err
+			}
+			decisions = append(decisions, map[string]any{"type": typ, "category": category, "occurredAt": at.UTC()})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, "", "", err
+		}
+	}
+	attempts := make([]map[string]any, 0, len(d.Attempts))
+	lastError := ""
+	for _, a := range d.Attempts {
+		item := map[string]any{"attempt": a.Attempt, "status": a.Status, "durationMs": a.DurationMs, "artifacts": a.Artifacts}
+		if a.Error != nil {
+			if a.Error.Message != nil {
+				item["message"] = cutQuery(*a.Error.Message, 4000)
+				lastError = *a.Error.Message
+			}
+			if a.Error.Stack != nil {
+				item["stack"] = cutQuery(*a.Error.Stack, 8000)
+			}
+		}
+		attempts = append(attempts, item)
+	}
+	// The identity when resolved, else this result: a pointer printed with
+	// %v is an address, which would make every request a new fingerprint.
+	subject := "result:" + resultID
+	if d.Result.StableTestID != nil {
+		subject = "identity:" + *d.Result.StableTestID
+	}
+	fingerprintBytes := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", subject, d.Result.FinalStatus, cutQuery(lastError, 1000))))
+	fingerprint := hex.EncodeToString(fingerprintBytes[:])
+	evidence := map[string]any{
+		"failureContext": map[string]any{"result": d.Result, "runId": d.RunID, "branch": run.Branch, "commitSha": run.CommitSHA, "environment": run.Environment, "attempts": attempts},
+		"stableHistory":  history,
+		"triageHistory":  decisions,
+	}
+	b, err := json.Marshal(evidence)
+	return b, fingerprint, d.Result.FinalStatus, err
+}
+
+func cutQuery(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // ---- Identities -----------------------------------------------------------

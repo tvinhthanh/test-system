@@ -50,7 +50,8 @@ const (
 	// (CHECKER_CONCURRENCY, default 2); more would only meet its 503.
 	urlCheckConcurrency = 2
 	// AI drafts: each is one model call of up to a few minutes.
-	aiConcurrency = 2
+	aiConcurrency            = 2
+	investigationConcurrency = 2
 	// Auto test (QĐ-16): each case holds one checker session
 	// (CHECKER_SESSIONS, default 4) for up to a few minutes; drafting and
 	// finding a sign-in hold one more each.
@@ -131,6 +132,8 @@ func main() {
 	}
 	ai := aisuggest.New(aisuggest.Deps{DB: db, Pepper: []byte(cfg.TokenPepper), LLM: model, Pages: pages,
 		ServerKey: cfg.LLMAPIKey, ServerProvider: cfg.LLMProvider, ServerModel: serverModel})
+	qry := query.New(db)
+	tri := triage.New(db, res, triage.WithInvestigation(triage.InvestigationDeps{Evidence: qry, Keys: ai, LLM: model}))
 	tm := testmgmt.New(db, idn, nil, testmgmt.Policy{})
 	// Auto test (QĐ-16): cases run in the checker service's browser
 	// sessions, so the pools run with URLCHECK=on; the key and model are the
@@ -175,7 +178,7 @@ func main() {
 		}
 		urlChecks = urlcheck.New(db, checker, scanLogins{auto})
 	}
-	purge := purger{tenancy: ten, authz: az, artifact: art, triage: triage.New(db, res), flaky: flk, identity: idn,
+	purge := purger{tenancy: ten, authz: az, artifact: art, triage: tri, flaky: flk, identity: idn,
 		testmgmt: tm, results: res, urlcheck: urlChecks, ai: ai, auto: auto}
 
 	metricsMux := http.NewServeMux()
@@ -202,6 +205,14 @@ func main() {
 		w.Logger, w.Metrics = logger, reg
 		logger.Info("worker pool started", "kind", aisuggest.JobDraft, "concurrency", aiConcurrency, "server_key", cfg.LLMAPIKey != "",
 			"server_provider", ai.ServerProvider(), "reads_pages", pages != nil)
+		w.Run(ctx)
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w := tri.InvestigationWorker(investigationConcurrency)
+		w.Logger, w.Metrics = logger, reg
+		logger.Info("worker pool started", "kind", triage.JobInvestigation, "concurrency", investigationConcurrency)
 		w.Run(ctx)
 	}()
 	if cfg.Sandbox {

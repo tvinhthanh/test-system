@@ -679,6 +679,51 @@ export function createFixtureTransport(): Transport {
       });
     }
     if (path.endsWith("/triage-events")) return response({});
+    const investigationList = path.match(
+      /^\/v1\/projects\/(commerce|platform)\/results\/(result-\d+)\/investigations$/,
+    );
+    if (investigationList) {
+      const item = {
+        id: "investigation-preview",
+        status: "done",
+        requestedBy: user.email,
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        turnCount: 2,
+        toolCount: 2,
+        inputTokens: 1810,
+        outputTokens: 220,
+        error: "",
+        createdAt: "2026-11-11T02:00:00Z",
+        startedAt: "2026-11-11T02:00:01Z",
+        finishedAt: "2026-11-11T02:00:08Z",
+        hypothesis: {
+          id: "hypothesis-preview",
+          category: "test_bug",
+          confidence: 0.82,
+          evidence: [
+            {
+              source: "failure_context",
+              fact: "Both attempts failed at the same checkout heading locator.",
+            },
+            {
+              source: "stable_history",
+              fact: "The stable test passed before the latest UI change.",
+            },
+          ],
+          suggestedAction:
+            "Update the checkout confirmation locator and keep the visibility assertion.",
+          decision: null,
+        },
+      };
+      return response(init?.body ? item : { items: [item] });
+    }
+    if (
+      /^\/v1\/projects\/(commerce|platform)\/results\/result-\d+\/hypotheses\/[^/]+\/decision$/.test(
+        path,
+      )
+    )
+      return response({});
     // Test Management (§6.8): a small, coherent set — two suites, three
     // requirements, five cases (two critical, one linked), one plan with
     // executions, two releases (one blocked, one shipped by override).

@@ -7,6 +7,9 @@ import {
   History,
   Paperclip,
   RefreshCw,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   UserRoundCheck,
 } from "@lucide/vue";
 import { useResultDetail } from "./useResultDetail";
@@ -32,6 +35,11 @@ const {
   emit,
   artifactUrl,
   traceUrl,
+  investigations,
+  investigationBusy,
+  investigationError,
+  investigate,
+  decide,
 } = useResultDetail();
 // Only these kinds are ever rendered inline by the server (§11.5 allowlist);
 // the rest download, so the link says so up front.
@@ -230,6 +238,99 @@ const canTriage = useProjectPermission("triage");
             </ul>
           </article>
         </div>
+      </section>
+
+      <section class="mt-8" aria-labelledby="investigation-title">
+        <SectionHeading id="investigation-title" title="AI investigation">
+          <Button
+            v-if="
+              canTriage &&
+              ['failed', 'timed_out', 'interrupted'].includes(
+                data.result.finalStatus,
+              )
+            "
+            size="sm"
+            :disabled="
+              investigationBusy ||
+              ['queued', 'collecting', 'investigating'].includes(
+                investigations[0]?.status ?? '',
+              )
+            "
+            @click="investigate"
+            ><Sparkles />Investigate with AI</Button
+          >
+        </SectionHeading>
+        <p v-if="investigationError" class="text-danger text-sm" role="alert">
+          The investigation action could not be completed.
+        </p>
+        <EmptyState
+          v-if="!investigations.length"
+          compact
+          :icon="Sparkles"
+          description="No AI investigation yet. Evidence stays read-only until a member accepts a hypothesis."
+        />
+        <article v-else class="bg-card space-y-4 rounded-lg border p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge :status="investigations[0]!.status" />
+            <span class="text-muted-foreground text-xs">{{
+              investigations[0]!.model || "Waiting for the AI worker"
+            }}</span>
+          </div>
+          <p v-if="investigations[0]!.error" class="text-danger text-sm">
+            {{ investigations[0]!.error }}
+          </p>
+          <template v-if="investigations[0]!.hypothesis">
+            <div class="flex flex-wrap items-center gap-2">
+              <strong class="capitalize">{{
+                investigations[0]!.hypothesis!.category.replaceAll("_", " ")
+              }}</strong>
+              <span class="text-muted-foreground text-xs"
+                >{{
+                  Math.round(investigations[0]!.hypothesis!.confidence * 100)
+                }}% confidence</span
+              >
+            </div>
+            <ul class="list-disc space-y-1 pl-5 text-sm">
+              <li
+                v-for="fact in investigations[0]!.hypothesis!.evidence"
+                :key="`${fact.source}:${fact.fact}`"
+              >
+                {{ fact.fact }}
+                <span class="text-muted-foreground"
+                  >({{ fact.source.replaceAll("_", " ") }})</span
+                >
+              </li>
+            </ul>
+            <p class="text-sm">
+              <span class="font-medium">Suggested action:</span>
+              {{ investigations[0]!.hypothesis!.suggestedAction }}
+            </p>
+            <div
+              v-if="canTriage && !investigations[0]!.hypothesis!.decision"
+              class="flex gap-2"
+            >
+              <Button
+                size="sm"
+                :disabled="investigationBusy"
+                @click="decide('accept')"
+                ><ThumbsUp />Accept</Button
+              >
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="investigationBusy"
+                @click="decide('reject')"
+                ><ThumbsDown />Reject</Button
+              >
+            </div>
+            <p
+              v-else-if="investigations[0]!.hypothesis!.decision"
+              class="text-muted-foreground text-sm capitalize"
+            >
+              Decision: {{ investigations[0]!.hypothesis!.decision }}
+            </p>
+          </template>
+        </article>
       </section>
 
       <section class="event-list" aria-labelledby="events-title">
