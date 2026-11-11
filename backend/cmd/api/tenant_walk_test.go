@@ -186,6 +186,20 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		string(a.project)).Scan(&scanA); err != nil {
 		t.Fatal(err)
 	}
+	// A finished AI investigation of A's with its hypothesis (QĐ-4), written
+	// the way the worker would: no model here.
+	var investigationA, hypothesisA string
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO ai_investigations (project_id, org_id, test_result_id, dedupe_key, requested_day, status, requested_by, finished_at)
+		VALUES ($1, $2, $3, $4, current_date, 'done', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID, resultA, strings.Repeat("ab", 32)).Scan(&investigationA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO ai_hypotheses (project_id, test_result_id, category, confidence, evidence, model, prompt_version, investigation_id)
+		VALUES ($1, $2, 'test_bug', 0.8, '[]', 'walk', 'investigation-v1', $3) RETURNING id`, string(a.project), resultA, investigationA).Scan(&hypothesisA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE ai_investigations SET hypothesis_id = $2 WHERE id = $1`, investigationA, hypothesisA); err != nil {
+		t.Fatal(err)
+	}
 	if reqA == "" || caseA == "" || linkA == "" || planA == "" || execA == "" || releaseA == "" {
 		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q %q", reqA, caseA, linkA, planA, execA, releaseA)
 	}
@@ -224,23 +238,27 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"tokenId":       a.tokenID,
 		"environmentId": envA,
 		"checkId":       checkA.ID, "which": "desktop",
-		"suggestionId": suggestionA,
-		"accountKey":   "walk-account", "draftId": draftA, "autoRunId": autoRunA, "shot": "final", "scanId": scanA, "loadRunId": loadA, "scriptRunId": scriptA,
+		"suggestionId":    suggestionA,
+		"investigationId": investigationA, "hypothesisId": hypothesisA,
+		"accountKey": "walk-account", "draftId": draftA, "autoRunId": autoRunA, "shot": "final", "scanId": scanA, "loadRunId": loadA, "scriptRunId": scriptA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
-		"POST /v1/projects/{projectId}/results/{resultId}/triage-events":             map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
-		"POST /v1/runs/{localRunId}/events":                                          map[string]any{"events": []any{event}},
-		"POST /v1/runs/{localRunId}/finish":                                          map[string]any{},
-		"POST /v1/artifacts/{artifactId}/complete":                                   map[string]any{"sha256": strings.Repeat("ab", 32)},
-		"POST /v1/artifacts":                                                         declare,
-		"POST /v1/projects/{projectId}/review/{itemId}":                              map[string]any{"decision": "kept"},
-		"POST /v1/projects/{projectId}/access-requests/{requestId}/decide":           map[string]any{"decision": "denied"},
-		"POST /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide":       map[string]any{"decision": "denied"},
-		"POST /v1/organizations/{organizationId}/access-requests/{requestId}/decide": map[string]any{"decision": "denied"},
-		"POST /v1/projects/{projectId}/identities/{identityId}/merge":                map[string]any{"into": identityA},
-		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge":           map[string]any{},
-		"POST /v1/projects/{projectId}/identities/{identityId}/split":                map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
+		"POST /v1/projects/{projectId}/results/{resultId}/triage-events": map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
+		// AI investigation (QĐ-4): requesting takes no body; a valid decision,
+		// so only the tenant check can refuse.
+		"POST /v1/projects/{projectId}/results/{resultId}/hypotheses/{hypothesisId}/decision": map[string]any{"decision": "reject"},
+		"POST /v1/runs/{localRunId}/events":                                                   map[string]any{"events": []any{event}},
+		"POST /v1/runs/{localRunId}/finish":                                                   map[string]any{},
+		"POST /v1/artifacts/{artifactId}/complete":                                            map[string]any{"sha256": strings.Repeat("ab", 32)},
+		"POST /v1/artifacts":                                                                  declare,
+		"POST /v1/projects/{projectId}/review/{itemId}":                                       map[string]any{"decision": "kept"},
+		"POST /v1/projects/{projectId}/access-requests/{requestId}/decide":                    map[string]any{"decision": "denied"},
+		"POST /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide":                map[string]any{"decision": "denied"},
+		"POST /v1/organizations/{organizationId}/access-requests/{requestId}/decide":          map[string]any{"decision": "denied"},
+		"POST /v1/projects/{projectId}/identities/{identityId}/merge":                         map[string]any{"into": identityA},
+		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge":                    map[string]any{},
+		"POST /v1/projects/{projectId}/identities/{identityId}/split":                         map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
 		// Test Management (P2). Valid bodies, so only the tenant check can refuse.
 		"POST /v1/projects/{projectId}/specialized-results":            specializedBody,
 		"POST /v1/projects/{projectId}/suites":                         map[string]any{"name": "Walk"},

@@ -207,3 +207,59 @@ it("opens traces in the same-origin trace viewer with an absolute artifact URL",
       ),
   );
 });
+
+it("decodes investigations and sends start and human decisions to scoped routes", async () => {
+  const item = {
+    id: "i1",
+    status: "done",
+    requestedBy: "u1",
+    provider: "anthropic",
+    model: "m1",
+    turnCount: 2,
+    toolCount: 2,
+    inputTokens: 100,
+    outputTokens: 20,
+    error: "",
+    createdAt: "2026-11-11T00:00:00Z",
+    startedAt: null,
+    finishedAt: "2026-11-11T00:00:02Z",
+    hypothesis: {
+      id: "h1",
+      category: "test_bug",
+      confidence: 0.82,
+      evidence: [
+        { source: "failure_context", fact: "same locator failed twice" },
+      ],
+      suggestedAction: "update locator",
+      decision: "",
+    },
+  };
+  const transport = vi.fn<Transport>(async (input, init) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path.endsWith("/investigations") && init?.body)
+      return new Response(JSON.stringify(item));
+    if (path.endsWith("/investigations"))
+      return new Response(JSON.stringify({ items: [item] }));
+    return new Response(JSON.stringify({}));
+  });
+  const client = new ApiClient(transport);
+  client.csrfToken = "csrf";
+  const repo = new ReportsRepository(client);
+  const list = await repo.investigations(
+    "p/x",
+    "r/1",
+    new AbortController().signal,
+  );
+  expect(list[0]?.hypothesis?.category).toBe("test_bug");
+  await repo.startInvestigation("p/x", "r/1", new AbortController().signal);
+  await repo.decideHypothesis(
+    "p/x",
+    "r/1",
+    "h/1",
+    "accept",
+    new AbortController().signal,
+  );
+  expect(String(transport.mock.calls[2]?.[0])).toContain(
+    "/projects/p%2Fx/results/r%2F1/hypotheses/h%2F1/decision",
+  );
+});

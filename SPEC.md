@@ -226,6 +226,8 @@ Wedge 12 tháng đầu: **"Bộ nhớ dài hạn cho bộ test E2E của bạn"*
 
 ### 1.4 QĐ-4 — AI Triage v0 vào Phase 1.5 ✅ CHỐT
 
+> **Thiết kế triển khai Proposed (11-11-2026):** [`docs/ai-failure-investigation.md`](docs/ai-failure-investigation.md) khóa state machine, evidence tools, schema, API, quyền, ngân sách và evaluation gate. Thiết kế giữ `triage` là module sở hữu `AiHypothesis`; chưa đánh dấu đã build.
+
 Phạm vi v0 (cố ý hẹp):
 
 - **Input:** TestResult fail + error message + stack trace + diff so với lần pass gần nhất + lịch sử flaky của `stableTestId`.
@@ -247,6 +249,165 @@ Phạm vi v0 (cố ý hẹp):
 - Fail trùng fingerprint trong cùng ngày không chạy lại hypothesis; LLM có trần cứng §10.3.
 
 **Lý do:** 0,5–1 người-tháng một khi schema chuẩn; đây là lớp tăng tốc triage, không phải điều kiện tồn tại của Report Center.
+
+#### 1.4.1 Thiết kế AI Failure Investigation Agent — Proposed 11-11-2026
+
+> Bản chi tiết và các DTO mẫu: [`docs/ai-failure-investigation.md`](docs/ai-failure-investigation.md). Mục này là contract chuẩn trong spec; trạng thái **Proposed**, chưa được tính là đã build trong §0.5.
+
+**Quyết định module:** workflow investigation nằm trong `internal/triage`, không tạo domain `investigation` song song. `triage` đã sở hữu `TriageEvent` và `AiHypothesis` (§6.9.5); chia workflow sang module khác sẽ tạo hai chủ sở hữu cho cùng một nghiệp vụ. Implementation được phép tách thành các file/package `internal` bên trong `triage`, nhưng chỉ phơi qua `triage.Service`.
+
+**Luồng người dùng:** member mở một result fail → bấm **Investigate with AI** → API authorize project và enqueue → worker thu thập evidence bằng tool chỉ đọc → model trả đúng một hypothesis có cấu trúc → UI hiển thị để người duyệt Accept/Reject. Accept/Reject phải sinh `HYPOTHESIS_ACCEPTED`/`HYPOTHESIS_REJECTED`; `TriageEvent` tiếp tục là nguồn sự thật duy nhất của TTRC và metric AI. Agent không tự đóng issue, rerun, sửa test, chạy script, sửa source hoặc tạo PR.
+
+**State machine:**
+
+```text
+queued -> collecting -> investigating -> done
+   |          |               |
+   +----------+---------------+-> error
+```
+
+Queue key là investigation id. Worker khóa row và bỏ qua row terminal để delivery idempotent. Queue retry tiếp tục từ step đã commit cuối, không gọi lại tool đã xong và không tạo hypothesis thứ hai.
+
+Mỗi lượt model phải trả JSON khớp đúng một trong hai action:
+
+```json
+{"action":"call_tool","tool":"stable_history","arguments":{}}
+```
+
+hoặc:
+
+```json
+{
+  "action":"finish",
+  "hypothesis": {
+    "category":"flaky_timing",
+    "confidence":0.78,
+    "evidence":[{"source":"history","fact":"Identity này pass 18/20 run gần nhất"}],
+    "suggestedAction":"Kiểm tra readiness condition và bỏ fixed wait."
+  }
+}
+```
+
+Server validate taxonomy, confidence, số evidence và source id. Mọi fact phải trỏ tới observation mà tool đã trả; UI không hiển thị hidden reasoning, raw prompt hoặc model HTML.
+
+**Ngân sách cứng MVP:**
+
+| Hạng mục | Trần |
+|---|---:|
+| Model turn | 4 |
+| Tool call | 6 |
+| Wall time | 3 phút |
+| Tổng observation JSON | 64 KiB |
+| Evidence trong kết luận | 10 |
+| `suggestedAction` | 1.000 byte |
+| Investigation/org/ngày | Team 200, Free 20 |
+
+**Tool allowlist:** mọi tool bị bind vào `projectId` và `testResultId` đã authorize; model không được truyền project id, SQL, file path, host hoặc URL.
+
+| Tool | Evidence trả về | MVP |
+|---|---|---|
+| `failure_context` | Result/run, attempts, error + stack excerpt đã giới hạn, artifact metadata | Luôn chạy đầu tiên |
+| `stable_history` | Tối đa 20 result gần nhất của cùng stable identity: status, duration, branch, commit, environment | Có |
+| `compare_last_pass` | So sánh với lần pass gần nhất: error signature, duration, branch/commit, attempt count | Có |
+| `triage_history` | Tối đa 20 quyết định accept/reject trước của cùng stable identity | Có |
+| `text_artifact` | Tối đa 16 KiB log/text attachment đã verify và redact | Có |
+| `github_change_context` | Changed files + diff excerpt trong commit range bị giới hạn | P3, tắt ở MVP |
+
+MVP không gửi screenshot/video/trace/HAR body, secret, cookie, authorization header, environment variable hoặc attachment tùy ý sang provider. `text_artifact` chỉ nhận artifact id đã xuất hiện từ `failure_context`, cùng project/result attempt, kind `log` hoặc text `attachment`; redact secret trước khi truncate và trước khi lưu.
+
+**Contract phụ thuộc:** `triage` chỉ ghi bảng của nó và khai báo interface phía người dùng:
+
+```go
+type EvidenceReader interface {
+    FailureContext(ctx context.Context, projectID, resultID string) (FailureContext, error)
+    StableHistory(ctx context.Context, projectID, stableTestID string, limit int) ([]HistoryItem, error)
+    CompareLastPass(ctx context.Context, projectID, resultID string) (Comparison, error)
+    TriageHistory(ctx context.Context, projectID, stableTestID string, limit int) ([]Decision, error)
+    TextArtifact(ctx context.Context, projectID, resultID, artifactID string, maxBytes int64) (TextEvidence, error)
+}
+
+type CredentialSource interface {
+    Credentials(ctx context.Context, orgID string) (llm.Account, string, bool, error)
+}
+
+type InvestigatorLLM interface {
+    JSON(ctx context.Context, req llm.Request) (llm.Result, error)
+}
+```
+
+Cross-domain read nằm trong `query`; artifact byte vẫn đọc qua `artifact`/object store. Adapter phối hợp hai phía nằm ở `cmd/api`/`cmd/worker`. `aisuggest.Service.Credentials` cấp key của organization hoặc server mà không lộ sealed-key storage cho `triage`.
+
+`triage.Service` thêm `RequestInvestigation`, `GetInvestigation`, `ListInvestigations`, `DecideHypothesis` và `InvestigationWorker`.
+
+**Schema migration dự kiến `0051_ai_investigations.sql`, vẫn do `triage` sở hữu:**
+
+```sql
+CREATE TABLE ai_investigations (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id      uuid NOT NULL,
+    org_id          uuid NOT NULL,
+    test_result_id  uuid NOT NULL,
+    stable_test_id  uuid,
+    dedupe_key      text NOT NULL CHECK (length(dedupe_key) = 64),
+    requested_day   date NOT NULL,
+    status          text NOT NULL DEFAULT 'queued'
+                    CHECK (status IN ('queued','collecting','investigating','done','error')),
+    requested_by    text NOT NULL CHECK (length(requested_by) BETWEEN 1 AND 254),
+    provider        text NOT NULL DEFAULT '',
+    model           text NOT NULL DEFAULT '',
+    key_source      text NOT NULL DEFAULT '',
+    prompt_version  text NOT NULL DEFAULT 'investigation-v1',
+    turn_count      integer NOT NULL DEFAULT 0 CHECK (turn_count BETWEEN 0 AND 4),
+    tool_count      integer NOT NULL DEFAULT 0 CHECK (tool_count BETWEEN 0 AND 6),
+    input_tokens    integer NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens   integer NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    hypothesis_id   uuid,
+    error           text NOT NULL DEFAULT '' CHECK (octet_length(error) <= 1000),
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    started_at      timestamptz,
+    finished_at     timestamptz,
+    UNIQUE (project_id, dedupe_key, requested_day)
+);
+
+CREATE INDEX ai_investigations_result
+    ON ai_investigations (project_id, test_result_id, created_at DESC);
+CREATE INDEX ai_investigations_org_day
+    ON ai_investigations (org_id, requested_day);
+
+CREATE TABLE ai_investigation_steps (
+    investigation_id uuid NOT NULL,
+    sequence         integer NOT NULL CHECK (sequence BETWEEN 1 AND 12),
+    kind             text NOT NULL CHECK (kind IN ('tool','model')),
+    tool             text NOT NULL DEFAULT '',
+    request          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    observation      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    input_tokens     integer NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens    integer NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (investigation_id, sequence)
+);
+```
+
+`ai_hypotheses` thêm nullable `investigation_id` với unique index. Transaction cuối cùng phải đồng thời insert hypothesis, append `HYPOTHESIS_PROPOSED` và chuyển investigation sang `done`. Không tạo cross-module FK. `request`/`observation` chỉ lưu argument đã validate và fact đã redact/giới hạn; cấm API key, raw prompt, hidden reasoning và binary artifact. Purge theo thứ tự steps → investigations/hypotheses → triage events.
+
+**HTTP contract:**
+
+| Method + path | Quyền | Hành vi |
+|---|---|---|
+| `POST /v1/projects/{projectId}/results/{resultId}/investigations` | `triage` | `202` tạo queued; `200` trả investigation cùng dedupe key trong ngày |
+| `GET /v1/projects/{projectId}/results/{resultId}/investigations?limit=&cursor=` | `view` | Danh sách mới nhất trước, cursor paging |
+| `GET /v1/projects/{projectId}/results/{resultId}/investigations/{id}` | `view` | Status, public activity label, usage, error, hypothesis; không trả prompt/observation nội bộ |
+| `POST /v1/projects/{projectId}/results/{resultId}/hypotheses/{id}/decision` | `triage` | `{decision: accept|reject, category?, note?}`; một terminal decision, retry idempotent |
+
+Error code ổn định: `AI_NOT_CONFIGURED`, `AI_DAILY_LIMIT`, `RESULT_NOT_FAILED`, `INVESTIGATION_BUSY`, `HYPOTHESIS_DECIDED`; result khác project luôn trả `404`. Accept mặc định dùng category của hypothesis; override vẫn phải thuộc §8.7 và được ghi vào event payload.
+
+**UI:** thêm card **AI investigation** trong `ResultDetailPage.vue`, sau attempts và trước triage timeline. Chỉ hiện nút cho `failed|timed_out|interrupted` khi AI có key và người dùng có quyền `triage`; kết quả cũ vẫn đọc được nếu provider bị tắt. Poll queued/running theo pattern Script Runs. Hiển thị category, confidence, evidence có source và suggested action; Accept cho override category, Reject cho note ngắn. Mọi text render dạng plain text. Fixture bắt buộc: queued→done, low confidence, provider error, daily limit, không có stable identity, accept, reject và viewer không có quyền triage.
+
+**Security/operations:** worker xác minh lại project/result/org thay vì tin payload; mọi SQL read có `project_id`; unknown tool không chạy; provider host vẫn bị khóa trong `platform/llm`; daily limit giữ bằng advisory transaction lock; log không chứa evidence/prompt/key. Metric gồm request, terminal status, latency, tool count, token, provider error, acceptance, decision và coverage, không gắn label chứa project/result/model output/error text.
+
+**Evaluation gate:** trước khi bật mặc định phải có 20–30 case đã redact với category + evidence ground truth. Đo category accuracy/macro-F1, evidence support rate, unsupported-claim rate, tool success/unnecessary-call rate, p50/p95 latency, token và cost. Sau release áp đúng guardrail QĐ-4: chưa đủ 30 quyết định/14 ngày thì `insufficient_data`; acceptance < 40% với decision rate ≥ 60% trong hai cửa sổ liên tiếp thì chuyển opt-in.
+
+**Lát triển khai theo thứ tự:** (1) contract + migration + purge/OpenAPI/tenant tests; (2) deterministic evidence collector + redact + daily dedupe, chưa gọi LLM; (3) bounded agent worker + retry + terminal transaction; (4) API + UI + permission/polling states; (5) labelled evaluation harness và release decision; (6) GitHub read-only context sau MVP, qua review privacy/quyền riêng.
 
 ### 1.5 QĐ-5 — Không build managed agent trong 12 tháng đầu ✅ CHỐT
 

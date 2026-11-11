@@ -16,6 +16,22 @@ Nhắc lại QĐ-11 #2: những gì dưới đây **không được nhắc tới
 | **T4** security + tenant isolation | ✅ tenant isolation (mọi route) 16-09; security §11.6 có bằng chứng từng dòng 17-09 (govulncheck, npm audit, CORS/headers, rate limit dashboard, SSRF rule, route inventory); **restore drill ✅** (`test/restore/`: dump → DB mới → 24/24 bảng checksum bằng nhau, api trả đúng byte, worker tiếp job pending, RTO ≈ 2 s ở cỡ test); audit revoke ✅ (`authz_audit`); còn mở: pentest | 17-09-2026 | §T4 |
 | **T5** soak 24–72 h | ⏳ harness `test/soak/` chạy **2 giờ** trên laptop 18-09: 5 400 run, 545k result, 87k request, **0 lỗi**, mọi trend phẳng (worker heap, goroutine, pool, backlog, `jobs`, latency), heap api chỉ lớn theo payload của store dev; tìm ra và sửa: `jobs` không bao giờ dọn, gauge backlog quét cả bảng, grant store dev không xóa; heap api đã profile: chỉ payload của store dev lớn lên (`io.ReadAll` ← `memory.Store.serve`), không có holder khác. **24–72 h cần host riêng + S3 staging** | 17-09-2026 | §T5 |
 
+## AI failure investigation (QĐ-4) — sửa trước khi ghép, 11-11-2026
+
+Nhánh `codex/ai-investigation-design`, chưa lên `main`; thiết kế vẫn **Proposed**
+(SPEC §1.4.1). Chạy `go test` trên PostgreSQL 17 thật thì hai test đỏ; cả hai
+đều là lỗi thật của code, không phải của test:
+
+| # | Mức | Lỗi | Sửa | Bằng chứng |
+|---|---|---|---|---|
+| 1 | Cao (tính năng không chạy được) | `query.InvestigationEvidence` đọc `e.name`, cột không có (bảng `environments` chỉ có `key`), nên mọi yêu cầu đều lỗi SQL; `RequestInvestigation` lại đổi mọi lỗi thành "not found", nên lỗi không hiện ra ở đâu | Đọc `e.key`, `LEFT JOIN` và `coalesce` cho `branch`/`commit_sha` (nullable); lỗi evidence trả nguyên, chỉ result không thuộc project mới là 404 | `TestFailureInvestigation` |
+| 2 | Trung bình (chống trùng không chạy) | Fingerprint in con trỏ `StableTestID` bằng `%v`, tức một địa chỉ bộ nhớ: mỗi lần gọi ra một khóa khác, nên "cùng failure trong ngày trả lại hàng cũ" không bao giờ đúng và hạn mức ngày bị tiêu vô ích | Dùng giá trị identity, hoặc id result khi chưa resolve | cùng test: gọi lần hai trả đúng id cũ, `created=false` |
+| 3 | Trung bình (§11.3.3) | `GET …/results/{resultId}/investigations` với result của tổ chức khác trả `200 {"items":[]}`; `POST` cùng đường dẫn xét "AI đã cấu hình chưa" trước khi kiểm tenant (theo thứ tự trong code) | Kiểm result thuộc project trước mọi thứ khác (`ownResult`) → 404 | `TestEveryRouteRefusesCrossTenant` đi cả 4 route mới (fixture `investigationId`, `hypothesisId`); `TestFailureInvestigation` kiểm project khác trên list/get/request |
+
+Đã chạy: `go vet`, `gofmt`, `go test ./internal/triage ./internal/query ./cmd/api
+./cmd/worker ./test/arch` — đạt. **Chưa kiểm:** một lần gọi model thật, worker
+investigation trên Docker, giao diện trên api thật.
+
 ## QĐ-19 final reliability review — 07-11-2026
 
 - Migration 0050 keeps the completed sandbox report only while its JUnit

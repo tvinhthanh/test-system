@@ -16,6 +16,7 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -181,6 +182,9 @@ type Service interface {
 	Run(ctx context.Context, projectID, runID string) (Run, error)
 	Results(ctx context.Context, projectID, runID string, limit int, cursor string) (Page[Result], error)
 	ResultDetail(ctx context.Context, projectID, resultID string) (ResultDetail, error)
+	// InvestigationEvidence is a bounded, redacted-ready snapshot for the
+	// triage agent. JSON keeps query independent of triage's domain types.
+	InvestigationEvidence(ctx context.Context, projectID, resultID string) (evidence json.RawMessage, fingerprint, finalStatus string, err error)
 	// Identities lists a project's active identities; view "flaky" keeps
 	// only suspect/flaky/quarantine_suggested (server-side filter).
 	Identities(ctx context.Context, projectID, view string, limit int, cursor string) (Page[Identity], error)

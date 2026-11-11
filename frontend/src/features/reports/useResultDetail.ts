@@ -2,7 +2,7 @@ import { computed, onScopeDispose, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useServices } from "../../app/providers/services";
 import { useResource } from "../../core/state/useResource";
-import type { ResultDetail } from "./reportsRepository";
+import type { Investigation, ResultDetail } from "./reportsRepository";
 
 const triageTypes = new Set([
   "HYPOTHESIS_ACCEPTED",
@@ -20,12 +20,57 @@ export function useResultDetail() {
   const resource = useResource<ResultDetail>();
   const actionBusy = ref(false),
     actionError = ref<unknown>(null);
+  const investigations = ref<Investigation[]>([]),
+    investigationBusy = ref(false),
+    investigationError = ref<unknown>(null);
   const seen = ref(false);
   let disposed = false;
   function refresh() {
-    return resource.load((signal) =>
-      reports.result(project.value, resultId.value, signal),
-    );
+    return resource.load(async (signal) => {
+      const [detail, items] = await Promise.all([
+        reports.result(project.value, resultId.value, signal),
+        reports.investigations(project.value, resultId.value, signal),
+      ]);
+      investigations.value = items;
+      return detail;
+    });
+  }
+  async function investigate() {
+    if (investigationBusy.value || disposed) return;
+    investigationBusy.value = true;
+    investigationError.value = null;
+    try {
+      await reports.startInvestigation(
+        project.value,
+        resultId.value,
+        new AbortController().signal,
+      );
+      await refresh();
+    } catch (error) {
+      investigationError.value = error;
+    } finally {
+      if (!disposed) investigationBusy.value = false;
+    }
+  }
+  async function decide(decision: "accept" | "reject") {
+    const h = investigations.value[0]?.hypothesis;
+    if (!h || investigationBusy.value) return;
+    investigationBusy.value = true;
+    investigationError.value = null;
+    try {
+      await reports.decideHypothesis(
+        project.value,
+        resultId.value,
+        h.id,
+        decision,
+        new AbortController().signal,
+      );
+      await refresh();
+    } catch (error) {
+      investigationError.value = error;
+    } finally {
+      if (!disposed) investigationBusy.value = false;
+    }
   }
   async function emit(type: string) {
     if (!triageTypes.has(type) && type !== "FAILURE_SEEN") return;
@@ -81,5 +126,10 @@ export function useResultDetail() {
     emit,
     artifactUrl,
     traceUrl,
+    investigations,
+    investigationBusy,
+    investigationError,
+    investigate,
+    decide,
   };
 }
