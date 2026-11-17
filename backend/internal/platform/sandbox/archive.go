@@ -83,16 +83,27 @@ func CheckArchive(archive []byte, kind, entry string) (Summary, error) {
 	if err != nil {
 		return Summary{}, archiveErr("not a .tar.gz (%v)", err)
 	}
-	tr := tar.NewReader(gz)
+	// The tar stream itself is bounded too, headers included: entries
+	// without content (folders, a name repeated, pax records) cost no
+	// unpacked bytes, and a few MB of them compress to GBs to read.
+	stream := &capReader{r: gz, left: maxStream}
+	tr := tar.NewReader(stream)
 	var s Summary
+	entries := 0
 	found := map[string]bool{}
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
+		if stream.over {
+			return Summary{}, archiveErr("over %d MB unpacked", MaxUnpacked>>20)
+		}
 		if err != nil {
 			return Summary{}, archiveErr("the archive is broken (%v)", err)
+		}
+		if entries++; entries > MaxEntries {
+			return Summary{}, archiveErr("more than %d files and folders", MaxEntries)
 		}
 		name := strings.TrimPrefix(h.Name, "./")
 		if name == "" || name == "." {
@@ -116,6 +127,9 @@ func CheckArchive(archive []byte, kind, entry string) (Summary, error) {
 			return Summary{}, archiveErr("more than %d files", MaxFiles)
 		}
 		n, err := io.Copy(io.Discard, io.LimitReader(tr, MaxUnpacked-s.Bytes+1))
+		if stream.over {
+			return Summary{}, archiveErr("over %d MB unpacked", MaxUnpacked>>20)
+		}
 		if err != nil {
 			return Summary{}, archiveErr("the archive is broken (%v)", err)
 		}
@@ -143,4 +157,30 @@ func CheckArchive(archive []byte, kind, entry string) (Summary, error) {
 		}
 	}
 	return s, nil
+}
+
+// maxStream bounds the decompressed tar stream: the files' bytes plus room
+// for every entry's headers (a long name or pax record is a few KB).
+const maxStream = MaxUnpacked + MaxEntries*8<<10
+
+// capReader reads at most left bytes, then fails and says so (over).
+type capReader struct {
+	r    io.Reader
+	left int64
+	over bool
+}
+
+var errStreamCap = errors.New("sandbox: tar stream over its limit")
+
+func (c *capReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		c.over = true
+		return 0, errStreamCap
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
 }

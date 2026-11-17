@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -82,6 +83,50 @@ func TestCheckArchive(t *testing.T) {
 	gz.Close()
 	if _, err := CheckArchive(buf.Bytes(), KindPlaywright, "big.bin"); err == nil || !strings.Contains(err.Error(), "unpacked") {
 		t.Errorf("bomb: %v", err)
+	}
+	// Entries with no content cost no unpacked bytes but still count: a
+	// few MB of repeated folder headers is millions of entries (GBs of tar)
+	// that the api would read for seconds on every upload.
+	buf.Reset()
+	gz = gzip.NewWriter(&buf)
+	tw = tar.NewWriter(gz)
+	_ = tw.WriteHeader(&tar.Header{Name: "load.js", Mode: 0o644, Size: 1, Typeflag: tar.TypeReg})
+	_, _ = tw.Write([]byte("x"))
+	for range 200_000 {
+		_ = tw.WriteHeader(&tar.Header{Name: "d/", Mode: 0o755, Typeflag: tar.TypeDir})
+	}
+	tw.Close()
+	gz.Close()
+	start := time.Now()
+	if _, err := CheckArchive(buf.Bytes(), KindK6, "load.js"); err == nil || !strings.Contains(err.Error(), "files and folders") {
+		t.Errorf("folder bomb (%d KB): %v", buf.Len()>>10, err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("folder bomb took %v to refuse", took)
+	}
+	// Too many files.
+	many := map[string]string{"load.js": "x"}
+	for i := range MaxFiles {
+		many[fmt.Sprintf("f/%d.js", i)] = ""
+	}
+	if _, err := CheckArchive(pack(t, many), KindK6, "load.js"); err == nil || !strings.Contains(err.Error(), "more than 5000 files") {
+		t.Errorf("5001 files: %v", err)
+	}
+	// Headers count toward the stream cap even under the entry cap: long
+	// pax records on a few entries.
+	buf.Reset()
+	gz = gzip.NewWriter(&buf)
+	tw = tar.NewWriter(gz)
+	_ = tw.WriteHeader(&tar.Header{Name: "load.js", Mode: 0o644, Size: 1, Typeflag: tar.TypeReg})
+	_, _ = tw.Write([]byte("x"))
+	pad := strings.Repeat("a", 900<<10)
+	for i := range 300 {
+		_ = tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("p%d/", i), Mode: 0o755, Typeflag: tar.TypeDir, PAXRecords: map[string]string{"comment": pad}})
+	}
+	tw.Close()
+	gz.Close()
+	if _, err := CheckArchive(buf.Bytes(), KindK6, "load.js"); err == nil || !strings.Contains(err.Error(), "unpacked") {
+		t.Errorf("pax padding (%d KB): %v", buf.Len()>>10, err)
 	}
 	if _, err := CleanFilter("grep", "login; rm -rf /"); err == nil {
 		t.Error("a filter with ; passed")
