@@ -162,6 +162,62 @@ func TestRuleInvestigationWithoutAI(t *testing.T) {
 	}
 }
 
+// The rules recognise an error the team already explained for ANOTHER test:
+// same message up to numbers (hosts, ports), different identity.
+func TestRulesRecogniseAnErrorExplainedForAnotherTest(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	res := results.New(db)
+	ctx := context.Background()
+	run, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: projectA, EnvironmentID: envA, LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-4423456789ab", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = res.AppendAttempts(ctx, run.ID, []results.AttemptEvent{
+		{Sequence: 1, ClientTestID: "ct_orders", DisplayName: "orders", IdentityRaw: json.RawMessage(`{"framework":"pytest","filePath":"test_orders.py","titlePath":["orders"]}`), Status: results.AttemptFailed, Outcome: results.OutcomeUnexpected, Error: json.RawMessage(`{"message":"psycopg.OperationalError: connect ECONNREFUSED 10.0.0.5:5432"}`)},
+		{Sequence: 2, ClientTestID: "ct_invoices", DisplayName: "invoices", IdentityRaw: json.RawMessage(`{"framework":"pytest","filePath":"test_invoices.py","titlePath":["invoices"]}`), Status: results.AttemptFailed, Outcome: results.OutcomeUnexpected, Error: json.RawMessage(`{"message":"psycopg.OperationalError: connect ECONNREFUSED 10.0.0.7:5433"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := res.ListResults(ctx, run.ID)
+	var orders, invoices string
+	for _, r := range list {
+		switch r.DisplayName {
+		case "orders":
+			orders = string(r.ID)
+		case "invoices":
+			invoices = string(r.ID)
+		}
+	}
+	qry := query.New(db)
+	svc := triage.New(db, res, triage.WithInvestigation(triage.InvestigationDeps{Evidence: qry}))
+	if _, _, err := svc.Record(ctx, triage.Record{ProjectID: projectA, TestResultID: orders, Type: triage.HypothesisAccepted, ActorType: triage.ActorUser, ActorID: "bob", Category: triage.CategoryEnvData}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _, err := qry.InvestigationEvidence(ctx, projectA, invoices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev struct {
+		SimilarFailures []map[string]any `json:"similarFailures"`
+	}
+	_ = json.Unmarshal(raw, &ev)
+	if len(ev.SimilarFailures) != 1 || ev.SimilarFailures[0]["category"] != "env_data" {
+		t.Fatalf("similar failures in the evidence: %s", raw)
+	}
+	in, _, err := svc.RequestInvestigation(ctx, triage.NewInvestigation{ProjectID: projectA, OrgID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ResultID: invoices, Actor: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.InvestigationWorker(1).Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	done, err := svc.GetInvestigation(ctx, projectA, invoices, in.ID)
+	if err != nil || done.Hypothesis == nil || done.Hypothesis.Category != triage.CategoryEnvData {
+		t.Fatalf("hypothesis: %+v %v", done.Hypothesis, err)
+	}
+}
+
 // A person's own verdict on the cause, with no hypothesis at all, counts the
 // same way.
 func TestHumanCauseVerdictCounts(t *testing.T) {

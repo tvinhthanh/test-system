@@ -21,9 +21,12 @@ import (
 // member accepts or rejects, so TTRC and triage coverage (§8.3, which count
 // only HYPOTHESIS_ACCEPTED) work without any AI provider.
 //
-// Every fact cites one of the three observed sources, exactly as the model's
-// contract demands. Confidence stays deliberately modest: rules see patterns,
-// not causes, and the human decision is what counts.
+// Every fact cites the evidence it came from. Beyond patterns, the rules
+// learn from the team's own verdicts: the same error explained for another
+// test is proposed again (similar_failures), and confidence is calibrated
+// per category against how often people accepted the rules' suggestions
+// (up to 0.95 once earned; at most 0.85 before). The human decision is still
+// what counts — TTRC is the time until the team accepts a cause (§8.3).
 
 // RulesModel names the rule set in ai_hypotheses.model and on the
 // investigation, so the UI can say "rule-based" and a rule change is visible
@@ -54,7 +57,30 @@ type ruleEvidence struct {
 		Category   *string   `json:"category"`
 		OccurredAt time.Time `json:"occurredAt"`
 	} `json:"triageHistory"`
+	// Causes accepted for other tests that failed with the same error.
+	SimilarFailures []struct {
+		Category       string    `json:"category"`
+		Tests          int       `json:"tests"`
+		Example        string    `json:"example"`
+		LastAcceptedAt time.Time `json:"lastAcceptedAt"`
+	} `json:"similarFailures"`
+	// How the team answered this rule set's hypotheses, per category.
+	RulesTrackRecord []struct {
+		Category string `json:"category"`
+		Accepted int    `json:"accepted"`
+		Rejected int    `json:"rejected"`
+	} `json:"rulesTrackRecord"`
 }
+
+// Confidence bounds. Below calibrationMinimum decisions a category keeps its
+// rule's own confidence (at most maxUncalibrated); with a track record it may
+// rise to maxCalibrated — earned by the team accepting it, never assumed.
+const (
+	maxUncalibrated    = 0.85
+	maxCalibrated      = 0.95
+	minConfidence      = 0.1
+	calibrationMinimum = 5
+)
 
 // ruleVerdict is what the rules conclude.
 type ruleVerdict struct {
@@ -214,6 +240,22 @@ func investigateByRules(raw json.RawMessage) (ruleVerdict, error) {
 		}
 	}
 
+	// 4. The same error, explained for other tests: the strongest signal the
+	// rules have, because a person already found that cause.
+	for _, sf := range ev.SimilarFailures {
+		if !ValidCategory(Category(sf.Category)) || sf.Tests < 1 {
+			continue
+		}
+		conf := minFloat(0.9, 0.75+0.05*float64(sf.Tests-1))
+		cands = append(cands, candidate{Category(sf.Category), conf})
+		others := ""
+		if sf.Tests > 1 {
+			others = fmt.Sprintf(" and %d other test(s)", sf.Tests-1)
+		}
+		add("similar_failures", fmt.Sprintf("The same error was explained before for %q%s: the team accepted %q (last on %s).", cut(sf.Example, 120), others, sf.Category, sf.LastAcceptedAt.Format("2006-01-02")))
+		break
+	}
+
 	v := ruleVerdict{Category: CategoryUnknown, Confidence: 0.2}
 	for _, c := range cands {
 		if c.confidence > v.Confidence {
@@ -228,7 +270,37 @@ func investigateByRules(raw json.RawMessage) (ruleVerdict, error) {
 		}
 	}
 	if agree > 1 {
-		v.Confidence = minFloat(0.85, v.Confidence+0.1*float64(agree-1))
+		v.Confidence = minFloat(maxUncalibrated, v.Confidence+0.1*float64(agree-1))
+	}
+	v.Confidence = minFloat(v.Confidence, maxUncalibrated)
+	if v.Confidence < 0.9 {
+		// A similar failure's own confidence may exceed the generic cap: a
+		// person explained that exact error.
+		for _, c := range cands {
+			if c.category == v.Category && c.confidence > v.Confidence {
+				v.Confidence = c.confidence
+			}
+		}
+	}
+
+	// 5. Calibrate against how the team answered these rules before: a cause
+	// the rules propose and people keep accepting earns confidence; one they
+	// keep rejecting or correcting loses it.
+	for _, tr := range ev.RulesTrackRecord {
+		n := tr.Accepted + tr.Rejected
+		if Category(tr.Category) != v.Category || n < calibrationMinimum {
+			continue
+		}
+		rate := float64(tr.Accepted) / float64(n)
+		v.Confidence = (v.Confidence + rate) / 2
+		if v.Confidence > maxCalibrated {
+			v.Confidence = maxCalibrated
+		}
+		if v.Confidence < minConfidence {
+			v.Confidence = minConfidence
+		}
+		add("triage_history", fmt.Sprintf("In this project the team accepted %d of the %d rule suggestions of %q.", tr.Accepted, n, tr.Category))
+		break
 	}
 	if len(facts) == 0 {
 		add("failure_context", "The failure carries no error text and the test has no history yet.")

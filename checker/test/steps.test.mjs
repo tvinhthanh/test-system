@@ -38,6 +38,21 @@ const pages = {
       };
     </script></main>`),
   "/inbox": html("Inbox", `<main><h1>Inbox</h1><a href="/message?to=bob">Bob</a></main>`),
+  // A single-page app's sign-in: no new document — the form posts with fetch,
+  // the answer comes late, then the app swaps the screen and the address.
+  "/spa-login": html("Sign in", `<main id="app"><h1>Sign in</h1>
+    <form id="f">
+      <label>Email <input name="email" type="email"></label>
+      <label>Password <input name="password" type="password"></label>
+      <button type="submit">Sign in</button>
+    </form>
+    <script>
+      document.getElementById("f").onsubmit = async (e) => {
+        e.preventDefault();
+        const r = await fetch("/api/login", { method: "POST", body: new URLSearchParams(new FormData(e.target)) });
+        if (r.ok) { history.pushState({}, "", "/inbox"); document.getElementById("app").innerHTML = "<h1>Inbox</h1>"; }
+      };
+    </script></main>`),
 };
 let site;
 let base;
@@ -65,6 +80,15 @@ before(async () => {
       if (f.get("email") === "tester@example.com" && f.get("password") === "s3cret!")
         return res.writeHead(303, { Location: "/inbox", "Set-Cookie": "sid=ok; Path=/" }).end();
       return res.writeHead(303, { Location: "/login?bad=1" }).end();
+    }
+    if (req.method === "POST" && url.pathname === "/api/login") {
+      let body = "";
+      for await (const c of req) body += c;
+      const f = new URLSearchParams(body);
+      await new Promise((r) => setTimeout(r, 800)); // a slow sign-in API
+      if (f.get("email") === "tester@example.com" && f.get("password") === "s3cret!")
+        return res.writeHead(204, { "Set-Cookie": "sid=ok; Path=/" }).end();
+      return res.writeHead(401).end();
     }
     if (url.pathname === "/logout") return res.writeHead(303, { Location: "/login", "Set-Cookie": "sid=; Path=/; Max-Age=0" }).end();
     if ((url.pathname === "/message" || url.pathname === "/inbox") && !signedIn)
@@ -109,6 +133,21 @@ test("signs in, then a chat case runs step by step", async () => {
     assert.match(view.tree, /button "Send"/);
     assert.match(view.tree, /Xin chào/);
     assert.ok(view.screenshot.length > 1000);
+  } finally {
+    await s.close();
+  }
+});
+
+// The bug a live run found: waitForLoadState("networkidle") returns at once in
+// a single-page app (no new document), so the password field was counted
+// while the sign-in request was still out, and a good sign-in was reported
+// as "still on the sign-in page".
+test("a single-page app that signs in late is signed in", async () => {
+  const s = await Session.open(browser, { base, policy });
+  try {
+    assert.deepEqual(await s.login({ ...login, url: "/spa-login", vars }), { loggedIn: true });
+    const { ok } = await s.run([step({ do: "goto", value: "/inbox" }), step({ do: "expect_title", value: "Inbox" })], vars);
+    assert.ok(ok, "the session's cookie was not kept");
   } finally {
     await s.close();
   }

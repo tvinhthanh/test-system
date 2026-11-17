@@ -91,7 +91,8 @@ func TestAutoTest(t *testing.T) {
 	if r := tester.post(accounts+"/nope/find-login", nil); r.code != 404 {
 		t.Errorf("find sign-in of an unknown account: %d %s", r.code, r.raw)
 	}
-	if r := tester.post(accounts+"/default/find-login", nil); r.code != 409 || r.errCode() != "AI_NOT_CONFIGURED" {
+	// No AI key: still queued — the worker reads the page by rules.
+	if r := tester.post(accounts+"/default/find-login", nil); r.code != 202 || r.body["loginStatus"] != "finding" {
 		t.Errorf("find sign-in without an AI key: %d %s", r.code, r.raw)
 	}
 

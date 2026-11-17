@@ -272,9 +272,8 @@ func (s *service) FindLogin(ctx context.Context, projectID, orgID, environmentID
 	if _, err := s.siteEnvironment(ctx, projectID, environmentID); err != nil {
 		return Account{}, err
 	}
-	if err := s.keysAvailable(ctx, orgID); err != nil {
-		return Account{}, err
-	}
+	// No AI key needed: the worker reads the page by rules then
+	// (login_rules.go). Either way the steps found must sign in to be kept.
 	var out Account
 	err := s.DB.WithTx(ctx, func(ctx context.Context) error {
 		a, err := scanAccount(s.DB.Q(ctx).QueryRow(ctx, `SELECT `+accountColumns+` FROM environment_accounts

@@ -275,6 +275,24 @@ export function describe(s, vars = {}) {
  * tree — the roles and names getByRole matches — plus its address and title.
  * The page is untrusted; the caller says so to the model.
  */
+/**
+ * Waits until no password field is visible — the sign-in went through — or
+ * until `ms` passed, and returns how many are still visible. A single-page
+ * app signs in without loading a new document, so
+ * waitForLoadState("networkidle") returns at once (that state was reached on
+ * the first load) and a count taken then sees the password field while the
+ * sign-in request is still on its way.
+ */
+export async function passwordFieldsLeft(page, ms = 10_000) {
+  const fields = page.locator('input[type="password"]').filter({ visible: true });
+  const until = Date.now() + ms;
+  for (;;) {
+    const n = await fields.count().catch(() => 0);
+    if (n === 0 || Date.now() >= until) return n;
+    await page.waitForTimeout(250);
+  }
+}
+
 export async function lookAt(page, limit = 16_000) {
   let tree = "";
   try {

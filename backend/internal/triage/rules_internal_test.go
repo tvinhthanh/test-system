@@ -84,7 +84,7 @@ func TestInvestigateByRules(t *testing.T) {
 			for _, f := range v.Evidence {
 				// The same contract as the model's hypotheses: every fact cites
 				// one of the three observed sources and says something.
-				if f.Source != "failure_context" && f.Source != "stable_history" && f.Source != "triage_history" {
+				if f.Source != "failure_context" && f.Source != "stable_history" && f.Source != "triage_history" && f.Source != "similar_failures" {
 					t.Errorf("fact cites unobserved source %q", f.Source)
 				}
 				if strings.TrimSpace(f.Fact) == "" {
@@ -113,6 +113,76 @@ func TestInvestigateByRulesAgreementRaisesConfidence(t *testing.T) {
 	}
 	if v.Category != CategoryEnvInfra || v.Confidence <= 0.7 {
 		t.Fatalf("got %s %.2f, want env_infra above 0.7", v.Category, v.Confidence)
+	}
+}
+
+// withExtra adds the learning inputs to an evidence document.
+func withExtra(t *testing.T, raw json.RawMessage, similar, track []map[string]any) json.RawMessage {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if similar != nil {
+		m["similarFailures"] = similar
+	}
+	if track != nil {
+		m["rulesTrackRecord"] = track
+	}
+	b, _ := json.Marshal(m)
+	return b
+}
+
+func TestInvestigateByRulesLearnsFromVerdicts(t *testing.T) {
+	when := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	assertion := evidenceJSON(t, "expect(received).toContain(expected) — order #4821", "ci", nil, nil)
+
+	t.Run("the same error explained for other tests wins over the pattern", func(t *testing.T) {
+		v, err := investigateByRules(withExtra(t, assertion, []map[string]any{{"category": "env_data", "tests": 3, "example": "checkout › pays", "lastAcceptedAt": when}}, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Category != CategoryEnvData || v.Confidence < 0.85 {
+			t.Fatalf("got %s %.2f, want env_data from the similar failure", v.Category, v.Confidence)
+		}
+		ok := false
+		for _, f := range v.Evidence {
+			ok = ok || (f.Source == "similar_failures" && strings.Contains(f.Fact, "checkout › pays") && strings.Contains(f.Fact, "2 other test"))
+		}
+		if !ok {
+			t.Errorf("no similar-failure fact: %+v", v.Evidence)
+		}
+	})
+
+	infra := evidenceJSON(t, "connect ECONNREFUSED", "staging", hist("ci", "passed", "passed"), nil) // env_infra, two signals: 0.8
+	cases := []struct {
+		name      string
+		track     []map[string]any
+		min, max  float64
+		mentioned bool
+	}{
+		{"accepted every time: confidence earned above the generic cap", []map[string]any{{"category": "env_infra", "accepted": 10, "rejected": 0}}, 0.86, 0.95, true},
+		{"mostly rejected: confidence drops", []map[string]any{{"category": "env_infra", "accepted": 1, "rejected": 9}}, 0.1, 0.5, true},
+		{"too few decisions: left alone", []map[string]any{{"category": "env_infra", "accepted": 4, "rejected": 0}}, 0.8, 0.8, false},
+		{"another category's record does not apply", []map[string]any{{"category": "app_bug", "accepted": 0, "rejected": 20}}, 0.8, 0.8, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v, err := investigateByRules(withExtra(t, infra, nil, c.track))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v.Category != CategoryEnvInfra || v.Confidence < c.min-1e-9 || v.Confidence > c.max+1e-9 {
+				t.Fatalf("got %s %.3f, want env_infra in [%.2f, %.2f]", v.Category, v.Confidence, c.min, c.max)
+			}
+			mentioned := false
+			for _, f := range v.Evidence {
+				mentioned = mentioned || strings.Contains(f.Fact, "rule suggestions")
+			}
+			if mentioned != c.mentioned {
+				t.Errorf("track record cited = %v, want %v: %+v", mentioned, c.mentioned, v.Evidence)
+			}
+		})
 	}
 }
 

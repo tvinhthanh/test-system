@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // An environment's test accounts (QĐ-16): what a case signs in with. The
 // password is sent once and never shown again; the sign-in steps are found
-// by AI from the sign-in page (it sees {{username}} / {{password}}, never
-// the values) or written here. While a search runs the list looks again
-// every 3 s.
+// from the sign-in page — by AI when the organization has a key (it sees
+// {{username}} / {{password}}, never the values), by fixed rules otherwise —
+// or written here. Found steps are kept only once a browser signs in with
+// them. While a search runs the list looks again every 3 s.
 import { KeyRound, Pencil, Plus, Search, Trash2 } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useServices } from "../../app/providers/services";
@@ -181,11 +182,14 @@ const accounts = computed(() => list.data.value ?? []);
         <StatusBadge :status="a.loginStatus" class="account-status" :title="statusText[a.loginStatus]" />
         <template v-if="canWrite">
           <Button
-            v-if="aiAvailable"
             size="sm"
             variant="outline"
             :disabled="mutation.busy.value !== null || a.loginStatus === 'finding'"
-            :title="'AI reads the sign-in page and writes the steps; a browser then proves they work'"
+            :title="
+              aiAvailable
+                ? 'AI reads the sign-in page and writes the steps; a browser then proves they work'
+                : 'The sign-in page is read by fixed rules (no AI key): user name, password, the sign-in button. A browser then proves the steps work; captchas and one-time codes need steps written by hand.'
+            "
             @click="find(a.key)"
             ><Search />Find sign-in steps</Button
           >
