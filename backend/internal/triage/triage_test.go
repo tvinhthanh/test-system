@@ -111,6 +111,85 @@ func (f *investigationLLM) JSON(context.Context, llm.Request) (llm.Result, error
 	return llm.Result{JSON: json.RawMessage(`{"action":"finish","tool":"","category":"test_bug","confidence":0.82,"evidence":[{"source":"failure_context","fact":"The selector no longer matches."}],"suggestedAction":"Update the locator and add a regression assertion."}`), Model: "fake-model", InputTokens: 100, OutputTokens: 30}, nil
 }
 
+// Without any AI key the investigation still runs, by rules, and accepting
+// its hypothesis is what triage coverage counts (§8.3) — the metrics no
+// longer depend on an AI provider.
+func TestRuleInvestigationWithoutAI(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	res := results.New(db)
+	ctx := context.Background()
+	run, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: projectA, EnvironmentID: envA, LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-2223456789ab", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = res.AppendAttempts(ctx, run.ID, []results.AttemptEvent{{Sequence: 1, ClientTestID: "ct_rules", DisplayName: "pay", IdentityRaw: json.RawMessage(`{"framework":"playwright","filePath":"pay.spec.ts","titlePath":["pay"]}`), Status: results.AttemptFailed, Outcome: results.OutcomeUnexpected, Error: json.RawMessage(`{"message":"locator.click: waiting for locator('#pay') resolved to 0 elements","stack":"at pay.spec.ts:10"}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := res.ListResults(ctx, run.ID)
+	resultID := string(list[0].ID)
+	qry := query.New(db)
+	// Evidence only: no key store, no model.
+	svc := triage.New(db, res, triage.WithInvestigation(triage.InvestigationDeps{Evidence: qry}))
+	in, created, err := svc.RequestInvestigation(ctx, triage.NewInvestigation{ProjectID: projectA, OrgID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ResultID: resultID, Actor: "alice"})
+	if err != nil || !created {
+		t.Fatalf("request without AI: %+v %v %v", in, created, err)
+	}
+	if _, err := svc.InvestigationWorker(1).Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	done, err := svc.GetInvestigation(ctx, projectA, resultID, in.ID)
+	if err != nil || done.Status != triage.InvestigationDone || done.Hypothesis == nil {
+		t.Fatalf("done: %+v err=%v", done, err)
+	}
+	if done.Provider != "rules" || done.Model != triage.RulesModel || done.Hypothesis.Category != triage.CategoryTestBug || len(done.Hypothesis.Evidence) == 0 {
+		t.Fatalf("rule hypothesis: provider=%s model=%s %+v", done.Provider, done.Model, done.Hypothesis)
+	}
+	events, _ := svc.ListForResult(ctx, projectA, resultID)
+	if len(events) != 1 || events[0].Type != triage.HypothesisProposed || events[0].ActorType != triage.ActorSystem {
+		t.Fatalf("proposal must be SYSTEM, not AI: %+v", events)
+	}
+	if _, err := svc.DecideHypothesis(ctx, triage.Decision{ProjectID: projectA, ResultID: resultID, HypothesisID: done.Hypothesis.ID, Actor: "alice", Decision: "accept"}); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := res.GetResult(ctx, projectA, list[0].ID)
+	if tr.FailureCategory != "test_bug" {
+		t.Fatalf("category stamped on the result: %s", tr.FailureCategory)
+	}
+	m, err := qry.Triage(ctx, projectA, time.Now().Add(-24*time.Hour))
+	if err != nil || m.Failures != 1 || m.Triaged != 1 || m.TriageCoverage != 1 {
+		t.Fatalf("triage coverage without AI: %+v err=%v", m, err)
+	}
+}
+
+// A person's own verdict on the cause, with no hypothesis at all, counts the
+// same way.
+func TestHumanCauseVerdictCounts(t *testing.T) {
+	db := pgtest.New(t, migrations.FS)
+	res := results.New(db)
+	ctx := context.Background()
+	run, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: projectA, EnvironmentID: envA, LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-3323456789ab", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = res.AppendAttempts(ctx, run.ID, []results.AttemptEvent{{Sequence: 1, ClientTestID: "ct_human", DisplayName: "cart", IdentityRaw: json.RawMessage(`{"framework":"playwright","filePath":"cart.spec.ts","titlePath":["cart"]}`), Status: results.AttemptFailed, Outcome: results.OutcomeUnexpected, Error: json.RawMessage(`{"message":"expected 1 received 0"}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := res.ListResults(ctx, run.ID)
+	svc := triage.New(db, res)
+	if _, _, err := svc.Record(ctx, triage.Record{ProjectID: projectA, TestResultID: string(list[0].ID), Type: triage.HypothesisAccepted, ActorType: triage.ActorUser, ActorID: "bob"}); !errors.Is(err, triage.ErrInvalid) {
+		t.Fatalf("a verdict without a category: %v", err)
+	}
+	if _, _, err := svc.Record(ctx, triage.Record{ProjectID: projectA, TestResultID: string(list[0].ID), Type: triage.HypothesisAccepted, ActorType: triage.ActorUser, ActorID: "bob", Category: triage.CategoryAppBug, Payload: map[string]any{"note": "total not recomputed"}}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := query.New(db).Triage(ctx, projectA, time.Now().Add(-24*time.Hour))
+	if err != nil || m.Triaged != 1 {
+		t.Fatalf("human verdict not counted: %+v err=%v", m, err)
+	}
+}
+
 func TestFailureInvestigation(t *testing.T) {
 	db := pgtest.New(t, migrations.FS)
 	res := results.New(db)

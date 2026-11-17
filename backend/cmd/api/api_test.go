@@ -401,12 +401,27 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Errorf("spoofed actor/time was applied: %d %s", r.code, r.raw)
 	}
 	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "payload": map[string]any{}}); r.code != 400 {
-		t.Errorf("type outside the UI set: %d %s", r.code, r.raw)
+		t.Errorf("a cause verdict without a category: %d %s", r.code, r.raw)
 	}
 	det = web.get(base + "/results/" + resultID)
 	events, _ = det.body["events"].([]any)
 	if len(events) != 2 || events[0].(map[string]any)["type"] != "FAILURE_SEEN" || events[1].(map[string]any)["type"] != "MARKED_FLAKY" {
 		t.Errorf("events after triage: %s", det.raw)
+	}
+	// A person's own verdict on the cause, with no AI behind it: it needs a
+	// §8.7 category, and category belongs to that type only.
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "category": "nonsense"}); r.code != 400 {
+		t.Errorf("unknown category: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "category": "app_bug"}); r.code != 400 {
+		t.Errorf("category on another type: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "category": "app_bug", "payload": map[string]any{"note": "total not recomputed"}}); r.code != 201 {
+		t.Errorf("human cause verdict: %d %s", r.code, r.raw)
+	}
+	det = web.get(base + "/results/" + resultID)
+	if events, _ = det.body["events"].([]any); len(events) != 3 || events[2].(map[string]any)["type"] != "HYPOTHESIS_ACCEPTED" {
+		t.Errorf("events after the verdict: %s", det.raw)
 	}
 	// POST without the CSRF header is refused even with a valid session.
 	saved := web.csrf
@@ -468,6 +483,9 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	}
 	if r := bobc.post(searchBase+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "payload": map[string]any{}}); r.code != 403 || r.errCode() != "FORBIDDEN" {
 		t.Errorf("viewer triaging: %d %s", r.code, r.raw)
+	}
+	if r := bobc.post(searchBase+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "category": "app_bug"}); r.code != 403 || r.errCode() != "FORBIDDEN" {
+		t.Errorf("viewer recording a cause: %d %s", r.code, r.raw)
 	}
 
 	// ---- Identity operations (§9.4 over HTTP): role, aliases, merge, undo, split, review ----

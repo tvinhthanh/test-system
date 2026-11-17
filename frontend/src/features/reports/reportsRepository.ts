@@ -482,15 +482,27 @@ export class ReportsRepository {
   traceViewerUrl(origin: string, projectId: string, artifactId: string) {
     return `/trace/index.html?trace=${encodeURIComponent(origin + this.artifactContentUrl(projectId, artifactId))}`;
   }
+  // `cause` only goes with HYPOTHESIS_ACCEPTED: a person's own verdict on the
+  // root cause (§8.7 category, optional note) — what triage coverage and TTRC
+  // count, with or without an AI key.
   async triage(
     projectId: string,
     resultId: string,
     type: string,
     signal: AbortSignal,
+    cause?: { category: string; note?: string },
   ) {
+    const note = cause?.note?.trim();
     await this.api.request(
       `${scope(projectId)}/results/${encodeURIComponent(resultId)}/triage-events`,
-      { signal, body: { type, payload: {} } },
+      {
+        signal,
+        body: {
+          type,
+          payload: note ? { note } : {},
+          ...(cause ? { category: cause.category } : {}),
+        },
+      },
     );
   }
   async investigations(
