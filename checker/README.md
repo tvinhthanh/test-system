@@ -55,7 +55,9 @@ details, passed or failed:
   the lowest impact that fails, serious by default.
 - `check_performance` compares the last load's LCP/FCP/TTFB/load/CLS with
   a budget such as `lcp=2500 cls=0.1 ttfb=800`. A metric the browser does
-  not report is noted, not failed.
+  not report is noted, not failed. It waits up to 5 s for the first paint
+  first, so a page that paints after its load event (or a cold WebKit) is
+  measured, not reported as having no timings.
 - `check_security` reads what the session saw: the main document's
   headers, the page's cookies, and plain-HTTP requests or "Mixed Content"
   messages from an HTTPS page. A high finding fails; with `strict`, a

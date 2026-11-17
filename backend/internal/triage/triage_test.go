@@ -305,4 +305,51 @@ func TestFailureInvestigation(t *testing.T) {
 	if own, err := svc.ListInvestigations(ctx, projectA, resultID, 20); err != nil || len(own) != 1 {
 		t.Errorf("own list: %d %v", len(own), err)
 	}
+
+	// The bug a live run found: the same test failing the same way in a
+	// second run that day got the first result's investigation back (200),
+	// and the second result's page — which lists by result — showed nothing.
+	// Now it gets its own investigation, finished from the first one's
+	// conclusion without calling the model again, and decided on its page.
+	run2, _, err := res.CreateRun(ctx, results.NewRun{ProjectID: projectA, EnvironmentID: envA, LocalRunID: "0198c3e1-7b1a-7c3d-9e4f-1123456789ac", StartedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = res.AppendAttempts(ctx, run2.ID, []results.AttemptEvent{{Sequence: 1, ClientTestID: "ct_ai", DisplayName: "checkout", IdentityRaw: json.RawMessage(`{"framework":"playwright","filePath":"checkout.spec.ts","titlePath":["checkout"]}`), Status: results.AttemptFailed, Outcome: results.OutcomeUnexpected, Error: json.RawMessage(`{"message":"button missing","stack":"at checkout.spec.ts:10"}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	list2, _ := res.ListResults(ctx, run2.ID)
+	second := string(list2[0].ID)
+	// Identity resolution (a worker elsewhere) names both the same test. The
+	// first result's investigation was keyed before that, so key it again.
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE test_results SET stable_test_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' WHERE id IN ($1,$2)`, resultID, second); err != nil {
+		t.Fatal(err)
+	}
+	_, fp, _, err := query.New(db).InvestigationEvidence(ctx, projectA, resultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE ai_investigations SET dedupe_key=$2 WHERE id=$1`, in.ID, fp); err != nil {
+		t.Fatal(err)
+	}
+	in2, created, err := svc.RequestInvestigation(ctx, triage.NewInvestigation{ProjectID: projectA, OrgID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ResultID: second, Actor: "alice"})
+	if err != nil || !created || in2.ID == in.ID || in2.ResultID != second {
+		t.Fatalf("second result's request: %+v created=%v err=%v", in2, created, err)
+	}
+	if _, err := svc.InvestigationWorker(1).Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := svc.ListInvestigations(ctx, projectA, second, 20)
+	if err != nil || len(mine) != 1 || mine[0].Status != triage.InvestigationDone || mine[0].Hypothesis == nil {
+		t.Fatalf("second result's list: %+v err=%v", mine, err)
+	}
+	if h := mine[0].Hypothesis; h.Category != triage.CategoryTestBug || h.ID == done.Hypothesis.ID || len(h.Evidence) == 0 || model.calls != 1 {
+		t.Fatalf("reused hypothesis: %+v calls=%d", h, model.calls)
+	}
+	if ev, _ := svc.ListForResult(ctx, projectA, second); len(ev) != 1 || ev[0].Type != triage.HypothesisProposed || ev[0].ActorType != triage.ActorAI {
+		t.Fatalf("second result's events: %+v", ev)
+	}
+	if _, err := svc.DecideHypothesis(ctx, triage.Decision{ProjectID: projectA, ResultID: second, HypothesisID: mine[0].Hypothesis.ID, Actor: "alice", Decision: "accept"}); err != nil {
+		t.Fatalf("decide on the second result: %v", err)
+	}
 }

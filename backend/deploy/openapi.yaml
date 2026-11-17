@@ -2998,12 +2998,12 @@ paths:
       operationId: requestFailureInvestigation
       tags: [dashboard]
       summary: Queue or reuse a same-day failure investigation (AI, or rules without an AI key)
-      description: With an AI key the worker asks the configured model; without one it investigates by fixed rules (`rules-v1` — error patterns, the test's pass/fail history, causes accepted before) and proposes a hypothesis the same way, recorded as SYSTEM so AI metrics never count it. Either way a member accepts or rejects it.
+      description: With an AI key the worker asks the configured model; without one it investigates by fixed rules (`rules-v1` — error patterns, the test's pass/fail history, causes accepted before) and proposes a hypothesis the same way, recorded as SYSTEM so AI metrics never count it. Either way a member accepts or rejects it. Investigations are deduped per result per day; another result of the same failure (same test, status and error) that day gets its own investigation, finished from the first one's hypothesis without investigating again.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/ResultId" }]
       responses:
         "202": { description: Queued, content: { application/json: { schema: { $ref: "#/components/schemas/AIInvestigation" } } } }
-        "200": { description: Same-day investigation reused, content: { application/json: { schema: { $ref: "#/components/schemas/AIInvestigation" } } } }
+        "200": { description: This result's same-day investigation reused, content: { application/json: { schema: { $ref: "#/components/schemas/AIInvestigation" } } } }
         "400": { $ref: "#/components/responses/InvalidPayload" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }

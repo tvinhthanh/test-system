@@ -394,7 +394,7 @@ CREATE TABLE ai_investigation_steps (
 
 | Method + path | Quyền | Hành vi |
 |---|---|---|
-| `POST /v1/projects/{projectId}/results/{resultId}/investigations` | `triage` | `202` tạo queued; `200` trả investigation cùng dedupe key trong ngày |
+| `POST /v1/projects/{projectId}/results/{resultId}/investigations` | `triage` | `202` tạo queued; `200` trả investigation cùng dedupe key trong ngày **của chính result này** (0052: kết quả khác cùng lỗi trong ngày có investigation riêng, worker chép giả thuyết đã xong, không gọi model lần nữa) |
 | `GET /v1/projects/{projectId}/results/{resultId}/investigations?limit=&cursor=` | `view` | Danh sách mới nhất trước, cursor paging |
 | `GET /v1/projects/{projectId}/results/{resultId}/investigations/{id}` | `view` | Status, public activity label, usage, error, hypothesis; không trả prompt/observation nội bộ |
 | `POST /v1/projects/{projectId}/results/{resultId}/hypotheses/{id}/decision` | `triage` | `{decision: accept|reject, category?, note?}`; một terminal decision, retry idempotent |

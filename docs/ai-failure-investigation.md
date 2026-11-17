@@ -182,6 +182,7 @@ CREATE TABLE ai_investigations (
     started_at      timestamptz,
     finished_at     timestamptz,
     UNIQUE (project_id, dedupe_key, requested_day)
+    -- 0052: UNIQUE (project_id, test_result_id, dedupe_key, requested_day)
 );
 
 CREATE INDEX ai_investigations_result
@@ -227,7 +228,13 @@ the project.
 - Permission: `triage`.
 - Body: `{}` for MVP.
 - `202`: new queued investigation.
-- `200`: the same-day investigation for this dedupe key already exists.
+- `200`: this result already has a same-day investigation for this dedupe key.
+- Dedupe is per result (migration `0052`): another result of the same failure
+  (same test, status and error) the same day gets its own investigation,
+  which the worker finishes by copying the finished sibling's hypothesis —
+  its own `ai_hypotheses` row and `HYPOTHESIS_PROPOSED` event, decided on its
+  own page, with no second model call. If no sibling has finished yet, it is
+  investigated normally.
 - Errors: `AI_NOT_CONFIGURED`, `AI_DAILY_LIMIT`, `RESULT_NOT_FAILED`,
   `INVESTIGATION_BUSY`.
 
