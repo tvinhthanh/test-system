@@ -406,6 +406,15 @@ gọi); gofmt/vet/`go test ./...` trên Postgres thật sạch. `npm audit` repo
 (launch-editor, high) — job frontend của CI sẽ đỏ ở `npm audit` cho tới khi nâng
 lên vite 6.4.5.
 
+**Dependency review 17-11:** CI trên `main` đỏ ở govulncheck từ merge PR #19
+(f635803) và #20 (d19e636) — không do code, mà do advisory mới **GO-2026-6859**
+(`net/http`: HTTP/1 server crash do race header của MaxBytesReader), được gọi qua
+`http.Server` của API/worker. Vá ở go1.26.11: `toolchain go1.26.11` (dòng `go
+1.25.5` giữ nguyên), CI `setup-go` + `golang:1.26.11-alpine` theo cùng;
+govulncheck vẫn v1.9.0. Local với go1.26.11: `govulncheck ./...` → **0 được gọi**
+(18 advisory trong module require, không gọi); vet/build sạch, `go test ./...`
+trên Postgres 17 thật 36/36 package pass.
+
 **Đối chiếu CI ngày 15-10:** [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
 trên `76f6df0` đã completed/success. Backend pass govulncheck, test Postgres/S3,
 Docker build, Compose config, promtool và OpenAPI; frontend/reporter/E2E đều

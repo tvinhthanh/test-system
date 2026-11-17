@@ -2,10 +2,10 @@ module github.com/vinh/automation-testing-platform/backend
 
 go 1.25.5
 
-// Security baseline 21-10-2026: Go 1.26.10 fixes the stdlib advisories
-// reported by govulncheck (GO-2026-6809 on top of those 1.26.9 fixed 13-10).
+// Security baseline 17-11-2026: Go 1.26.11 fixes the stdlib advisories
+// reported by govulncheck (GO-2026-6859 on top of GO-2026-6809, 21-10).
 // CI and the build image use this exact toolchain.
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.84.0
