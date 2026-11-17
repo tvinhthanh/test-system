@@ -67,7 +67,7 @@ jobs:
         with:
           # The patched toolchain go.mod names (govulncheck 21-10); explicit so
           # GOTOOLCHAIN=local below never has to download one.
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: backend/go.sum
 
       # pg_dump/pg_restore of the server's major, for test/restore. Ubuntu's
