@@ -87,21 +87,24 @@ func (s *service) markLogin(ctx context.Context, accountID, status, msg string, 
 	return err
 }
 
-// findLogin asks a model to write the sign-in steps from the sign-in page,
-// then proves them: a session must sign in with them.
+// findLogin writes the sign-in steps from the sign-in page — with a model
+// when the organization has an AI key, by fixed rules otherwise
+// (login_rules.go) — then proves them: a session must sign in with them.
 func (s *service) findLogin(ctx context.Context, orgID string, env tenancy.Environment, a Account) ([]Step, error) {
-	if s.Browser == nil || s.LLM == nil || s.Keys == nil {
+	if s.Browser == nil {
 		return nil, tell("the account has no sign-in steps and this server cannot find them: write them on the account")
 	}
-	acct, _, ok, err := s.Keys.Credentials(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, tell("the account %q has no sign-in steps: write them, or set up AI (Team → AI settings) so they are found", a.Key)
+	var acct llm.Account
+	useAI := false
+	if s.LLM != nil && s.Keys != nil {
+		var err error
+		if acct, _, useAI, err = s.Keys.Credentials(ctx, orgID); err != nil {
+			return nil, err
+		}
 	}
 	start := env.BaseURL
 	if a.LoginURL != "" {
+		var err error
 		if start, err = resolveTarget(env.BaseURL, a.LoginURL); err != nil {
 			return nil, tell("sign-in page: %v", err)
 		}
@@ -110,31 +113,38 @@ func (s *service) findLogin(ctx context.Context, orgID string, env tenancy.Envir
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = sess.Close(context.WithoutCancel(ctx)) }()
 	o, err := sess.Run(ctx, []Step{{Do: "goto", Value: start}}, nil)
 	var view View
 	if err == nil && o.OK {
 		view, err = sess.Look(ctx, false)
 	}
-	_ = sess.Close(context.WithoutCancel(ctx))
 	if err != nil {
 		return nil, err
 	}
 	if !o.OK {
 		return nil, tell("the sign-in page %s did not open: %s", start, o.Results[len(o.Results)-1].Error)
 	}
-	res, err := s.LLM.JSON(ctx, llm.Request{Account: acct, System: loginSystem, User: loginPrompt(view), Schema: loginSchema, MaxTokens: 8000})
-	if err != nil {
-		if msg := llmMessage(err, acct); msg != "" {
-			return nil, tell("%s", msg)
+	var steps []Step
+	if useAI {
+		res, err := s.LLM.JSON(ctx, llm.Request{Account: acct, System: loginSystem, User: loginPrompt(view), Schema: loginSchema, MaxTokens: 8000})
+		if err != nil {
+			if msg := llmMessage(err, acct); msg != "" {
+				return nil, tell("%s", msg)
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	steps, note, err := parseLogin(res.JSON)
-	if err != nil {
-		return nil, tell("the model's answer did not have the sign-in shape")
-	}
-	if steps == nil {
-		return nil, tell("no sign-in steps found on %s: %s", view.URL, note)
+		var note string
+		if steps, note, err = parseLogin(res.JSON); err != nil {
+			return nil, tell("the model's answer did not have the sign-in shape")
+		}
+		if steps == nil {
+			return nil, tell("no sign-in steps found on %s: %s", view.URL, note)
+		}
+	} else {
+		if steps, err = s.loginStepsByRules(ctx, sess, a, view); err != nil {
+			return nil, err
+		}
 	}
 	pw, err := s.password(ctx, a)
 	if err != nil {

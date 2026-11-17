@@ -407,13 +407,98 @@ func (s *service) InvestigationEvidence(ctx context.Context, projectID, resultID
 	}
 	fingerprintBytes := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", subject, d.Result.FinalStatus, cutQuery(lastError, 1000))))
 	fingerprint := hex.EncodeToString(fingerprintBytes[:])
+	similar, err := s.similarFailures(ctx, projectID, resultID, d.Result.StableTestID, lastError)
+	if err != nil {
+		return nil, "", "", err
+	}
+	track, err := s.rulesTrackRecord(ctx, projectID)
+	if err != nil {
+		return nil, "", "", err
+	}
 	evidence := map[string]any{
-		"failureContext": map[string]any{"result": d.Result, "runId": d.RunID, "branch": run.Branch, "commitSha": run.CommitSHA, "environment": run.Environment, "attempts": attempts},
-		"stableHistory":  history,
-		"triageHistory":  decisions,
+		"failureContext":   map[string]any{"result": d.Result, "runId": d.RunID, "branch": run.Branch, "commitSha": run.CommitSHA, "environment": run.Environment, "attempts": attempts},
+		"stableHistory":    history,
+		"triageHistory":    decisions,
+		"similarFailures":  similar,
+		"rulesTrackRecord": track,
 	}
 	b, err := json.Marshal(evidence)
 	return b, fingerprint, d.Result.FinalStatus, err
+}
+
+// errorKey is how two failures are judged to share an error: the first line
+// of the message, lower-cased, digits and long hex ids (ports, timeouts, row
+// ids, request ids) folded to "#", spaces collapsed, at most 200 characters.
+// The same expression runs on both sides, in SQL.
+const errorKey = `left(regexp_replace(regexp_replace(lower(split_part(%s, E'\n', 1)), '[0-9a-f]{8,}|[0-9]+', '#', 'g'), '\s+', ' ', 'g'), 200)`
+
+// similarFailures are causes the team accepted for OTHER tests of the project
+// that failed with the same error: "we have seen and explained this before".
+// It starts from the project's accepted verdicts, a small set, so the cost
+// does not grow with the number of runs.
+func (s *service) similarFailures(ctx context.Context, projectID, resultID string, stableTestID *string, lastError string) ([]map[string]any, error) {
+	out := []map[string]any{}
+	if strings.TrimSpace(lastError) == "" {
+		return out, nil
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT e.payload->>'category', count(DISTINCT coalesce(t.stable_test_id::text, t.id::text)), min(t.display_name), max(e.occurred_at)
+		  FROM triage_events e
+		  JOIN test_results t ON t.id = e.test_result_id
+		  JOIN runs r ON r.id = t.run_id AND r.deleted_at IS NULL
+		  JOIN LATERAL (
+		       SELECT a.error->>'message' AS m FROM test_result_attempts a
+		        WHERE a.test_result_id = t.id AND a.error IS NOT NULL
+		        ORDER BY a.attempt DESC LIMIT 1) la ON true
+		 WHERE e.project_id = $1 AND e.type = 'HYPOTHESIS_ACCEPTED' AND e.payload->>'category' IS NOT NULL
+		   AND t.id <> $2
+		   -- Other tests only, when this one's identity is known; a result not
+		   -- yet resolved (the worker resolves after ingest) excludes only itself.
+		   AND ($3::uuid IS NULL OR t.stable_test_id IS DISTINCT FROM $3::uuid)
+		   AND `+fmt.Sprintf(errorKey, "la.m")+` = `+fmt.Sprintf(errorKey, "$4::text")+`
+		 GROUP BY 1 ORDER BY 2 DESC, 4 DESC LIMIT 5`, projectID, resultID, stableTestID, cutQuery(lastError, 4000))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var category, example string
+		var tests int
+		var last time.Time
+		if err := rows.Scan(&category, &tests, &example, &last); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"category": category, "tests": tests, "example": example, "lastAcceptedAt": last.UTC()})
+	}
+	return out, rows.Err()
+}
+
+// rulesTrackRecord is how the team answered the rule-based hypotheses of this
+// project, per category: accepted as proposed, or rejected / accepted with a
+// different cause. The rules use it to calibrate their confidence.
+func (s *service) rulesTrackRecord(ctx context.Context, projectID string) ([]map[string]any, error) {
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT h.category,
+		       count(*) FILTER (WHERE e.type = 'HYPOTHESIS_ACCEPTED' AND coalesce(e.payload->>'category', h.category) = h.category),
+		       count(*) FILTER (WHERE e.type = 'HYPOTHESIS_REJECTED' OR coalesce(e.payload->>'category', h.category) <> h.category)
+		  FROM ai_hypotheses h
+		  JOIN triage_events e ON e.hypothesis_id = h.id AND e.type IN ('HYPOTHESIS_ACCEPTED', 'HYPOTHESIS_REJECTED')
+		 WHERE h.project_id = $1 AND h.model = 'rules-v1'
+		 GROUP BY h.category`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var category string
+		var accepted, rejected int
+		if err := rows.Scan(&category, &accepted, &rejected); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"category": category, "accepted": accepted, "rejected": rejected})
+	}
+	return out, rows.Err()
 }
 
 func cutQuery(s string, n int) string {

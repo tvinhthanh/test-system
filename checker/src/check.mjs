@@ -6,7 +6,7 @@
 import tls from "node:tls";
 import { axeSource } from "./inspect.mjs";
 import { Blocked, resolveAllowed, startProxy } from "./proxy.mjs";
-import { runStep, StepError } from "./steps.mjs";
+import { passwordFieldsLeft, runStep, StepError } from "./steps.mjs";
 
 const NAV_TIMEOUT_MS = 30_000;
 const SETTLE_MS = 3_000;
@@ -211,8 +211,7 @@ async function signIn(context, url, login) {
         return i === 0 ? `the sign-in page did not open: ${err.message}` : `sign-in step ${i} failed: ${err instanceof StepError ? err.message : String(err)}`;
       }
     }
-    await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
-    const passwords = await page.locator('input[type="password"]').filter({ visible: true }).count().catch(() => 0);
+    const passwords = await passwordFieldsLeft(page);
     return passwords > 0 ? "still on the sign-in page after the sign-in steps" : "";
   } finally {
     await page.close().catch(() => {});

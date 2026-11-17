@@ -53,7 +53,9 @@ func (s *service) RequestInvestigation(ctx context.Context, in NewInvestigation)
 	if err := s.ownResult(ctx, in.ProjectID, in.ResultID); err != nil {
 		return Investigation{}, false, err
 	}
-	if s.evidence == nil || s.keys == nil || s.llm == nil {
+	// Evidence is the one hard requirement: without an AI key (or without the
+	// AI deps at all) the worker investigates by rules instead (rules.go).
+	if s.evidence == nil {
 		return Investigation{}, false, ErrNotConfigured
 	}
 	evidence, fingerprint, status, err := s.evidence.InvestigationEvidence(ctx, in.ProjectID, in.ResultID)
@@ -67,11 +69,6 @@ func (s *service) RequestInvestigation(ctx context.Context, in NewInvestigation)
 	}
 	if len(evidence) == 0 || len(fingerprint) != 64 {
 		return Investigation{}, false, fmt.Errorf("%w: evidence", ErrInvalid)
-	}
-	if _, _, ok, err := s.keys.Credentials(ctx, in.OrgID); err != nil {
-		return Investigation{}, false, err
-	} else if !ok {
-		return Investigation{}, false, ErrNotConfigured
 	}
 	day := s.now().UTC().Format("2006-01-02")
 	var out Investigation
@@ -249,12 +246,17 @@ func (s *service) runInvestigation(ctx context.Context, job queue.Job) error {
 	if err := q.QueryRow(ctx, `SELECT org_id FROM ai_investigations WHERE id=$1`, in.ID).Scan(&orgID); err != nil {
 		return err
 	}
-	acct, source, ok, err := s.keys.Credentials(ctx, orgID)
-	if err != nil {
-		return err
+	var acct llm.Account
+	var source string
+	ok := false
+	if s.keys != nil && s.llm != nil {
+		var err error
+		if acct, source, ok, err = s.keys.Credentials(ctx, orgID); err != nil {
+			return err
+		}
 	}
 	if !ok {
-		return fail("No AI key is configured for this organization.")
+		return s.runRulesInvestigation(ctx, in, fail)
 	}
 	raw, _, _, err := s.evidence.InvestigationEvidence(ctx, in.ProjectID, in.ResultID)
 	if err != nil {

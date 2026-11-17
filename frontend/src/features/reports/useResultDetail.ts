@@ -92,6 +92,27 @@ export function useResultDetail() {
       if (!disposed) actionBusy.value = false;
     }
   }
+  // A person records the cause they found, with no AI or rule hypothesis
+  // behind it (HYPOTHESIS_ACCEPTED + category).
+  async function recordCause(category: string, note: string) {
+    if (!category || actionBusy.value || disposed) return;
+    actionBusy.value = true;
+    actionError.value = null;
+    try {
+      await reports.triage(
+        project.value,
+        resultId.value,
+        "HYPOTHESIS_ACCEPTED",
+        new AbortController().signal,
+        { category, note },
+      );
+      await refresh();
+    } catch (error) {
+      actionError.value = error;
+    } finally {
+      if (!disposed) actionBusy.value = false;
+    }
+  }
   watch(
     () => [project.value, resultId.value],
     async () => {
@@ -124,6 +145,7 @@ export function useResultDetail() {
     actionError,
     refresh,
     emit,
+    recordCause,
     artifactUrl,
     traceUrl,
     investigations,

@@ -404,16 +404,22 @@ func (d *dashboard) identityRuns(w http.ResponseWriter, r *http.Request) {
 type triageRequest struct {
 	Type    string         `json:"type"`
 	Payload map[string]any `json:"payload"`
+	// Category is the §8.7 cause, required for HYPOTHESIS_ACCEPTED: a person
+	// records the root cause they found, with no AI hypothesis behind it.
+	Category string `json:"category"`
 }
 
-// P1 types the UI may emit (contract): FAILURE_SEEN needs a viewer, the
-// rest member or above (§11.3.2). Category acceptance stays with the
-// operator CLI until the UI has a category picker.
+// Types the UI may emit (contract): FAILURE_SEEN needs a viewer, the rest
+// member or above (§11.3.2). HYPOTHESIS_ACCEPTED here is a person's own
+// verdict on the cause (category required) — what TTRC and triage coverage
+// count, so they work without any AI key. Accepting an AI or rule-based
+// hypothesis goes through …/hypotheses/{id}/decision instead.
 var uiTriageTypes = map[triage.EventType]authz.Action{
-	triage.FailureSeen:      authz.ActionView,
-	triage.MarkedFlaky:      authz.ActionTriage,
-	triage.MarkedKnownIssue: authz.ActionTriage,
-	triage.Resolved:         authz.ActionTriage,
+	triage.FailureSeen:        authz.ActionView,
+	triage.MarkedFlaky:        authz.ActionTriage,
+	triage.MarkedKnownIssue:   authz.ActionTriage,
+	triage.Resolved:           authz.ActionTriage,
+	triage.HypothesisAccepted: authz.ActionTriage,
 }
 
 // triageEvent is the UI's only way to move TTRC (§8.3).
@@ -430,7 +436,17 @@ func (d *dashboard) triageEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	action, allowed := uiTriageTypes[triage.EventType(req.Type)]
 	if !allowed {
-		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "type must be FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE or RESOLVED", map[string]any{"field": "type"})
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "type must be FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED or HYPOTHESIS_ACCEPTED", map[string]any{"field": "type"})
+		return
+	}
+	category := triage.Category(req.Category)
+	if triage.EventType(req.Type) == triage.HypothesisAccepted {
+		if !triage.ValidCategory(category) {
+			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "category must be one of app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown", map[string]any{"field": "category"})
+			return
+		}
+	} else if req.Category != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "category is only for HYPOTHESIS_ACCEPTED", map[string]any{"field": "category"})
 		return
 	}
 	scope, ok := d.project(w, r, p, action)
@@ -439,7 +455,7 @@ func (d *dashboard) triageEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	ev, created, err := d.triage.Record(r.Context(), triage.Record{
 		ProjectID: string(scope.ProjectID), TestResultID: r.PathValue("resultId"), Type: triage.EventType(req.Type),
-		ActorType: triage.ActorUser, ActorID: p.UserID, Payload: req.Payload,
+		ActorType: triage.ActorUser, ActorID: p.UserID, Payload: req.Payload, Category: category,
 	})
 	if err != nil {
 		switch {

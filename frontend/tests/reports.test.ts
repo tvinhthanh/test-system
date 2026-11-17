@@ -208,6 +208,44 @@ it("opens traces in the same-origin trace viewer with an absolute artifact URL",
   );
 });
 
+it("records a person's root cause with its category and note, and plain triage without one", async () => {
+  const bodies: unknown[] = [];
+  const transport = vi.fn<Transport>(async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({}), { status: 201 });
+  });
+  const client = new ApiClient(transport);
+  client.csrfToken = "csrf";
+  const repo = new ReportsRepository(client);
+  await repo.triage(
+    "p/x",
+    "r/1",
+    "HYPOTHESIS_ACCEPTED",
+    new AbortController().signal,
+    { category: "app_bug", note: "  total not recomputed  " },
+  );
+  await repo.triage("p/x", "r/1", "MARKED_FLAKY", new AbortController().signal);
+  await repo.triage(
+    "p/x",
+    "r/1",
+    "HYPOTHESIS_ACCEPTED",
+    new AbortController().signal,
+    { category: "unknown", note: "   " },
+  );
+  expect(String(transport.mock.calls[0]?.[0])).toContain(
+    "/projects/p%2Fx/results/r%2F1/triage-events",
+  );
+  expect(bodies).toEqual([
+    {
+      type: "HYPOTHESIS_ACCEPTED",
+      category: "app_bug",
+      payload: { note: "total not recomputed" },
+    },
+    { type: "MARKED_FLAKY", payload: {} },
+    { type: "HYPOTHESIS_ACCEPTED", category: "unknown", payload: {} },
+  ]);
+});
+
 it("decodes investigations and sends start and human decisions to scoped routes", async () => {
   const item = {
     id: "i1",

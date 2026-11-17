@@ -395,8 +395,9 @@ type Service interface {
 	Accounts(ctx context.Context, projectID, environmentID string) ([]Account, error)
 	SaveAccount(ctx context.Context, projectID, environmentID string, in AccountInput) (Account, error)
 	DeleteAccount(ctx context.Context, projectID, environmentID, key string) (bool, error)
-	// FindLogin queues reading the account's sign-in page with a model and
-	// trying the steps it writes (needs an API key for orgID).
+	// FindLogin queues reading the account's sign-in page — with a model
+	// when orgID has an AI key, by fixed rules otherwise — and trying the
+	// steps found; only steps that sign in are kept.
 	FindLogin(ctx context.Context, projectID, orgID, environmentID, key string) (Account, error)
 
 	// Specs.

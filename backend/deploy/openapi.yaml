@@ -2964,6 +2964,9 @@ paths:
         Actor and time are the session's and the server's; anything the body
         claims about them is ignored (§11.6 API3). `FAILURE_SEEN` is deduped per
         user/result/24 h (`200` instead of `201`). Viewers get `403`.
+        `HYPOTHESIS_ACCEPTED` is a person's own verdict on the cause and needs
+        `category` (§8.7); it is what TTRC and triage coverage count, so they work
+        without an AI key. `category` on any other type is a `400`.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2976,7 +2979,8 @@ paths:
               type: object
               required: [type]
               properties:
-                type: { type: string, enum: [FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED] }
+                type: { type: string, enum: [FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED, HYPOTHESIS_ACCEPTED] }
+                category: { type: string, enum: [app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown], description: "Required for HYPOTHESIS_ACCEPTED, refused otherwise." }
                 payload: { type: object }
       responses:
         "201":
@@ -2993,7 +2997,8 @@ paths:
     post:
       operationId: requestFailureInvestigation
       tags: [dashboard]
-      summary: Queue or reuse a same-day AI failure investigation
+      summary: Queue or reuse a same-day failure investigation (AI, or rules without an AI key)
+      description: With an AI key the worker asks the configured model; without one it investigates by fixed rules (`rules-v1` — error patterns, the test's pass/fail history, causes accepted before) and proposes a hypothesis the same way, recorded as SYSTEM so AI metrics never count it. Either way a member accepts or rejects it.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/ResultId" }]
       responses:
@@ -3003,7 +3008,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { description: AI is not configured. }
+        "409": { description: The investigation service is not available on this server. }
         "429": { description: Daily investigation limit reached. }
     get:
       operationId: listFailureInvestigations

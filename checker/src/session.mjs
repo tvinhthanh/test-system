@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { defaultUA } from "./check.mjs";
 import { contextProxy, deviceOptions } from "./engines.mjs";
 import { startProxy } from "./proxy.mjs";
-import { lookAt, runStep, siteOf, StepError } from "./steps.mjs";
+import { lookAt, passwordFieldsLeft, runStep, siteOf, StepError } from "./steps.mjs";
 
 const USER_AGENT_SUFFIX = " ATP-Auto-Test/1";
 
@@ -160,8 +160,7 @@ export class Session {
       const failed = results.at(-1);
       return { loggedIn: false, error: `sign-in step ${results.length - start.length} failed: ${failed.error}` };
     }
-    await this.page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
-    const passwords = await this.page.locator('input[type="password"]').filter({ visible: true }).count().catch(() => 0);
+    const passwords = await passwordFieldsLeft(this.page);
     if (passwords > 0) {
       const alert = await this.page.getByRole("alert").first().innerText({ timeout: 500 }).catch(() => "");
       return {
