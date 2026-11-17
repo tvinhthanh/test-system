@@ -265,15 +265,17 @@ func TestBackupRestoreDrill(t *testing.T) {
 	}
 	u.Path = "/" + target
 	targetURL := u.String()
-	// Extensions live outside the schema (0004: pg_trgm WITH SCHEMA public)
-	// and a schema-scoped dump does not carry them; restore.sh creates them
-	// first, so does the drill.
+	// Extensions live outside the schema (0004 pg_trgm, 0029 btree_gin, both
+	// WITH SCHEMA public) and a schema-scoped dump does not carry them;
+	// restore.sh creates them first, so does the drill.
 	admin, err := pgx.Connect(ctx, targetURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`); err != nil {
-		t.Fatal(err)
+	for _, ext := range []string{"pg_trgm", "btree_gin"} { // 0004, 0029
+		if _, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS `+ext+` WITH SCHEMA public`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	admin.Close(ctx)
 	createTook := time.Since(createStart)

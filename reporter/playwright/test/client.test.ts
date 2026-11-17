@@ -69,6 +69,21 @@ test("timeouts and connection failures are retryable network errors", async () =
   await assert.rejects(client(only.fetch, [], { maxAttempts: 1 }).finishRun("x", "now"), (e: any) => e instanceof NetworkError);
 });
 
+test("timeout covers reading the response body after headers arrive", async () => {
+  const fetchWithHangingBody = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener("abort", () => controller.error(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      },
+    });
+    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as unknown as typeof fetch;
+
+  const started = Date.now();
+  await assert.rejects(client(fetchWithHangingBody, [], { timeoutMs: 30, maxAttempts: 1 }).sendEvents("x", []), (e: any) => e instanceof NetworkError && /timeout after 30 ms/.test(e.message));
+  assert.ok(Date.now() - started < 200, "body read should be bounded by the request timeout");
+});
+
 test("presigned PUT sends the pinned headers and returns the ETag", async () => {
   const s = scripted([{ status: 200, headers: { ETag: '"abc"' } }]);
   const res = await client(s.fetch, []).put("http://bucket.test/upload?token=1", new Uint8Array([1, 2, 3]), { "Content-Type": "image/png" });
@@ -76,4 +91,33 @@ test("presigned PUT sends the pinned headers and returns the ETag", async () => 
   assert.equal(s.calls[0].init.method, "PUT");
   assert.equal((s.calls[0].init.headers as Record<string, string>)["Content-Type"], "image/png");
   assert.equal((s.calls[0].init.headers as Record<string, string>)["Authorization"], undefined);
+});
+
+test("an upload URL that does not parse fails at once: no request, no retry, the grant not echoed", async () => {
+  const s = scripted([]);
+  const sleeps: number[] = [];
+  await assert.rejects(
+    client(s.fetch, sleeps).put("https://<account>.r2.cloudflarestorage.com/upload?token=grant123", new Uint8Array(1), {}),
+    (e: any) => e instanceof ApiError && e.code === "UPLOAD_URL_INVALID" && !e.retryable && !e.message.includes("grant123"),
+  );
+  assert.equal(s.calls.length, 0);
+  assert.deepEqual(sleeps, []);
+});
+
+test("once a request uses up its retries, the platform is down for the run: later calls fail without a request", async () => {
+  const s = scripted([...Array(5).fill({ status: 0, fail: true }), { status: 200, body: {} }]);
+  const c = client(s.fetch, []);
+  await assert.rejects(c.createRun({}), (e: any) => e instanceof NetworkError);
+  assert.equal(c.unavailable, true);
+  await assert.rejects(c.sendEvents("x", [{}]), (e: any) => e instanceof NetworkError && /unavailable earlier/.test(e.message));
+  assert.equal(s.calls.length, 5, "no sixth request after the breaker opened");
+});
+
+test("a 4xx does not open the breaker; a presigned PUT failing does not either", async () => {
+  const s = scripted([{ status: 401, body: { error: { code: "UNAUTHORIZED" } } }, ...Array(5).fill({ status: 503 }), { status: 200, body: { accepted: 1, duplicates: 0, identityMap: {} } }]);
+  const c = client(s.fetch, []);
+  await assert.rejects(c.createRun({}), (e: any) => e instanceof ApiError && e.status === 401);
+  await assert.rejects(c.put("http://store.test/o", new Uint8Array(1), {}), (e: any) => e instanceof ApiError && e.status === 503);
+  assert.equal(c.unavailable, false);
+  assert.equal((await c.sendEvents("x", [{}])).accepted, 1);
 });

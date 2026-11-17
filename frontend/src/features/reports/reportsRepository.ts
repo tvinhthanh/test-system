@@ -74,6 +74,34 @@ export interface ResultDetail {
   attempts: Attempt[];
   events: TriageEvent[];
 }
+export interface EvidenceFact {
+  source: string;
+  fact: string;
+}
+export interface InvestigationHypothesis {
+  id: string;
+  category: string;
+  confidence: number;
+  evidence: EvidenceFact[];
+  suggestedAction: string;
+  decision: string | null;
+}
+export interface Investigation {
+  id: string;
+  status: "queued" | "collecting" | "investigating" | "done" | "error";
+  requestedBy: string;
+  provider: string;
+  model: string;
+  turnCount: number;
+  toolCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  error: string;
+  hypothesis: InvestigationHypothesis | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
 // Engineering overview (§2.5 EM screen, §6.4 product signals). Every number is
 // computed by the server over the window; the client only formats.
 export interface TriageMetrics {
@@ -135,12 +163,14 @@ export interface RunsQuery {
   q: string;
   status: string;
   environment: string;
+  source: string;
   cursor: string;
 }
 export const emptyQuery: RunsQuery = {
   q: "",
   status: "",
   environment: "",
+  source: "",
   cursor: "",
 };
 function project(value: unknown): Project {
@@ -246,6 +276,48 @@ function triageEvent(value: unknown): TriageEvent {
     type: d.string(x.type),
     actorName: d.string(x.actorName),
     occurredAt: d.date(x.occurredAt),
+  };
+}
+function investigation(value: unknown): Investigation {
+  const x = d.record(value);
+  let hypothesis: InvestigationHypothesis | null = null;
+  if (x.hypothesis !== undefined && x.hypothesis !== null) {
+    const h = d.record(x.hypothesis);
+    hypothesis = {
+      id: d.string(h.id),
+      category: d.string(h.category),
+      confidence: typeof h.confidence === "number" ? h.confidence : d.invalid(),
+      evidence: d.array(
+        h.evidence,
+        (item) => {
+          const e = d.record(item);
+          return { source: d.string(e.source), fact: d.string(e.fact) };
+        },
+        10,
+      ),
+      suggestedAction: d.string(h.suggestedAction),
+      decision:
+        h.decision === undefined || h.decision === ""
+          ? null
+          : d.string(h.decision),
+    };
+  }
+  return {
+    id: d.string(x.id),
+    status: d.string(x.status) as Investigation["status"],
+    requestedBy: d.string(x.requestedBy),
+    provider: x.provider === undefined ? "" : d.string(x.provider),
+    model: x.model === undefined ? "" : d.string(x.model),
+    turnCount: d.integer(x.turnCount),
+    toolCount: d.integer(x.toolCount),
+    inputTokens: d.integer(x.inputTokens),
+    outputTokens: d.integer(x.outputTokens),
+    error: x.error === undefined ? "" : d.string(x.error),
+    hypothesis,
+    createdAt: d.date(x.createdAt),
+    startedAt: x.startedAt === undefined ? null : d.nullableString(x.startedAt),
+    finishedAt:
+      x.finishedAt === undefined ? null : d.nullableString(x.finishedAt),
   };
 }
 function identity(value: unknown): Identity {
@@ -410,15 +482,64 @@ export class ReportsRepository {
   traceViewerUrl(origin: string, projectId: string, artifactId: string) {
     return `/trace/index.html?trace=${encodeURIComponent(origin + this.artifactContentUrl(projectId, artifactId))}`;
   }
+  // `cause` only goes with HYPOTHESIS_ACCEPTED: a person's own verdict on the
+  // root cause (§8.7 category, optional note) — what triage coverage and TTRC
+  // count, with or without an AI key.
   async triage(
     projectId: string,
     resultId: string,
     type: string,
     signal: AbortSignal,
+    cause?: { category: string; note?: string },
   ) {
+    const note = cause?.note?.trim();
     await this.api.request(
       `${scope(projectId)}/results/${encodeURIComponent(resultId)}/triage-events`,
-      { signal, body: { type, payload: {} } },
+      {
+        signal,
+        body: {
+          type,
+          payload: note ? { note } : {},
+          ...(cause ? { category: cause.category } : {}),
+        },
+      },
+    );
+  }
+  async investigations(
+    projectId: string,
+    resultId: string,
+    signal: AbortSignal,
+  ) {
+    const x = d.record(
+      await this.api.request(
+        `${scope(projectId)}/results/${encodeURIComponent(resultId)}/investigations?limit=20`,
+        { signal },
+      ),
+    );
+    return d.array(x.items, investigation, 20);
+  }
+  async startInvestigation(
+    projectId: string,
+    resultId: string,
+    signal: AbortSignal,
+  ) {
+    return investigation(
+      await this.api.request(
+        `${scope(projectId)}/results/${encodeURIComponent(resultId)}/investigations`,
+        { signal, body: {} },
+      ),
+    );
+  }
+  async decideHypothesis(
+    projectId: string,
+    resultId: string,
+    hypothesisId: string,
+    decision: "accept" | "reject",
+    signal: AbortSignal,
+  ) {
+    await this.api.request(
+      `${scope(projectId)}/results/${encodeURIComponent(resultId)}/hypotheses/${encodeURIComponent(hypothesisId)}/decision`,
+      { signal, body: { decision, category: "", note: "" } },
     );
   }
   async identities(

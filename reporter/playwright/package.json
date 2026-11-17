@@ -1,12 +1,12 @@
 {
   "name": "@atp/playwright-reporter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Playwright reporter that streams runs, results and artifacts to the Automation Testing Platform (SPEC §7).",
   "license": "UNLICENSED",
   "private": true,
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
-  "files": ["dist", "README.md"],
+  "files": ["dist/src", "README.md"],
   "engines": { "node": ">=18" },
   "scripts": {
     "build": "tsc -p tsconfig.json",

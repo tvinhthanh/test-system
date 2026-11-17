@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -eu
+case "$*" in
+  'compose version') [ "${DOCTOR_NO_COMPOSE:-0}" != 1 ] ;;
+  'info --format {{.OSType}}')
+    [ "${DOCTOR_NO_ENGINE:-0}" != 1 ] || exit 1
+    printf '%s\n' "${DOCTOR_ENGINE:-linux}"
+    ;;
+  compose*'config --quiet') [ "${DOCTOR_BAD_CONFIG:-0}" != 1 ] ;;
+  *) printf 'Unexpected Docker command: %s\n' "$*" >&2; exit 99 ;;
+esac

@@ -20,6 +20,7 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 	"github.com/vinh/automation-testing-platform/backend/migrations"
 )
 
@@ -135,6 +136,70 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	planA := a.user.post(baseA+"/test-plans", map[string]any{"name": "Sprint 12"}).body["id"].(string)
 	execA := a.user.post(baseA+"/test-plans/"+planA+"/executions", map[string]any{"testCaseId": caseA, "status": "passed"}).body["id"].(string)
 	releaseA := a.user.post(baseA+"/releases", map[string]any{"version": "2026.09.21"}).body["id"].(string)
+	envA, _ := a.user.post(baseA+"/environments", map[string]any{"key": "walk-env", "baseUrl": "https://alpha.example"}).body["id"].(string)
+	if envA == "" {
+		t.Fatal("seeding A's environment failed")
+	}
+	// A finished URL check of A's with a screenshot (QĐ-14): URLCHECK is
+	// off in this server, so it is written the way the worker would.
+	checkA, err := urlcheck.New(db, nil).Create(ctx, string(a.project), envA, "https://alpha.example", "a@alpha.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE url_checks SET status = 'done', verdict = 'passed', report = '{"checks":[]}', desktop_shot = '\xffd8ffe0'::bytea, finished_at = now() WHERE id = $1`, checkA.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A finished AI suggestion of A's (QĐ-15), written directly: no model here.
+	var suggestionA string
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO case_suggestions (project_id, org_id, test_type, count, status, drafts, requested_by, finished_at)
+		VALUES ($1, $2, 'smoke', 1, 'done', '[]', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID).Scan(&suggestionA); err != nil {
+		t.Fatal(err)
+	}
+	// Org A's auto test rows (QĐ-16): a test account through the api, a
+	// draft, a finished run with a screenshot and a site scan written the
+	// way the worker would (no checker or model here).
+	if r := a.user.post(baseA+"/environments/"+envA+"/accounts", map[string]any{"key": "walk-account", "username": "a", "password": "p"}); r.code != 200 {
+		t.Fatalf("seed A's test account: %d %s", r.code, r.raw)
+	}
+	var draftA, autoRunA, scanA, loadA, scriptA string
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO auto_drafts (project_id, org_id, environment_id, target, count, status, drafts, requested_by, finished_at)
+		VALUES ($1, $2, $3, '/', 1, 'done', '[]', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID, envA).Scan(&draftA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO auto_runs (project_id, org_id, environment_id, status, trigger, requested_by, total, passed, started_at, finished_at)
+		VALUES ($1, $2, $3, 'done', 'dashboard', 'a@alpha.example', 1, 1, now(), now()) RETURNING id`, string(a.project), a.orgID, envA).Scan(&autoRunA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `INSERT INTO auto_run_cases (run_id, case_id, position, title, spec, status, final_shot, finished_at)
+		VALUES ($1, $2, 0, 'Walk', '{}', 'passed', '\xffd8ffe0'::bytea, now())`, autoRunA, caseA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO load_runs (project_id, org_id, environment_id, host, base, paths, vus, seconds, requested_by)
+		VALUES ($1, $2, $3, 'alpha.example', 'https://alpha.example', '{/}', 1, 5, 'a@alpha.example') RETURNING id`, string(a.project), a.orgID, envA).Scan(&loadA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO script_runs (project_id, org_id, environment_id, kind, base, entry, timeout_seconds, archive, archive_bytes, requested_by)
+		VALUES ($1, $2, $3, 'playwright', 'https://alpha.example', 'playwright.config.ts', 60, decode('1f8b', 'hex'), 2, 'a@alpha.example') RETURNING id`, string(a.project), a.orgID, envA).Scan(&scriptA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO site_scans (project_id, start_url, max_pages, requested_by) VALUES ($1, 'https://alpha.example/', 5, 'a@alpha.example') RETURNING id`,
+		string(a.project)).Scan(&scanA); err != nil {
+		t.Fatal(err)
+	}
+	// A finished AI investigation of A's with its hypothesis (QĐ-4), written
+	// the way the worker would: no model here.
+	var investigationA, hypothesisA string
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO ai_investigations (project_id, org_id, test_result_id, dedupe_key, requested_day, status, requested_by, finished_at)
+		VALUES ($1, $2, $3, $4, current_date, 'done', 'a@alpha.example', now()) RETURNING id`, string(a.project), a.orgID, resultA, strings.Repeat("ab", 32)).Scan(&investigationA); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Q(ctx).QueryRow(ctx, `INSERT INTO ai_hypotheses (project_id, test_result_id, category, confidence, evidence, model, prompt_version, investigation_id)
+		VALUES ($1, $2, 'test_bug', 0.8, '[]', 'walk', 'investigation-v1', $3) RETURNING id`, string(a.project), resultA, investigationA).Scan(&hypothesisA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Q(ctx).Exec(ctx, `UPDATE ai_investigations SET hypothesis_id = $2 WHERE id = $1`, investigationA, hypothesisA); err != nil {
+		t.Fatal(err)
+	}
 	if reqA == "" || caseA == "" || linkA == "" || planA == "" || execA == "" || releaseA == "" {
 		t.Fatalf("seeding A's test management rows failed: %q %q %q %q %q %q", reqA, caseA, linkA, planA, execA, releaseA)
 	}
@@ -145,34 +210,63 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Org A's ids by path parameter name. A parameter this map does not
-	// know is a route the walk cannot exercise — fail loudly, do not skip.
+	// A pending access request on A's project (ADR-001 join_org), seeded
+	// directly: the walk needs its id, not the anonymous sign-up path.
+	var accessReqA string
+	if err := db.Q(ctx).QueryRow(ctx, `
+		INSERT INTO access_requests (user_id, scope_level, scope_id, requested_role, note)
+		VALUES ($1, 'project', $2, 'viewer', 'walk') RETURNING id`, a.userID, string(a.project)).Scan(&accessReqA); err != nil {
+		t.Fatal(err)
+	}
+
+	specializedBody := map[string]any{"schemaVersion": 1, "idempotencyKey": "walk-specialized", "kind": "recovery", "title": "Walk recovery", "state": "not_run", "notes": "Not executed", "environment": "test", "applicationVersion": "1", "source": "manual", "toolVersion": "1", "adapterVersion": "atp-v1", "details": map[string]any{}}
+	specialized := a.user.post(baseA+"/specialized-results", specializedBody)
+	if specialized.code != 201 {
+		t.Fatalf("seed specialized report: %d %s", specialized.code, specialized.raw)
+	}
+	// Org A's ids by path parameter name. An unknown parameter is a route
+	// the walk cannot exercise: fail loudly, do not skip.
 	foreign := map[string]string{
-		"projectId": string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
+		"specializedId": specialized.body["id"].(string),
+		"projectId":     string(a.project), "runId": runA, "resultId": resultA, "identityId": identityA,
 		"localRunId": localRunA, "artifactId": artifactA, "itemId": itemA,
 		"requirementId": reqA, "testCaseId": caseA, "linkId": linkA, "planId": planA, "executionId": execA, "releaseId": releaseA,
 		"userId":      a.userID,
 		"workspaceId": a.wsID, "organizationId": a.orgID,
-		"invitationId": inviteA.ID,
-		"tokenId":      a.tokenID,
+		"invitationId":  inviteA.ID,
+		"requestId":     accessReqA,
+		"tokenId":       a.tokenID,
+		"environmentId": envA,
+		"checkId":       checkA.ID, "which": "desktop",
+		"suggestionId":    suggestionA,
+		"investigationId": investigationA, "hypothesisId": hypothesisA,
+		"accountKey": "walk-account", "draftId": draftA, "autoRunId": autoRunA, "shot": "final", "scanId": scanA, "loadRunId": loadA, "scriptRunId": scriptA,
 	}
 	// Bodies that pass validation, so a 400 can never stand in for the tenant check.
 	bodies := map[string]any{
-		"POST /v1/projects/{projectId}/results/{resultId}/triage-events":   map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
-		"POST /v1/runs/{localRunId}/events":                                map[string]any{"events": []any{event}},
-		"POST /v1/runs/{localRunId}/finish":                                map[string]any{},
-		"POST /v1/artifacts/{artifactId}/complete":                         map[string]any{"sha256": strings.Repeat("ab", 32)},
-		"POST /v1/artifacts":                                               declare,
-		"POST /v1/projects/{projectId}/review/{itemId}":                    map[string]any{"decision": "kept"},
-		"POST /v1/projects/{projectId}/identities/{identityId}/merge":      map[string]any{"into": identityA},
-		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge": map[string]any{},
-		"POST /v1/projects/{projectId}/identities/{identityId}/split":      map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
+		"POST /v1/projects/{projectId}/results/{resultId}/triage-events": map[string]any{"type": "FAILURE_SEEN", "payload": map[string]any{}},
+		// AI investigation (QĐ-4): requesting takes no body; a valid decision,
+		// so only the tenant check can refuse.
+		"POST /v1/projects/{projectId}/results/{resultId}/hypotheses/{hypothesisId}/decision": map[string]any{"decision": "reject"},
+		"POST /v1/runs/{localRunId}/events":                                                   map[string]any{"events": []any{event}},
+		"POST /v1/runs/{localRunId}/finish":                                                   map[string]any{},
+		"POST /v1/artifacts/{artifactId}/complete":                                            map[string]any{"sha256": strings.Repeat("ab", 32)},
+		"POST /v1/artifacts":                                                                  declare,
+		"POST /v1/projects/{projectId}/review/{itemId}":                                       map[string]any{"decision": "kept"},
+		"POST /v1/projects/{projectId}/access-requests/{requestId}/decide":                    map[string]any{"decision": "denied"},
+		"POST /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide":                map[string]any{"decision": "denied"},
+		"POST /v1/organizations/{organizationId}/access-requests/{requestId}/decide":          map[string]any{"decision": "denied"},
+		"POST /v1/projects/{projectId}/identities/{identityId}/merge":                         map[string]any{"into": identityA},
+		"POST /v1/projects/{projectId}/identities/{identityId}/undo-merge":                    map[string]any{},
+		"POST /v1/projects/{projectId}/identities/{identityId}/split":                         map[string]any{"fingerprint": "fp1:walk", "at": time.Now().UTC().Format(time.RFC3339)},
 		// Test Management (P2). Valid bodies, so only the tenant check can refuse.
+		"POST /v1/projects/{projectId}/specialized-results":            specializedBody,
 		"POST /v1/projects/{projectId}/suites":                         map[string]any{"name": "Walk"},
 		"POST /v1/projects/{projectId}/requirements":                   map[string]any{"title": "Walk"},
 		"PATCH /v1/projects/{projectId}/requirements/{requirementId}":  map[string]any{"title": "Walk"},
 		"POST /v1/projects/{projectId}/test-cases":                     map[string]any{"title": "Walk"},
 		"POST /v1/projects/{projectId}/test-cases/import":              map[string]any{"csv": "title\nWalk"},
+		"POST /v1/projects/{projectId}/test-cases/bulk":                map[string]any{"items": []map[string]any{{"id": caseA, "expectedUpdatedAt": "2026-10-13T09:00:00Z"}}, "patch": map[string]any{"priority": "p1"}},
 		"PATCH /v1/projects/{projectId}/test-cases/{testCaseId}":       map[string]any{"title": "Walk"},
 		"POST /v1/projects/{projectId}/test-cases/{testCaseId}/links":  map[string]any{"stableTestId": identityA},
 		"POST /v1/projects/{projectId}/test-plans":                     map[string]any{"name": "Walk"},
@@ -189,13 +283,35 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 		"DELETE /v1/projects/{projectId}/runs/{runId}":                   map[string]any{},
 		"POST /v1/projects/{projectId}/runs/{runId}/restore":             map[string]any{},
 		"DELETE /v1/projects/{projectId}":                                map[string]any{"confirmName": "alpha-app"},
+		"PATCH /v1/projects/{projectId}/settings":                        map[string]any{"retention": map[string]int{"video": 1}},
+		"POST /v1/projects/{projectId}/environments":                     map[string]any{"key": "walk-b", "baseUrl": "https://beta.example"},
+		"POST /v1/projects/{projectId}/url-checks":                       map[string]any{"url": "https://beta.example"},
+		"POST /v1/projects/{projectId}/case-suggestions":                 map[string]any{"testType": "smoke"},
+		"POST /v1/organizations/{organizationId}/ai-settings":            map[string]any{"apiKey": "sk-walk", "model": "claude-opus-5-5"},
+		"PATCH /v1/projects/{projectId}/environments/{environmentId}":    map[string]any{"baseUrl": "https://beta.example"},
 		"POST /v1/workspaces/{workspaceId}/projects/{projectId}/restore": map[string]any{},
 		"POST /v1/workspaces/{workspaceId}/projects":                     map[string]any{"name": "walk project"},
 		"POST /v1/workspaces/{workspaceId}/members":                      map[string]any{"email": "a@alpha.example", "role": "workspace_admin"},
 		"POST /v1/organizations/{organizationId}/members":                map[string]any{"email": "a@alpha.example", "role": "org_admin"},
+		"DELETE /v1/organizations/{organizationId}":                      map[string]any{"confirmName": "ALPHA"},
+		"POST /v1/organizations/{organizationId}/restore":                map[string]any{},
 		// JUnit upload: the tenant check runs before the body is read.
 		"POST /v1/projects/{projectId}/imports/junit": map[string]any{},
 		"POST /v1/projects/{projectId}/tokens":        map[string]any{"name": "walk"},
+		// Auto test (QĐ-16).
+		"POST /v1/projects/{projectId}/environments/{environmentId}/accounts":                         map[string]any{"key": "walk-b", "username": "b", "password": "p"},
+		"POST /v1/projects/{projectId}/environments/{environmentId}/accounts/{accountKey}/find-login": map[string]any{},
+		"POST /v1/projects/{projectId}/auto-specs":                                                    map[string]any{"title": "Walk", "target": "/", "steps": []any{map[string]any{"do": "expect_title", "value": "x"}}},
+		"POST /v1/projects/{projectId}/test-cases/{testCaseId}/auto-spec":                             map[string]any{"target": "/", "steps": []any{map[string]any{"do": "expect_title", "value": "x"}}},
+		"POST /v1/projects/{projectId}/auto-drafts":                                                   map[string]any{"environmentId": envA, "target": "/"},
+		"POST /v1/projects/{projectId}/auto-runs":                                                     map[string]any{"environmentId": envA},
+		"POST /v1/projects/{projectId}/auto-runs/{autoRunId}/cases/{testCaseId}/apply-heal":           map[string]any{"step": 0},
+		"POST /v1/projects/{projectId}/site-scans":                                                    map[string]any{"url": "https://beta.example"},
+		// Load tests (QĐ-19 tier 3).
+		"POST /v1/projects/{projectId}/environments/{environmentId}/ownership/check": map[string]any{"method": "file"},
+		"POST /v1/projects/{projectId}/load-runs":                                    map[string]any{"environmentId": envA, "vus": 1, "seconds": 5},
+		// Script runs (QĐ-19 tier 4): multipart; the tenant check runs before the body is read.
+		"POST /v1/projects/{projectId}/script-runs": map[string]any{},
 		// ROI baseline (§6.8.3, QĐ-13): a valid measurement, so only the tenant check refuses.
 		"POST /v1/projects/{projectId}/roi/baselines": map[string]any{"kind": "retrospective", "failures": 10, "medianMinutes": 180, "periodFrom": "2026-08-01", "periodTo": "2026-08-14"},
 	}
@@ -204,14 +320,17 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	exempt := map[string]bool{
 		"GET /healthz": true, "GET /v1/session": true, "POST /v1/session": true, "POST /v1/session/logout": true,
 		"GET /v1/projects": true, "POST /v1/runs": true, "POST /v1/artifacts": true,
-		"POST /v1/imports/junit": true, // the token names the project, like POST /v1/runs; asserted below
-		"GET /v1/member-scopes":  true, // per user; asserted below
+		"POST /v1/imports/junit":        true, // the token names the project, like POST /v1/runs; asserted below
+		"POST /v1/auto-runs":            true, // the token names the project (QĐ-16); asserted below
+		"GET /v1/member-scopes":         true, // per user; asserted below
+		"GET /v1/organizations/deleted": true, // the caller's own deleted orgs; asserted below
 		// MFA acts on the signed-in user only; asserted in mfa_test.go.
 		"POST /v1/session/mfa": true, "GET /v1/session/mfa": true, "POST /v1/session/mfa/setup": true,
 		"POST /v1/session/mfa/enable": true, "POST /v1/session/mfa/disable": true,
 		// OAuth sign-in: anonymous browser navigations, asserted in oauth_test.go.
 		"GET /v1/session/oauth/{provider}/start": true, "GET /v1/session/oauth/{provider}/callback": true,
 		"POST /v1/session/password/forgot": true, "POST /v1/session/password/reset": true, // anonymous; invitations_test.go
+		"POST /v1/session/signup": true, "POST /v1/session/signup/complete": true, // anonymous; signup_test.go
 		"POST /v1/session/password":   true,                                      // the caller's own password; password_test.go
 		"POST /v1/invitations/lookup": true, "POST /v1/invitations/accept": true, // anonymous, by token; invitations_test.go
 		"GET /v1/session/identities": true, "DELETE /v1/session/identities/{identityId}": true, // the caller's own; oauth_test.go
@@ -267,8 +386,9 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 			if r := rep.do(method, fill(path, foreign), body, bearerA); r.code != 401 {
 				t.Errorf("bearer token on %s: %d %s", pat, r.code, r.raw)
 			}
-		case strings.HasPrefix(path, "/v1/releases/"):
-			// CI gate (§6.8.4 #2): a bearer route whose URL names no project.
+		case strings.HasPrefix(path, "/v1/releases/"), strings.HasPrefix(path, "/v1/auto-runs/"):
+			// CI gate (§6.8.4 #2) and auto runs for CI (QĐ-16): bearer routes
+			// whose URL names no project.
 			walked++
 			refused("B token → "+pat, rep.do(method, fill(path, foreign), nil, map[string]string{"Authorization": "Bearer " + b.token}))
 			// A's own ingest token lacks project:read — the permission
@@ -296,6 +416,17 @@ func TestEveryRouteRefusesCrossTenant(t *testing.T) {
 	}
 
 	// The exempt routes' tenant properties.
+	// POST /v1/auto-runs (QĐ-16): the token names its own project; an
+	// ingest-only token may not start runs, and a session is not a token.
+	if r := rep.do("POST", "/v1/auto-runs", map[string]any{"environment": "walk-env"}, bearerA); r.code != 403 {
+		t.Errorf("ingest token starts an auto run: %d %s", r.code, r.raw)
+	}
+	if r := a.user.do("POST", "/v1/auto-runs", map[string]any{"environment": "walk-env"}, nil); r.code != 401 {
+		t.Errorf("session cookie on POST /v1/auto-runs: %d %s", r.code, r.raw)
+	}
+	if r := b.user.get("/v1/organizations/deleted"); r.code != 200 || len(r.items()) != 0 {
+		t.Errorf("B lists deleted organizations: %s", r.raw)
+	}
 	if r := b.user.get("/v1/member-scopes"); r.code != 200 || len(r.items()) != 0 {
 		t.Errorf("B (a project member) manages some scope: %s", r.raw)
 	}

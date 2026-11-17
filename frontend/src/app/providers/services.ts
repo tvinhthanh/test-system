@@ -2,6 +2,7 @@ import { inject, type InjectionKey } from "vue";
 import type { ReportsRepository } from "../../features/reports/reportsRepository";
 import type { ProjectAccess } from "../../features/reports/projectAccess";
 import type { TestmgmtRepository } from "../../features/testmgmt/testmgmtRepository";
+import type { AutotestRepository } from "../../features/autotest/autotestRepository";
 import type { MembersRepository } from "../../features/members/membersRepository";
 import type { MfaRepository } from "../../features/account/mfaRepository";
 import type { TeamAccess } from "../../features/members/teamAccess";
@@ -14,6 +15,7 @@ export interface Services {
   reports: ReportsRepository;
   projectAccess: ProjectAccess;
   testmgmt: TestmgmtRepository;
+  autotest: AutotestRepository;
   members: MembersRepository;
   mfa: MfaRepository;
   teamAccess: TeamAccess;

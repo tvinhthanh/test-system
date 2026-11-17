@@ -208,3 +208,18 @@ func sendReset(ctx context.Context, m mail.Sender, publicURL, to, token string) 
 			"Resetting signs out every session; two-factor authentication, if on, stays on.\n",
 	})
 }
+
+// sendSignup mails the link that finishes a self-serve sign-up (QĐ-17). It
+// names no team: whoever filled in the form chose the node by id, and the
+// mail goes to whatever address they typed.
+func sendSignup(ctx context.Context, m mail.Sender, publicURL, to, token string) error {
+	return m.Send(ctx, mail.Message{
+		To:      to,
+		Subject: "Finish signing up for ATP",
+		Text: "Someone asked to create an ATP account for this address and to join a team.\n\n" +
+			"Choose a password here to create the account (the link works once, for 24 hours):\n" +
+			publicURL + "/signup#" + token + "\n\n" +
+			"An admin of that team still has to approve the request before the account can see anything.\n" +
+			"If it was not you, ignore this email: no account is created.\n",
+	})
+}

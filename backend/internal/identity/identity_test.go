@@ -235,21 +235,33 @@ func TestRaceOnUnknownFingerprint(t *testing.T) {
 	s := sig("tests/race.spec.ts", "Race", "same test")
 	const n = 8
 	ids := make(chan string, n)
+	decisions := make(chan identity.Decision, n)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			m, _, err := svc.ResolveDeferred(ctx, project, "", []identity.Ref{ref("k", s)}, nil)
+			m, oc, err := svc.ResolveDeferred(ctx, project, "", []identity.Ref{ref("k", s)}, nil)
 			if err != nil {
 				t.Errorf("worker %d: %v", i, err)
 				return
 			}
 			ids <- m["k"]
+			decisions <- oc[0].Decision
 		}(i)
 	}
 	wg.Wait()
 	close(ids)
+	close(decisions)
+	// One run created it; every other one found it — the losers of the
+	// insert race report an exact match, not a second "new".
+	counts := map[identity.Decision]int{}
+	for d := range decisions {
+		counts[d]++
+	}
+	if counts[identity.DecisionNew] != 1 || counts[identity.DecisionExact] != n-1 {
+		t.Errorf("decisions: %v, want 1 new and %d exact", counts, n-1)
+	}
 	seen := map[string]bool{}
 	for id := range ids {
 		seen[id] = true

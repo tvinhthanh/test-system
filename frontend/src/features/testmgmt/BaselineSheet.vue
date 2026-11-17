@@ -82,7 +82,9 @@ async function save() {
 <template>
   <Sheet v-model:open="open">
     <SheetTrigger as-child>
-      <Button variant="outline" size="sm"><Plus />Record a baseline</Button>
+      <Button variant="outline" size="sm" class="min-h-11 lg:min-h-8"
+        ><Plus />Record a baseline</Button
+      >
     </SheetTrigger>
     <SheetContent
       class="baseline-sheet w-full gap-0 overflow-y-auto sm:max-w-md"

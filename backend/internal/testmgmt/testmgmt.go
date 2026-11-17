@@ -72,6 +72,11 @@ type Step struct {
 }
 
 type TestCase struct {
+	Taxonomy         Taxonomy
+	Preconditions    string
+	TestData         string
+	Audit            []CaseChange
+	AuditTruncated   bool
 	ID               string
 	ProjectID        string
 	SuiteID          string
@@ -88,6 +93,14 @@ type TestCase struct {
 	Requirements     []string // requirement ids covered, present on Get
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+type CaseChange struct {
+	ID            string    `json:"id"`
+	Actor         string    `json:"actor"`
+	Action        string    `json:"action"`
+	ChangedFields []string  `json:"changedFields"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 type LinkType string
@@ -126,14 +139,42 @@ const (
 )
 
 type Plan struct {
-	ID            string
-	ProjectID     string
-	Name          string
-	EnvironmentID string
-	Status        PlanStatus
-	Executions    []Execution // latest per case, present on Get
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	Cases            []PlanCase
+	ID               string
+	ProjectID        string
+	Name             string
+	EnvironmentID    string
+	TestType         string // smoke, regression, … (QĐ-15); "" when not chosen
+	Status           PlanStatus
+	Executions       []Execution // latest per case, present on Get
+	ExecutionHistory []Execution // newest 200, present on Get
+	HistoryTruncated bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type PlanCase struct {
+	TestCase       TestCase
+	AssigneeUserID string
+	AssigneeEmail  string
+	AssignedBy     string
+	AssignedAt     *time.Time
+	WorkStatus     string
+}
+
+type PlanCaseUpdate struct {
+	TestCaseID     string
+	AssigneeUserID *string
+	AssigneeEmail  *string
+	WorkStatus     *string
+}
+
+type PlanPatch struct {
+	Status            *PlanStatus
+	CaseIDs           *[]string
+	CaseUpdate        *PlanCaseUpdate
+	EnvironmentID     *string // "" clears; the caller checks it is the project's
+	ExpectedUpdatedAt time.Time
 }
 
 type ExecutionStatus string
@@ -147,14 +188,34 @@ const (
 
 // Execution is ManualExecution (§6.8.2): one person ran one case once.
 type Execution struct {
-	ID         string
-	PlanID     string
-	TestCaseID string
-	CaseTitle  string
-	ExecutedBy string
-	Status     ExecutionStatus
-	Note       string
-	ExecutedAt time.Time
+	ID           string
+	PlanID       string
+	TestCaseID   string
+	CaseTitle    string
+	ExecutedBy   string
+	Status       ExecutionStatus
+	Note         string
+	ExecutedAt   time.Time
+	CaseSnapshot *CaseSnapshot
+	StepResults  []StepResult
+	BugURL       string
+	RetestOf     string
+}
+
+type CaseSnapshot struct {
+	Taxonomy      *Taxonomy `json:"taxonomy"`
+	Preconditions *string   `json:"preconditions"`
+	TestData      *string   `json:"testData"`
+	Title         string    `json:"title"`
+	Steps         []Step    `json:"steps"`
+	Expected      string    `json:"expected"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type StepResult struct {
+	StepIndex int             `json:"stepIndex"`
+	Status    ExecutionStatus `json:"status"`
+	Actual    string          `json:"actual"`
 }
 
 type ReleaseStatus string
@@ -355,28 +416,42 @@ type RequirementPatch struct {
 }
 
 type NewTestCase struct {
-	SuiteID     string
-	ExternalKey string
-	Title       string
-	Steps       []Step
-	Expected    string
-	Priority    Priority // "" = p2
-	IsCritical  bool
-	OwnerID     string
+	Taxonomy      Taxonomy
+	Preconditions string
+	TestData      string
+	Actor         string
+	SuiteID       string
+	ExternalKey   string
+	Title         string
+	Steps         []Step
+	Expected      string
+	Priority      Priority // "" = p2
+	IsCritical    bool
+	OwnerID       string
 }
 
 type TestCasePatch struct {
-	SuiteID          *string
-	Title            *string
-	Steps            *[]Step
-	Expected         *string
-	Priority         *Priority
-	IsCritical       *bool
-	AutomationStatus *AutomationStatus
-	OwnerID          *string
+	Taxonomy          *Taxonomy
+	Preconditions     *string
+	TestData          *string
+	ExpectedUpdatedAt time.Time
+	Actor             string
+	SuiteID           *string
+	Title             *string
+	Steps             *[]Step
+	Expected          *string
+	Priority          *Priority
+	IsCritical        *bool
+	AutomationStatus  *AutomationStatus
+	OwnerID           *string
 }
 
 type CaseFilter struct {
+	Level            string
+	Purpose          string
+	Tag              string
+	ExecutionMode    string
+	PerformanceType  string
 	SuiteID          string
 	AutomationStatus AutomationStatus
 	Critical         *bool
@@ -384,16 +459,33 @@ type CaseFilter struct {
 	Limit            int
 }
 
-type NewPlan struct {
-	Name          string
-	EnvironmentID string
+type CaseExport struct {
+	CSV        string    `json:"csv"`
+	Count      int       `json:"count"`
+	ExportedAt time.Time `json:"exportedAt"`
 }
 
+type NewPlan struct {
+	CaseIDs       *[]string // nil selects current active cases; empty creates an empty plan
+	Actor         string
+	Name          string
+	EnvironmentID string
+	TestType      string // one of PlanTestTypes or ""
+}
+
+// PlanTestTypes are what a plan may be for (QĐ-15): the case taxonomy's
+// usage tags and purposes (migration 0033), checked again by 0039.
+var PlanTestTypes = []string{"smoke", "regression", "e2e", "functional", "performance", "security", "usability", "accessibility", "compatibility", "recovery"}
+
 type NewExecution struct {
-	TestCaseID string
-	Status     ExecutionStatus
-	Note       string
-	ExecutedAt time.Time // zero = now
+	CaseUpdatedAt time.Time // optional optimistic check against the case displayed by the client
+	TestCaseID    string
+	Status        ExecutionStatus
+	Note          string
+	ExecutedAt    time.Time // zero = now
+	StepResults   []StepResult
+	BugURL        string
+	RetestOf      string
 }
 
 type NewRelease struct {
@@ -430,6 +522,10 @@ var (
 // another project answers ErrNotFound (§11.3.3: the tenant condition is in
 // the query, never a filter afterwards).
 type Service interface {
+	AddSpecializedResult(ctx context.Context, projectID string, in SpecializedInput, actor string) (SpecializedResult, error)
+	GetSpecializedResult(ctx context.Context, projectID, id string) (SpecializedResult, error)
+	ListSpecializedResults(ctx context.Context, projectID string, filter SpecializedFilter) (SpecializedPage, error)
+	SpecializedOriginal(ctx context.Context, projectID, id string) (string, error)
 	// PurgeProject deletes everything this module keeps for a project that
 	// tenancy has soft-deleted and whose restore window has passed (§11.3.2
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
@@ -450,6 +546,7 @@ type Service interface {
 	CreateTestCase(ctx context.Context, projectID string, in NewTestCase) (TestCase, error)
 	UpdateTestCase(ctx context.Context, projectID, id string, p TestCasePatch) (TestCase, error)
 	ListTestCases(ctx context.Context, projectID string, f CaseFilter) ([]TestCase, error)
+	ExportCases(ctx context.Context, projectID string, f CaseFilter, ids []string) (CaseExport, error)
 	GetTestCase(ctx context.Context, projectID, id string) (TestCase, error)
 	// LinkAutomation ties a case to a TestIdentity of the same project. The
 	// identity must be active (a merged or retired one answers ErrConflict).
@@ -462,12 +559,14 @@ type Service interface {
 	// column is absent). Header names are case-insensitive: key, title,
 	// suite, steps, expected, priority, critical, requirement.
 	ImportCSV(ctx context.Context, projectID string, csvText string) (ImportReport, error)
+	ImportCSVAs(ctx context.Context, projectID string, csvText, actor string) (ImportReport, error)
 
 	// Plans and manual executions
 	CreatePlan(ctx context.Context, projectID string, in NewPlan) (Plan, error)
 	ListPlans(ctx context.Context, projectID string) ([]Plan, error)
 	GetPlan(ctx context.Context, projectID, id string) (Plan, error)
 	SetPlanStatus(ctx context.Context, projectID, id string, status PlanStatus) (Plan, error)
+	UpdatePlan(ctx context.Context, projectID, id string, patch PlanPatch, actor string) (Plan, error)
 	RecordExecution(ctx context.Context, projectID, planID string, in NewExecution, actor string) (Execution, error)
 	// ExecutionForEvidence resolves one execution of one plan for an
 	// evidence upload (§6.8.2 "Artifact dùng lại"): the artifact row is

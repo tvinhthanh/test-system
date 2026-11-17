@@ -7,6 +7,7 @@ import { createSessionStore } from "./features/auth/sessionStore";
 import { ReportsRepository } from "./features/reports/reportsRepository";
 import { ProjectAccess } from "./features/reports/projectAccess";
 import { TestmgmtRepository } from "./features/testmgmt/testmgmtRepository";
+import { AutotestRepository } from "./features/autotest/autotestRepository";
 import { MembersRepository } from "./features/members/membersRepository";
 import { TeamAccess } from "./features/members/teamAccess";
 import { MfaRepository } from "./features/account/mfaRepository";
@@ -47,6 +48,7 @@ async function start() {
     reports,
     projectAccess,
     testmgmt: new TestmgmtRepository(api),
+    autotest: new AutotestRepository(api),
     members,
     teamAccess,
     mfa: new MfaRepository(api),

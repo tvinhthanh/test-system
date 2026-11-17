@@ -106,9 +106,9 @@ const ciUrl = computed(() =>
 );
 const ciSnippet = computed(
   () =>
-    `# fails the job when the gate is blocked and nobody overrode it\n` +
+    `# fails the job unless the release may ship (.ci.reason says why)\n` +
     `curl -fsS -H "Authorization: Bearer $ATP_READ_TOKEN" ${ciUrl.value} \\\n` +
-    `  | jq -e '(.gate.verdict != "blocked") or (.status == "approved" or .status == "shipped")'`,
+    `  | jq -e '.ci.pass'`,
 );
 </script>
 <template>

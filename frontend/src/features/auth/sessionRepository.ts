@@ -25,6 +25,8 @@ export interface Session {
   invitations: boolean;
   // Forgot-password by email is available.
   passwordReset: boolean;
+  // Self-serve sign-up with role approval is open (SIGNUP=on, QĐ-17).
+  signup: boolean;
 }
 // A correct password on an account with MFA on: no session yet (202).
 export interface MfaChallenge {
@@ -44,6 +46,7 @@ function parseSession(value: unknown): Session {
     providers,
     invitations: json.invitations === true,
     passwordReset: json.passwordReset === true,
+    signup: json.signup === true,
     user: user
       ? {
           id: string(user.id),
@@ -93,6 +96,15 @@ function parseInvitation(value: unknown): InvitationInfo {
   };
 }
 
+// The sign-up form (QĐ-17): who asks to join which node, as what.
+export interface SignupRequest {
+  email: string;
+  scopeLevel: "organization" | "workspace" | "project";
+  scopeId: string;
+  requestedRole: string;
+  note: string;
+}
+
 export class SessionRepository {
   constructor(private api: ApiClient) {}
   async bootstrap() {
@@ -130,6 +142,18 @@ export class SessionRepository {
     await this.api.request("/v1/session/password/reset", {
       body: { token, password },
     });
+  }
+  // Self-serve sign-up (QĐ-17): the form gets the same answer for any
+  // email; the mailed /signup#<token> link creates the account.
+  async requestSignup(form: SignupRequest) {
+    await this.api.request("/v1/session/signup", { body: form });
+  }
+  async completeSignup(token: string, password: string) {
+    return parseSession(
+      await this.api.request("/v1/session/signup/complete", {
+        body: { token, password },
+      }),
+    );
   }
   // §11.2: the signed-in person changes their own password; other
   // sessions end, this one stays.

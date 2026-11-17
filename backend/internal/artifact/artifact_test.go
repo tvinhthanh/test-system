@@ -540,3 +540,100 @@ func TestManualEvidence(t *testing.T) {
 		t.Errorf("expired evidence still listed: %+v", byExec)
 	}
 }
+
+// A project's retention (§11.3.2 "Sửa retention"): shorter than the plan
+// only, applied to artifacts recorded afterwards, cleared with 0, and never
+// longer than the plan even when the plan shrinks under an override.
+func TestProjectRetention(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	daysOf := func(a artifact.Artifact) int { return int(a.ExpiresAt.Sub(a.CreatedAt).Round(time.Hour).Hours() / 24) }
+	row := func(list []artifact.Retention, k artifact.Kind) artifact.Retention {
+		for _, r := range list {
+			if r.Kind == k {
+				return r
+			}
+		}
+		t.Fatalf("no row for %s", k)
+		return artifact.Retention{}
+	}
+
+	list, err := e.svc.Retention(ctx, e.projectA, "team")
+	if err != nil || len(list) != len(artifact.Kinds) {
+		t.Fatalf("retention: %v %v", list, err)
+	}
+	if r := row(list, artifact.KindVideo); r.PlanDays != 14 || r.Days != 14 || r.Override {
+		t.Errorf("video before: %+v", r)
+	}
+	var above *artifact.AbovePlanError
+	if _, err := e.svc.SetRetention(ctx, e.projectA, "team", map[artifact.Kind]int{artifact.KindVideo: 15}, "mia"); !errors.As(err, &above) || above.PlanDays != 14 {
+		t.Errorf("above plan: %v", err)
+	}
+	if _, err := e.svc.SetRetention(ctx, e.projectA, "team", map[artifact.Kind]int{"pdf": 3}, "mia"); !errors.Is(err, artifact.ErrInvalid) {
+		t.Errorf("unknown kind: %v", err)
+	}
+	changed, err := e.svc.SetRetention(ctx, e.projectA, "team", map[artifact.Kind]int{artifact.KindScreenshot: 3, artifact.KindManualEvidence: 30, artifact.KindLog: 30}, "mia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// log at 30 is the plan's number: an override, but no change.
+	if len(changed) != 2 || changed[artifact.KindScreenshot] != [2]int{30, 3} || changed[artifact.KindManualEvidence] != [2]int{365, 30} {
+		t.Errorf("changed: %v", changed)
+	}
+	list, _ = e.svc.Retention(ctx, e.projectA, "team")
+	if r := row(list, artifact.KindScreenshot); r.Days != 3 || !r.Override || r.UpdatedBy != "mia" || r.UpdatedAt.IsZero() {
+		t.Errorf("screenshot after: %+v", r)
+	}
+	// Other projects are untouched.
+	if other, _ := e.svc.Retention(ctx, "0198c3e1-7b1a-7c3d-9e4f-000000000000", "team"); row(other, artifact.KindScreenshot).Days != 30 {
+		t.Errorf("override leaked to another project")
+	}
+
+	// Declared from now on: 3 days (the free plan of the org would be 14).
+	png := bytes.Repeat([]byte("\x89PNG..."), 100)
+	if r := e.post(e.tokenA, "/v1/artifacts", declareBody(e.runA.LocalRunID, "ct_r", 0, "r.png", "screenshot", "image/png", png)); r.code != 201 {
+		t.Fatalf("declare: %d %s", r.code, r.raw)
+	} else if a, err := e.svc.Get(ctx, e.projectA, r.body["artifactId"].(string)); err != nil || daysOf(a) != 3 {
+		t.Errorf("declared screenshot keeps %d days, want 3 (%v)", daysOf(a), err)
+	}
+	ev, err := e.svc.PutEvidence(ctx, artifact.Evidence{ProjectID: e.projectA, ExecutionID: "0198c3e1-7b1a-7c3d-9e4f-00000000e0e1", Plan: "team", Name: "e.png", ContentType: "image/png"}, pngBytes)
+	if err != nil || daysOf(ev) != 30 {
+		t.Errorf("evidence keeps %d days, want 30 (%v)", daysOf(ev), err)
+	}
+	// A plan smaller than the override wins: free keeps evidence 90 > 30,
+	// but a 120-day override on business evidence (365) read under free is 90.
+	if _, err := e.svc.SetRetention(ctx, e.projectA, "business", map[artifact.Kind]int{artifact.KindManualEvidence: 120}, "mia"); err != nil {
+		t.Fatal(err)
+	}
+	if r := row(mustRetention(t, e, "free"), artifact.KindManualEvidence); r.Days != 90 || r.PlanDays != 90 {
+		t.Errorf("override above a smaller plan: %+v", r)
+	}
+	ev, _ = e.svc.PutEvidence(ctx, artifact.Evidence{ProjectID: e.projectA, ExecutionID: "0198c3e1-7b1a-7c3d-9e4f-00000000e0e2", Plan: "free", Name: "f.png", ContentType: "image/png"}, pngBytes)
+	if daysOf(ev) != 90 {
+		t.Errorf("evidence under the smaller plan keeps %d days, want 90", daysOf(ev))
+	}
+
+	// 0 goes back to the plan; purge removes the overrides.
+	if changed, err := e.svc.SetRetention(ctx, e.projectA, "team", map[artifact.Kind]int{artifact.KindScreenshot: 0}, "mia"); err != nil || changed[artifact.KindScreenshot] != [2]int{3, 30} {
+		t.Errorf("clear: %v %v", changed, err)
+	}
+	if r := row(mustRetention(t, e, "team"), artifact.KindScreenshot); r.Override || r.Days != 30 {
+		t.Errorf("cleared: %+v", r)
+	}
+	if _, err := e.svc.PurgeProject(ctx, e.projectA); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := e.db.Q(ctx).QueryRow(ctx, `SELECT count(*) FROM artifact_retention WHERE project_id = $1`, e.projectA).Scan(&left); err != nil || left != 0 {
+		t.Errorf("overrides after purge: %d %v", left, err)
+	}
+}
+
+func mustRetention(t *testing.T, e *env, plan string) []artifact.Retention {
+	t.Helper()
+	list, err := e.svc.Retention(context.Background(), e.projectA, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list
+}

@@ -38,6 +38,11 @@ import (
 //	                                   framework decided, we carry it)
 //	  <rerunFailure>/<rerunError>      Surefire reruns of a test that never passed:
 //	                                   more failed attempts, outcome unexpected
+//	Node's test runner                 --test-reporter=junit puts top-level tests
+//	                                   straight under <testsuites>, writes each
+//	                                   describe() as a <testsuite>, names no file
+//	                                   and sets classname="test" on every case:
+//	                                   the suites around a case are its describes
 //
 // Times: a testsuite's timestamp (UTC when it names no zone) plus the
 // durations of the cases before, since JUnit has no per-case start. A file
@@ -52,7 +57,12 @@ var ErrJUnit = errors.New("junit")
 
 type junitSuites struct {
 	Suites []junitSuite `xml:"testsuite"`
+	Cases  []junitCase  `xml:"testcase"` // Node's test runner: top-level tests outside any suite
 }
+
+// nodeClassname is the classname Node's test runner writes on every case; it
+// names no class.
+const nodeClassname = "test"
 
 type junitSuite struct {
 	Name      string       `xml:"name,attr"`
@@ -103,8 +113,9 @@ func parseJUnit(body []byte, framework string, startedAt time.Time) (junitReport
 	var rep junitReport
 	var seq int64
 	occurrences := map[string]int{}
-	var walk func(s junitSuite, file string, clock time.Time) (time.Time, error)
-	walk = func(s junitSuite, file string, clock time.Time) (time.Time, error) {
+	// path is the names of the suites around s, outermost first.
+	var walk func(s junitSuite, file string, path []string, clock time.Time) (time.Time, error)
+	walk = func(s junitSuite, file string, path []string, clock time.Time) (time.Time, error) {
 		if s.Timestamp != "" {
 			t, err := parseJUnitTime(s.Timestamp)
 			if err != nil {
@@ -115,14 +126,20 @@ func parseJUnit(body []byte, framework string, startedAt time.Time) (junitReport
 		if s.File != "" {
 			file = s.File
 		}
+		if name := strings.TrimSpace(s.Name); name != "" {
+			path = append(path[:len(path):len(path)], name)
+		}
 		for _, c := range s.Cases {
 			if clock.IsZero() {
+				if s.Name == "" {
+					return clock, fmt.Errorf("%w: no timestamp in the report — pass startedAt (the date the run happened)", ErrJUnit)
+				}
 				return clock, fmt.Errorf("%w: no timestamp on testsuite %q — pass startedAt (the date the run happened)", ErrJUnit, s.Name)
 			}
 			if rep.StartedAt.IsZero() || clock.Before(rep.StartedAt) {
 				rep.StartedAt = clock
 			}
-			attempts, end, err := junitAttempts(c, s, file, framework, clock)
+			attempts, end, err := junitAttempts(c, s, file, path, framework, clock)
 			if err != nil {
 				return clock, err
 			}
@@ -141,7 +158,7 @@ func parseJUnit(body []byte, framework string, startedAt time.Time) (junitReport
 			}
 		}
 		for _, child := range s.Suites {
-			next, err := walk(child, file, clock)
+			next, err := walk(child, file, path, clock)
 			if err != nil {
 				return clock, err
 			}
@@ -150,7 +167,7 @@ func parseJUnit(body []byte, framework string, startedAt time.Time) (junitReport
 		return clock, nil
 	}
 	for _, s := range suites {
-		if _, err := walk(s, "", startedAt); err != nil {
+		if _, err := walk(s, "", nil, startedAt); err != nil {
 			return junitReport{}, err
 		}
 	}
@@ -183,6 +200,11 @@ func decodeJUnit(body []byte) ([]junitSuite, error) {
 			var all junitSuites
 			if err := dec.DecodeElement(&all, &start); err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrJUnit, err)
+			}
+			if len(all.Cases) > 0 {
+				// A nameless suite of their own, so they are dated and placed
+				// like any other case.
+				return append([]junitSuite{{Cases: all.Cases}}, all.Suites...), nil
 			}
 			return all.Suites, nil
 		case "testsuite":
@@ -217,8 +239,9 @@ func seconds(s string) time.Duration {
 	return time.Duration(f * float64(time.Second))
 }
 
-// junitSignals is §7.3 identity for one testcase (mapping in the header).
-func junitSignals(c junitCase, s junitSuite, file, framework string) (identity.Signals, error) {
+// junitSignals is §7.3 identity for one testcase (mapping in the header);
+// path is the names of the suites around it.
+func junitSignals(c junitCase, s junitSuite, file string, path []string, framework string) (identity.Signals, error) {
 	name := strings.TrimSpace(c.Name)
 	if name == "" {
 		return identity.Signals{}, fmt.Errorf("%w: a <testcase> in %q has no name", ErrJUnit, s.Name)
@@ -235,6 +258,9 @@ func junitSignals(c junitCase, s junitSuite, file, framework string) (identity.S
 	switch {
 	case file != "":
 		describes = classDescribes(class, name, file)
+	case class == nodeClassname && len(path) > 0:
+		// Node's test runner: no file anywhere, the describes are the suites.
+		file, describes = class, append([]string(nil), path...)
 	case class != "":
 		file = strings.ReplaceAll(class, ".", "/")
 	case s.Name != "":
@@ -288,8 +314,8 @@ func extOf(p string) string {
 
 // junitAttempts is one testcase's attempts, earliest first, starting at
 // clock; it returns when the last one ended.
-func junitAttempts(c junitCase, s junitSuite, file, framework string, clock time.Time) ([]results.AttemptEvent, time.Time, error) {
-	sig, err := junitSignals(c, s, file, framework)
+func junitAttempts(c junitCase, s junitSuite, file string, path []string, framework string, clock time.Time) ([]results.AttemptEvent, time.Time, error) {
+	sig, err := junitSignals(c, s, file, path, framework)
 	if err != nil {
 		return nil, clock, err
 	}

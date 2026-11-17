@@ -1,0 +1,118 @@
+# Checker (URL checks QĐ-14, auto test QĐ-16)
+
+Opens pages in headless Chromium for the ATP worker, its only client.
+
+A **URL check** reports what a tester looks at first on one page: page
+load, HTTPS certificate, JavaScript errors, failed images and scripts,
+broken links (first 40), accessibility (axe-core, WCAG A/AA), speed (first
+byte, LCP, layout shift), page basics (title, lang, description, h1) and
+phone fit — with a desktop and a phone screenshot. It can sign in first and
+lists the page's same-site links, which is how a **site scan** walks a site.
+
+A **session** runs the steps of an auto-test case (`src/steps.mjs`): each
+step is data — an action (`goto`, `click`, `fill`, `select`, `check`,
+`press`, `hover`, `wait`, `expect_*`) and an element named by role and
+name, label, placeholder, text, test id or CSS — interpreted with
+Playwright's own locators; an exact name wins over one that only contains
+it. Nothing runs as code. Top-level navigation stays on the site under test
+(the host and its siblings under the same registrable name): a step that
+leaves it fails and the browser comes back. `{{name}}` in a step is a
+variable the worker sends per call — including `{{password}}`, which is
+used and forgotten when the session closes.
+
+A session runs on the **browser and device** the worker asks for (QĐ-19
+tier 2, `src/engines.mjs`):
+- **Browser:** `chromium`, `firefox` or `webkit`.
+- **Device:** `desktop` (1366×768), or `phone` / `tablet` with Playwright's
+  Pixel 7, iPhone 13, Galaxy Tab S4 and iPad profiles.
+
+Firefox has no mobile emulation, so on a phone or tablet it gets the screen
+size and touch only. Every engine runs behind the same guarded proxy. Firefox
+is also told to send localhost through the proxy and to turn WebRTC and
+HTTP/3 off. `test/engines.test.mjs` proves that loopback stays closed on all
+three engines, by IP, by name and over IPv6.
+
+**Load tests and ownership proof** (QĐ-19 tier 3, `src/load.mjs`):
+
+- `POST /verify {base}` reads `/.well-known/atp-verification.txt`. It
+  returns `{status, text}`, with at most 4 KB of text.
+- `POST /load {base, paths, vus, seconds, rampSeconds}` runs `vus` virtual
+  users sending GETs to the paths for `seconds`. It answers when done with
+  requests, errors (no answer or 5xx), 4xx, rps, latency p50–p99, statuses
+  and a per-second timeline.
+
+Both use Playwright's request API through a guarded proxy of their own.
+Redirects are not followed, and a refused host ends the run as `blocked`.
+The worker asks only for a host its organization proved and within
+`LOAD_MAX_VUS` / `LOAD_MAX_SECONDS`. The checker caps again at 200 VUs and
+600 s, and runs `CHECKER_LOADS` (default 1) at a time.
+
+Three **check steps** (QĐ-19, `src/inspect.mjs`) take no element and check
+the page as the steps before left it. A result's `note` carries the
+details, passed or failed:
+
+- `check_accessibility` runs axe-core (WCAG 2.0/2.1/2.2 A/AA). The value is
+  the lowest impact that fails, serious by default.
+- `check_performance` compares the last load's LCP/FCP/TTFB/load/CLS with
+  a budget such as `lcp=2500 cls=0.1 ttfb=800`. A metric the browser does
+  not report is noted, not failed.
+- `check_security` reads what the session saw: the main document's
+  headers, the page's cookies, and plain-HTTP requests or "Mixed Content"
+  messages from an HTTPS page. A high finding fails; with `strict`, a
+  medium one does too. It does not attack anything.
+
+```
+POST /check {"url": "https://staging.example.com", "login"?: {url, steps, vars}}
+  → {"report": {...}, "links": [...], "screenshots": {"desktop": "<base64 JPEG>", "mobile": "..."}}
+POST /outline {"url": "…"}
+  → {"outline": {title, lang, headings, links, forms, buttons, text}}   (QĐ-15: what AI drafting reads)
+POST /sessions {"base": "https://staging.example.com", "login"?: {url, steps, vars}, "browser"?: "firefox", "device"?: "phone"}
+  → {"id", "loggedIn"?, "error"?}
+POST /sessions/:id/steps {"steps": [...], "vars": {...}, "shot"?: "failure"|"always"|"none"}
+  → {"ok", "results": [{status, kind, error, ms}], "url", "console", tree/title/screenshot on a failure}
+POST /sessions/:id/look {"shot"?: true}   → {"url", "title", "tree" (accessibility snapshot), "screenshot"?}
+DELETE /sessions/:id
+GET  /healthz
+```
+
+A failed step says why (`kind`): `locator` — the element was not found or
+could not be used (the worker may ask a model to repair it); `assert` — an
+expectation did not hold; `navigation` — a page did not open or the browser
+tried to leave the site; `input` — the step itself is wrong. A session idle
+for two minutes, or open for fifteen, is closed.
+
+## Why the proxy
+
+The checker opens addresses users type, from inside the server's network
+(SSRF, §11.6 API7). Chromium is launched so that **every** connection —
+pages, images, scripts, links, the link checker's requests — goes through a
+proxy started for that one check (`src/proxy.mjs`): it resolves the name
+once, judges every address with `src/guard.mjs`, and connects to the address
+it judged, so DNS rebinding has nothing to race. Never opened: loopback,
+"this host", link-local (cloud metadata at 169.254.169.254), multicast,
+reserved. Private ranges only with `URLCHECK_ALLOW_PRIVATE=on`. WebRTC UDP
+and QUIC are off, service workers blocked, downloads refused. Compose puts
+the service on a network shared with the worker alone.
+
+## Settings
+
+| Env | Default | |
+|---|---|---|
+| `PORT` | `8090` | |
+| `URLCHECK_ALLOW_PRIVATE` | `off` | `on`: also 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 … |
+| `CHECKER_CONCURRENCY` | `2` | checks at once; more answer 503 and the worker retries |
+| `CHECKER_SESSIONS` | `4` | auto-test sessions open at once; more answer 503 and the worker retries |
+| `CHECKER_BROWSERS` | `chromium,firefox,webkit` | engines a session may ask for (QĐ-19); another answers 422 and the tester is told. Build the image with `--build-arg ENGINES=` for Chromium alone (smaller) |
+
+## Develop
+
+```bash
+npm ci
+npx playwright install --only-shell chromium
+npm test          # guard unit tests + real Chromium against local fixture sites (a chat that needs signing in)
+npm start         # PORT=8099 npm start, then POST /check
+```
+
+The fixture site listens on 127.0.0.1, which the guard never allows; the
+tests let exactly that address through and prove 127.0.0.2 and `localhost`
+are still refused.

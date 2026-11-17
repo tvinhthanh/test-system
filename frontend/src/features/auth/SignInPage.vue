@@ -306,6 +306,17 @@ onMounted(() => {
           </Button>
         </template>
         <p
+          v-if="session.signup"
+          class="signup-link text-muted-foreground text-center text-sm"
+        >
+          New here?
+          <RouterLink
+            to="/signup"
+            class="text-foreground font-medium underline-offset-4 hover:underline"
+            >Ask to join</RouterLink
+          >
+        </p>
+        <p
           v-if="fixture"
           class="text-muted-foreground border-t pt-4 text-center text-xs"
         >

@@ -19,7 +19,10 @@ defineProps<{ eyebrow: string; title: string; description?: string }>();
         <slot name="description">{{ description }}</slot>
       </p>
     </div>
-    <div v-if="$slots.default" class="flex shrink-0 items-center gap-2">
+    <div
+      v-if="$slots.default"
+      class="flex max-w-full flex-wrap items-center gap-2"
+    >
       <slot />
     </div>
   </header>

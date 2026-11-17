@@ -61,6 +61,40 @@ var RetentionDays = map[string]map[Kind]int{
 	"business": {KindScreenshot: 90, KindVideo: 30, KindTrace: 30, KindHAR: 30, KindLog: 90, KindAttachment: 90, KindManualEvidence: 365},
 }
 
+// Kinds is every kind in §10.4 order — the rows of a project's retention.
+var Kinds = []Kind{KindScreenshot, KindVideo, KindTrace, KindHAR, KindLog, KindAttachment, KindManualEvidence}
+
+// planDays is RetentionDays for a plan id, free when unknown.
+func planDays(plan string) map[Kind]int {
+	if d := RetentionDays[plan]; d != nil {
+		return d
+	}
+	return RetentionDays["free"]
+}
+
+// Retention is one kind's row of a project's retention (§11.3.2 "Sửa
+// retention"): what the plan allows, and the shorter number a maintainer
+// chose, if any. Days is what new artifacts of the kind get.
+type Retention struct {
+	Kind      Kind
+	PlanDays  int
+	Days      int
+	Override  bool
+	UpdatedBy string    // "" without an override
+	UpdatedAt time.Time // zero without an override
+}
+
+// AbovePlanError: a requested retention is longer than the plan allows.
+type AbovePlanError struct {
+	Kind     Kind
+	PlanDays int
+	Got      int
+}
+
+func (e *AbovePlanError) Error() string {
+	return fmt.Sprintf("artifact: %s retention %d days is above the plan's %d", e.Kind, e.Got, e.PlanDays)
+}
+
 // Protocol constants (§7.7).
 const (
 	MultipartThreshold = 8 << 20          // at or above: multipart
@@ -223,6 +257,16 @@ type Service interface {
 	// "xóa project"); cmd/worker calls every module, tenancy last. Idempotent:
 	// a purge cut short is finished by the next one.
 	PurgeProject(ctx context.Context, projectID string) (int, error)
+
+	// Retention is the project's retention under plan, one row per kind
+	// in Kinds order.
+	Retention(ctx context.Context, projectID, plan string) ([]Retention, error)
+	// SetRetention changes some kinds' retention: days between 1 and the
+	// plan's number sets an override, 0 clears it (back to the plan); above
+	// the plan is *AbovePlanError and nothing changes. It applies to
+	// artifacts recorded from now on — stored ones keep their expiry.
+	// Returns the kinds whose effective days changed, old → new.
+	SetRetention(ctx context.Context, projectID, plan string, days map[Kind]int, actor string) (changed map[Kind][2]int, err error)
 
 	// Declare records the artifact and returns how to upload it. Repeating
 	// a declare returns the same artifact with fresh URLs and, for

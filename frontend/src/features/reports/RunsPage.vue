@@ -47,6 +47,7 @@ const {
 } = useRuns();
 // Backfilling history is configuring the project (maintainer and up).
 const canImport = useProjectPermission("project.configure");
+const canStart = useProjectPermission("testmgmt.write");
 // Deleted runs can be restored by those who may delete them (§11.3.2).
 const canDelete = useProjectPermission("data.delete");
 const statuses = ["running", "passed", "failed", "error", "cancelled"];
@@ -72,12 +73,46 @@ const runPath = (id: string) =>
   </PageHeader>
 
   <ViewTabs label="Run sources">
-    <ViewTab selected><GitBranch />All runs</ViewTab>
-    <span
-      class="text-muted-foreground inline-flex h-10 items-center px-3 text-sm"
-      >Playwright</span
+    <ViewTab :selected="!query.source" @select="filter({ source: '' })"
+      ><GitBranch />All runs</ViewTab
+    >
+    <ViewTab
+      :selected="query.source === 'playwright'"
+      @select="filter({ source: 'playwright' })"
+      >Playwright</ViewTab
+    >
+    <ViewTab
+      :selected="query.source === 'junit'"
+      @select="filter({ source: 'junit' })"
+      >JUnit imports</ViewTab
+    >
+    <ViewTab
+      :selected="query.source === 'auto'"
+      @select="filter({ source: 'auto' })"
+      >Auto runs</ViewTab
     >
   </ViewTabs>
+  <nav
+    aria-label="Other test records"
+    class="text-muted-foreground -mt-2 mb-5 flex flex-wrap gap-x-4 gap-y-2 text-sm"
+  >
+    <RouterLink
+      :to="`/p/${encodeURIComponent(project)}/plans`"
+      class="text-foreground underline underline-offset-4"
+      >Manual plans</RouterLink
+    >
+    <RouterLink
+      :to="`/p/${encodeURIComponent(project)}/specialized-results`"
+      class="text-foreground underline underline-offset-4"
+      >Specialized results</RouterLink
+    >
+    <RouterLink
+      v-if="canStart"
+      :to="`/p/${encodeURIComponent(project)}/start`"
+      class="text-foreground underline underline-offset-4"
+      >Start testing (10 types)</RouterLink
+    >
+  </nav>
 
   <form
     class="mb-4 flex flex-col gap-3 md:flex-row md:items-end"
@@ -140,15 +175,21 @@ const runPath = (id: string) =>
     <EmptyState
       v-if="!data?.items.length"
       :icon="Inbox"
-      :title="filtered ? 'No matching runs' : 'No test runs yet'"
+      :title="
+        filtered || query.source ? 'No matching runs' : 'No test runs yet'
+      "
       :description="
-        filtered
-          ? 'Try a different branch, status or environment.'
+        filtered || query.source
+          ? 'Try another source, branch, status or environment.'
           : 'Runs will appear after your reporter sends results.'
       "
     >
-      <Button v-if="filtered" variant="outline" size="sm" @click="clear"
-        >Clear filters</Button
+      <Button
+        v-if="filtered || query.source"
+        variant="outline"
+        size="sm"
+        @click="filtered ? clear() : filter({ source: '' })"
+        >{{ filtered ? "Clear filters" : "All runs" }}</Button
       >
       <Button v-else variant="outline" size="sm" @click="refresh"
         ><RefreshCw />Refresh</Button

@@ -4,17 +4,17 @@
 #
 #   docker build -f deploy/Dockerfile -t atp/backend:<git-sha> .
 #
-# Stage 1 compiles with the exact toolchain go.mod asks for (golang:1.25.13
+# Stage 1 compiles with the exact toolchain go.mod asks for (golang:1.26.10
 # carries the stdlib fixes govulncheck flagged, see go.mod); GOTOOLCHAIN=local
 # refuses to download anything else. Static binaries, no cgo, symbols stripped.
-FROM golang:1.25.13-alpine AS build
+FROM golang:1.26.10-alpine AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath GOTOOLCHAIN=local
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -ldflags='-s -w' -o /out/ ./cmd/api ./cmd/worker ./cmd/migrate ./cmd/admin ./cmd/healthcheck ./cmd/pgtls
+    go build -ldflags='-s -w' -o /out/ ./cmd/api ./cmd/worker ./cmd/migrate ./cmd/admin ./cmd/healthcheck ./cmd/pgtls ./cmd/sandboxd
 
 # Stage 2: distroless static — no shell, no package manager, runs as the
 # unprivileged `nonroot` user (uid 65532). The image is the same for api,

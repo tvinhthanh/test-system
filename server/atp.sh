@@ -11,6 +11,7 @@
 #   ./server/atp.sh up              build the dashboard + images, start everything
 #   ./server/atp.sh seed            first organization, project, owner account, CI token
 #   ./server/atp.sh status          what runs, and is the api healthy
+#   ./server/atp.sh doctor [--pilot] read-only deployment prerequisites
 #
 # Everything else:
 #   down | restart | logs [service] | update
@@ -20,6 +21,7 @@
 #   ca [file]                       export Caddy's root certificate for other devices
 #   firewall                        open HTTPS_PORT (tcp+udp) and HTTP_PORT: Windows (Git Bash/WSL),
 #                                   ufw, firewalld, iptables or nftables
+#   reporter                        re-pack the Playwright reporter served at /downloads/ (up does it too)
 #   reset                           stop and DELETE ALL DATA (asks first)
 #
 # Requirements: docker (with compose v2; the dashboard is built in a Node
@@ -35,7 +37,19 @@ export MSYS_NO_PATHCONV=1
 # Paths handed to docker are native ones (C:/… on Windows): with path
 # conversion off, docker would read a Git Bash /c/… or /tmp/… literally.
 host_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi; }
-dc() { docker compose -f "$(host_path "$DEPLOY/compose.yml")" --env-file "$(host_path "$ENV_FILE")" "$@"; }
+# URLCHECK=on in the config also runs the URL checker, SANDBOX=on sandboxd
+# and its two images (compose profiles).
+dc() {
+	local profile=()
+	if [ -f "$ENV_FILE" ] && [ "$(grep -E '^URLCHECK=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '\r')" = on ]; then
+		profile=(--profile urlcheck)
+	fi
+	if [ -f "$ENV_FILE" ] && [ "$(grep -E '^SANDBOX=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '\r')" = on ]; then
+		profile+=(--profile scripts)
+	fi
+	# ${a[@]+…}: an empty array under `set -u` is an error in macOS's bash 3.2.
+	docker compose -f "$(host_path "$DEPLOY/compose.yml")" --env-file "$(host_path "$ENV_FILE")" ${profile[@]+"${profile[@]}"} "$@"
+}
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
@@ -122,6 +136,8 @@ cmd_init() {
 	}
 	set_kv POSTGRES_PASSWORD "$(secret 24)"
 	set_kv TOKEN_PEPPER "$(secret 32)"
+	# Ready for SANDBOX=on (script runs, QĐ-19): the worker and sandboxd share it.
+	set_kv SANDBOX_TOKEN "$(secret 32)"
 	set_kv DOMAIN "$host"
 	set_kv HTTPS_PORT "$port"
 	set_kv HTTP_PORT "$hport"
@@ -137,8 +153,9 @@ cmd_init() {
 	set_kv OBJSTORE_SECRET_KEY "$skey"
 	chmod 600 "$ENV_FILE" 2>/dev/null || true
 	say "wrote $ENV_FILE (secrets generated; back this file up — without TOKEN_PEPPER every token and MFA enrolment is lost)"
-	echo "    Sign-in with Google/GitHub and email (invitations, forgot password) are off;"
-	echo "    turn them on in that file (OAUTH_*, MAIL=smtp) and run: $0 restart"
+	echo "    Sign-in with Google/GitHub, email (invitations, forgot password) and self-serve"
+	echo "    sign-up are off; turn them on in that file (OAUTH_*, MAIL=smtp, SIGNUP=on — sign-up"
+	echo "    needs MAIL=smtp) and run: $0 restart"
 	if [ "$host" != localhost ]; then
 		echo "    Other devices reach it at $url — open the ports with: $0 firewall"
 		echo "    they must also trust its certificate: after up, run $0 ca"
@@ -169,6 +186,26 @@ build_ui() {
 			chown -R "$OWNER" /out 2>/dev/null || true'
 }
 
+# The Playwright reporter as an npm tarball that Caddy serves at /downloads/
+# (QĐ-14): a test project installs it from this server, without a copy of
+# the ATP repository. Packed like the dashboard is built, in a throwaway
+# Node container from a copy of reporter/playwright; only the tarball and
+# index.json come back (reporter/playwright/scripts/pack-for-server.mjs
+# explains the file names and why old tarballs stay).
+build_reporter() {
+	say "packing the Playwright reporter (backend/deploy/downloads)"
+	mkdir -p "$DEPLOY/downloads"
+	docker run --rm \
+		-v "$(host_path "$ROOT/reporter/playwright"):/src:ro" \
+		-v "$(host_path "$DEPLOY/downloads"):/out" \
+		-v atp-npm-cache:/root/.npm \
+		node:22-alpine sh -ec '
+			mkdir /build
+			cd /src && tar --exclude=./node_modules --exclude=./dist --exclude=./test-results -cf - . | tar -xf - -C /build
+			cd /build && npm ci --no-audit --no-fund --loglevel=error && npm run build
+			node scripts/pack-for-server.mjs /out'
+}
+
 cmd_up() {
 	need_env; need docker "https://docs.docker.com/get-docker/"
 	case ",$(env_get DASHBOARD_ORIGINS)," in
@@ -176,6 +213,7 @@ cmd_up() {
 		*) warn "DASHBOARD_ORIGINS in $ENV_FILE does not list $(base_url) — signed-in changes from that address will be refused" ;;
 	esac
 	build_ui
+	build_reporter
 	say "building images and starting the stack"
 	dc up -d --build
 	wait_healthy
@@ -191,6 +229,70 @@ cmd_status() {
 	else
 		warn "$url/healthz does not answer from here"
 	fi
+}
+
+cmd_doctor() {
+	local pilot=false failures=0 daemon=false value key
+	case "${1:-}" in
+		"") [ "$#" -eq 0 ] || die "usage: $0 doctor [--pilot]" ;;
+		--pilot) [ "$#" -eq 1 ] || die "usage: $0 doctor [--pilot]"; pilot=true ;;
+		*) die "usage: $0 doctor [--pilot]" ;;
+	esac
+	say "read-only deployment checks (no containers started or config changed)"
+	if ! command -v docker >/dev/null 2>&1; then
+		warn "FAIL: docker is not installed"; failures=$((failures + 1))
+	else
+		if docker compose version >/dev/null 2>&1; then say "PASS: Docker Compose available"
+		else warn "FAIL: Docker Compose v2 is unavailable"; failures=$((failures + 1)); fi
+		if value=$(docker info --format '{{.OSType}}' 2>/dev/null); then
+			value=${value//$'\r'/}
+			if [ "$value" = linux ]; then daemon=true; say "PASS: Linux Docker engine reachable"
+			else warn "FAIL: switch Docker Desktop to Linux containers"; failures=$((failures + 1)); fi
+		else warn "FAIL: Docker engine unreachable; start Docker Desktop on the deployment host"; failures=$((failures + 1)); fi
+	fi
+	if ! command -v curl >/dev/null 2>&1; then
+		warn "FAIL: curl is required for deployment health checks"; failures=$((failures + 1))
+	fi
+	if [ ! -f "$ENV_FILE" ]; then
+		warn "FAIL: deployment config missing; run $0 init on the deployment host"
+		failures=$((failures + 1))
+	else
+		for key in POSTGRES_PASSWORD TOKEN_PEPPER DOMAIN DASHBOARD_ORIGINS; do
+			value=$(env_get "$key" || true)
+			case "$value" in
+				""|*change-me*|*'<account>'*) warn "FAIL: $key is missing or still a placeholder"; failures=$((failures + 1)) ;;
+			esac
+		done
+		value=$(env_get TOKEN_PEPPER || true)
+		if [ "${#value}" -lt 32 ]; then warn "FAIL: TOKEN_PEPPER must contain at least 32 bytes"; failures=$((failures + 1)); fi
+		if [ "$(env_get OBJSTORE || true)" = s3 ]; then
+			for key in OBJSTORE_ENDPOINT OBJSTORE_BUCKET OBJSTORE_ACCESS_KEY OBJSTORE_SECRET_KEY; do
+				value=$(env_get "$key" || true)
+				case "$value" in
+					""|*change-me*|*'<'*|*'>'*) warn "FAIL: $key is missing or still a placeholder"; failures=$((failures + 1)) ;;
+				esac
+			done
+			say "S3 storage configured; bucket access and restart persistence still require a real test"
+		elif [ "$(env_get OBJSTORE || true)" = memory ]; then
+			if $pilot; then warn "FAIL: pilot requires durable S3-compatible artifact storage"; failures=$((failures + 1))
+			else warn "Memory artifacts disappear on API restart; this config is only for trying the app"; fi
+		else warn "FAIL: OBJSTORE must be memory or s3"; failures=$((failures + 1)); fi
+		if $pilot; then
+			case "$(env_get APP_ENV || true)" in
+				staging|prod) ;;
+				*) warn "FAIL: pilot requires APP_ENV=staging or prod"; failures=$((failures + 1)) ;;
+			esac
+			if [ "$(env_get COOKIE_SECURE || true)" != true ]; then warn "FAIL: pilot requires COOKIE_SECURE=true"; failures=$((failures + 1)); fi
+		fi
+		if $daemon; then
+			# Never print compose's resolved config: it contains credentials.
+			if dc config --quiet >/dev/null 2>&1; then say "PASS: Compose configuration validates"
+			else warn "FAIL: Compose configuration invalid; review deploy/.env and compose.yml locally"; failures=$((failures + 1)); fi
+		fi
+	fi
+	warn "Manual acceptance still required: trusted HTTPS/LAN, bucket access, restart persistence, off-host DB/artifact backup and restore"
+	if [ "$failures" -ne 0 ]; then warn "$failures prerequisite check(s) failed"; return 1; fi
+	say "prerequisites passed; this is not pilot or production acceptance"
 }
 
 cmd_seed() {
@@ -431,6 +533,7 @@ case "${1:-help}" in
 	down | stop) need_env; dc down ;;
 	restart) need_env; dc up -d; wait_healthy ;;
 	status | ps) cmd_status ;;
+	doctor) shift; cmd_doctor "$@" ;;
 	logs) need_env; shift; dc logs -f --tail=200 "$@" ;;
 	seed) cmd_seed ;;
 	token) shift; cmd_token "$@" ;;
@@ -441,7 +544,8 @@ case "${1:-help}" in
 	ca) shift; cmd_ca "$@" ;;
 	firewall) cmd_firewall ;;
 	update) cmd_update ;;
+	reporter) need docker "https://docs.docker.com/get-docker/"; build_reporter ;;
 	reset) cmd_reset ;;
-	help | -h | --help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
+	help | -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
 	*) die "unknown command '$1' — see: $0 help" ;;
 esac

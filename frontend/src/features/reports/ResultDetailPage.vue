@@ -7,8 +7,14 @@ import {
   History,
   Paperclip,
   RefreshCw,
+  Sparkles,
+  Stethoscope,
+  ThumbsDown,
+  ThumbsUp,
   UserRoundCheck,
 } from "@lucide/vue";
+import { ref } from "vue";
+import { categoryLabel, failureCategories } from "./categories";
 import { useResultDetail } from "./useResultDetail";
 import { useProjectPermission } from "./useProjectPermission";
 import { bytes, duration, time } from "../../shared/format";
@@ -19,7 +25,9 @@ import PageHeader from "../../shared/PageHeader.vue";
 import SectionHeading from "../../shared/SectionHeading.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import TechnicalBlock from "../../shared/TechnicalBlock.vue";
+import NativeSelect from "../../shared/NativeSelect.vue";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 const {
   data,
   error,
@@ -30,9 +38,31 @@ const {
   actionError,
   refresh,
   emit,
+  recordCause,
   artifactUrl,
   traceUrl,
+  investigations,
+  investigationBusy,
+  investigationError,
+  investigate,
+  decide,
 } = useResultDetail();
+// The cause a person found, recorded without any AI (§8.7). "unknown" is a
+// real choice here: "we looked and could not tell".
+const causeCategory = ref("");
+const causeNote = ref("");
+async function submitCause() {
+  if (!causeCategory.value) return;
+  await recordCause(causeCategory.value, causeNote.value);
+  causeCategory.value = "";
+  causeNote.value = "";
+}
+const causeLabel = (c: string) =>
+  c === "unknown"
+    ? "Could not tell"
+    : (categoryLabel[c as keyof typeof categoryLabel] ?? c);
+// Rule-based investigations (no AI key) carry this model name.
+const isRules = (model: string) => model === "rules-v1";
 // Only these kinds are ever rendered inline by the server (§11.5 allowlist);
 // the rest download, so the link says so up front.
 const inlineKinds = new Set(["screenshot", "video", "log"]);
@@ -115,6 +145,53 @@ const canTriage = useProjectPermission("triage");
           <Button variant="ghost" size="xs" @click="refresh">Refresh</Button>
         </span>
       </div>
+
+      <!-- Root cause: what a person found, no AI needed. This is what triage
+           coverage and time-to-root-cause count. -->
+      <form
+        v-if="
+          canTriage &&
+          ['failed', 'timed_out', 'interrupted', 'flaky_pass'].includes(
+            data.result.finalStatus,
+          )
+        "
+        class="bg-card mb-6 flex flex-wrap items-end gap-2 rounded-lg border p-3"
+        aria-label="Record the root cause"
+        @submit.prevent="submitCause"
+      >
+        <div class="flex min-w-44 flex-col gap-1">
+          <label
+            for="cause-category"
+            class="text-muted-foreground text-xs font-medium"
+            >Root cause</label
+          >
+          <NativeSelect id="cause-category" v-model="causeCategory">
+            <option value="" disabled>Choose what caused it</option>
+            <option v-for="c in failureCategories" :key="c" :value="c">
+              {{ causeLabel(c) }}
+            </option>
+          </NativeSelect>
+        </div>
+        <div class="flex min-w-56 flex-1 flex-col gap-1">
+          <label
+            for="cause-note"
+            class="text-muted-foreground text-xs font-medium"
+            >What you found <span class="font-normal">(optional)</span></label
+          >
+          <Input
+            id="cause-note"
+            v-model="causeNote"
+            maxlength="1000"
+            placeholder="e.g. the total is not recomputed after a coupon"
+          />
+        </div>
+        <Button
+          type="submit"
+          size="sm"
+          :disabled="actionBusy || !causeCategory"
+          ><Stethoscope />Record cause</Button
+        >
+      </form>
 
       <section class="attempts" aria-labelledby="attempts-title">
         <SectionHeading id="attempts-title" title="Attempts"
@@ -230,6 +307,101 @@ const canTriage = useProjectPermission("triage");
             </ul>
           </article>
         </div>
+      </section>
+
+      <section class="mt-8" aria-labelledby="investigation-title">
+        <SectionHeading id="investigation-title" title="Investigation">
+          <Button
+            v-if="
+              canTriage &&
+              ['failed', 'timed_out', 'interrupted'].includes(
+                data.result.finalStatus,
+              )
+            "
+            size="sm"
+            :disabled="
+              investigationBusy ||
+              ['queued', 'collecting', 'investigating'].includes(
+                investigations[0]?.status ?? '',
+              )
+            "
+            @click="investigate"
+            ><Sparkles />Investigate</Button
+          >
+        </SectionHeading>
+        <p v-if="investigationError" class="text-danger text-sm" role="alert">
+          The investigation action could not be completed.
+        </p>
+        <EmptyState
+          v-if="!investigations.length"
+          compact
+          :icon="Sparkles"
+          description="No investigation yet. With an AI key the model proposes a cause; without one, fixed rules read the error, the test's history and earlier verdicts. Nothing counts until a member accepts it."
+        />
+        <article v-else class="bg-card space-y-4 rounded-lg border p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge :status="investigations[0]!.status" />
+            <span class="text-muted-foreground text-xs">{{
+              isRules(investigations[0]!.model)
+                ? "Rule-based analysis — no AI key, no AI cost"
+                : investigations[0]!.model || "Waiting for the worker"
+            }}</span>
+          </div>
+          <p v-if="investigations[0]!.error" class="text-danger text-sm">
+            {{ investigations[0]!.error }}
+          </p>
+          <template v-if="investigations[0]!.hypothesis">
+            <div class="flex flex-wrap items-center gap-2">
+              <strong class="capitalize">{{
+                investigations[0]!.hypothesis!.category.replaceAll("_", " ")
+              }}</strong>
+              <span class="text-muted-foreground text-xs"
+                >{{
+                  Math.round(investigations[0]!.hypothesis!.confidence * 100)
+                }}% confidence</span
+              >
+            </div>
+            <ul class="list-disc space-y-1 pl-5 text-sm">
+              <li
+                v-for="fact in investigations[0]!.hypothesis!.evidence"
+                :key="`${fact.source}:${fact.fact}`"
+              >
+                {{ fact.fact }}
+                <span class="text-muted-foreground"
+                  >({{ fact.source.replaceAll("_", " ") }})</span
+                >
+              </li>
+            </ul>
+            <p class="text-sm">
+              <span class="font-medium">Suggested action:</span>
+              {{ investigations[0]!.hypothesis!.suggestedAction }}
+            </p>
+            <div
+              v-if="canTriage && !investigations[0]!.hypothesis!.decision"
+              class="flex gap-2"
+            >
+              <Button
+                size="sm"
+                :disabled="investigationBusy"
+                @click="decide('accept')"
+                ><ThumbsUp />Accept</Button
+              >
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="investigationBusy"
+                @click="decide('reject')"
+                ><ThumbsDown />Reject</Button
+              >
+            </div>
+            <p
+              v-else-if="investigations[0]!.hypothesis!.decision"
+              class="text-muted-foreground text-sm capitalize"
+            >
+              Decision: {{ investigations[0]!.hypothesis!.decision }}
+            </p>
+          </template>
+        </article>
       </section>
 
       <section class="event-list" aria-labelledby="events-title">

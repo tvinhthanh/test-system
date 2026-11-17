@@ -49,9 +49,10 @@ type client struct {
 }
 
 type resp struct {
-	code int
-	body map[string]any
-	raw  string
+	code   int
+	body   map[string]any
+	raw    string
+	header http.Header
 }
 
 func (c *client) do(method, path string, body any, headers map[string]string) resp {
@@ -84,7 +85,7 @@ func (c *client) do(method, path string, body any, headers map[string]string) re
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)
-	out := resp{code: res.StatusCode, raw: string(raw)}
+	out := resp{code: res.StatusCode, raw: string(raw), header: res.Header}
 	_ = json.Unmarshal(raw, &out.body)
 	return out
 }
@@ -400,12 +401,27 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Errorf("spoofed actor/time was applied: %d %s", r.code, r.raw)
 	}
 	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "payload": map[string]any{}}); r.code != 400 {
-		t.Errorf("type outside the UI set: %d %s", r.code, r.raw)
+		t.Errorf("a cause verdict without a category: %d %s", r.code, r.raw)
 	}
 	det = web.get(base + "/results/" + resultID)
 	events, _ = det.body["events"].([]any)
 	if len(events) != 2 || events[0].(map[string]any)["type"] != "FAILURE_SEEN" || events[1].(map[string]any)["type"] != "MARKED_FLAKY" {
 		t.Errorf("events after triage: %s", det.raw)
+	}
+	// A person's own verdict on the cause, with no AI behind it: it needs a
+	// §8.7 category, and category belongs to that type only.
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "category": "nonsense"}); r.code != 400 {
+		t.Errorf("unknown category: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "category": "app_bug"}); r.code != 400 {
+		t.Errorf("category on another type: %d %s", r.code, r.raw)
+	}
+	if r := web.post(base+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "category": "app_bug", "payload": map[string]any{"note": "total not recomputed"}}); r.code != 201 {
+		t.Errorf("human cause verdict: %d %s", r.code, r.raw)
+	}
+	det = web.get(base + "/results/" + resultID)
+	if events, _ = det.body["events"].([]any); len(events) != 3 || events[2].(map[string]any)["type"] != "HYPOTHESIS_ACCEPTED" {
+		t.Errorf("events after the verdict: %s", det.raw)
 	}
 	// POST without the CSRF header is refused even with a valid session.
 	saved := web.csrf
@@ -467,6 +483,9 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	}
 	if r := bobc.post(searchBase+"/results/"+resultID+"/triage-events", map[string]any{"type": "MARKED_FLAKY", "payload": map[string]any{}}); r.code != 403 || r.errCode() != "FORBIDDEN" {
 		t.Errorf("viewer triaging: %d %s", r.code, r.raw)
+	}
+	if r := bobc.post(searchBase+"/results/"+resultID+"/triage-events", map[string]any{"type": "HYPOTHESIS_ACCEPTED", "category": "app_bug"}); r.code != 403 || r.errCode() != "FORBIDDEN" {
+		t.Errorf("viewer recording a cause: %d %s", r.code, r.raw)
 	}
 
 	// ---- Identity operations (§9.4 over HTTP): role, aliases, merge, undo, split, review ----
@@ -586,13 +605,72 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Fatalf("create requirement: %d %s", reqR.code, reqR.raw)
 	}
 	reqID := reqR.body["id"].(string)
-	caseR := web.post(base+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true, "steps": []map[string]string{{"action": "open cart", "expected": "cart shown"}}})
+	caseR := web.post(base+"/test-cases", map[string]any{"title": "Pay with saved card", "isCritical": true, "steps": []map[string]string{{"action": "open cart", "expected": "cart shown"}}, "taxonomy": map[string]any{"level": "system", "purposes": []string{"performance", "functional"}, "tags": []string{"regression", "e2e"}, "executionModes": []string{"manual", "automated"}, "performanceTypes": []string{"load", "stress"}}})
 	if caseR.code != 201 || caseR.body["automationStatus"] != "manual_only" {
 		t.Fatalf("create case: %d %s", caseR.code, caseR.raw)
 	}
 	caseID := caseR.body["id"].(string)
+	classification := caseR.body["taxonomy"].(map[string]any)
+	if classification["level"] != "system" {
+		t.Fatalf("missing taxonomy: %s", caseR.raw)
+	}
+	filteredCases := web.get(base + "/test-cases?level=system&purpose=performance&tag=e2e&executionMode=automated&performanceType=stress")
+	if filteredCases.code != 200 || len(filteredCases.body["items"].([]any)) != 1 {
+		t.Fatalf("taxonomy filter: %s", filteredCases.raw)
+	}
+	if bad := web.get(base + "/test-cases?purpose=unknown"); bad.code != 400 {
+		t.Fatalf("invalid taxonomy filter: %d %s", bad.code, bad.raw)
+	}
+	if bad := web.do("PATCH", base+"/test-cases/"+caseID, map[string]any{"taxonomy": map[string]any{"performanceTypes": []string{"stress"}}}, nil); bad.code != 400 {
+		t.Fatalf("orphan subtype: %d %s", bad.code, bad.raw)
+	}
+	contextUpdate := web.do("PATCH", base+"/test-cases/"+caseID, map[string]any{"preconditions": "Signed in", "testData": "account=42", "expectedUpdatedAt": caseR.body["updatedAt"]}, nil)
+	if contextUpdate.code != 200 || contextUpdate.body["preconditions"] != "Signed in" || contextUpdate.body["testData"] != "account=42" {
+		t.Fatalf("case context update: %d %s", contextUpdate.code, contextUpdate.raw)
+	}
+	caseAudit := contextUpdate.body["audit"].([]any)
+	if len(caseAudit) != 2 || caseAudit[0].(map[string]any)["actor"] != "alice@example.com" {
+		t.Fatalf("case audit actor: %s", contextUpdate.raw)
+	}
+	if r := web.do("PATCH", base+"/test-cases/"+caseID, map[string]any{"title": "Stale", "expectedUpdatedAt": caseR.body["updatedAt"]}, nil); r.code != 409 {
+		t.Fatalf("stale case patch: %d %s", r.code, r.raw)
+	}
 	if r := web.post(base+"/test-cases", map[string]any{"title": "x", "priority": "urgent"}); r.code != 400 {
 		t.Errorf("bad priority: %d %s", r.code, r.raw)
+	}
+	bulkOther := web.post(base+"/test-cases", map[string]any{"title": "Bulk target"})
+	if bulkOther.code != 201 {
+		t.Fatalf("bulk seed: %d %s", bulkOther.code, bulkOther.raw)
+	}
+	bulkInput := map[string]any{"items": []map[string]any{
+		{"id": caseID, "expectedUpdatedAt": caseR.body["updatedAt"]},
+		{"id": bulkOther.body["id"], "expectedUpdatedAt": bulkOther.body["updatedAt"]},
+	}, "patch": map[string]any{"priority": "p0"}}
+	bulk := web.post(base+"/test-cases/bulk", bulkInput)
+	if bulk.code != 200 {
+		t.Fatalf("bulk update: %d %s", bulk.code, bulk.raw)
+	}
+	bulkItems := bulk.body["items"].([]any)
+	if bulkItems[0].(map[string]any)["code"] != "CONFLICT" || bulkItems[1].(map[string]any)["updated"] != true {
+		t.Fatalf("partial success missing: %s", bulk.raw)
+	}
+	if r := web.get(base + "/test-cases/" + bulkOther.body["id"].(string)); r.body["priority"] != "p0" || r.body["audit"].([]any)[0].(map[string]any)["actor"] != "alice@example.com" {
+		t.Fatalf("bulk lost audit: %s", r.raw)
+	}
+	if r := bobc.post(base+"/test-cases/bulk", bulkInput); r.code != 404 {
+		t.Fatalf("foreign bulk: %d", r.code)
+	}
+	if r := bobc.get(base + "/test-cases/export"); r.code != 404 {
+		t.Fatalf("foreign export: %d", r.code)
+	}
+	if r := bobc.post(searchBase+"/test-cases/bulk", bulkInput); r.code != 403 {
+		t.Fatalf("viewer bulk: %d", r.code)
+	}
+	if r := bobc.get(searchBase + "/test-cases/export"); r.code != 200 {
+		t.Fatalf("viewer own export: %d %s", r.code, r.raw)
+	}
+	if r := web.get(base + "/test-cases/export?ids=" + caseID); r.code != 200 || r.body["count"] != float64(1) || !strings.Contains(r.body["csv"].(string), "steps_json") {
+		t.Fatalf("export contract: %d %s", r.code, r.raw)
 	}
 	// Links target TestIdentity.id only (§6.8.1): the retired one is a
 	// conflict, an unknown id a 404, the active one links and flips status.
@@ -636,6 +714,36 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		t.Fatalf("plan: %d %s", planR.code, planR.raw)
 	}
 	planID := planR.body["id"].(string)
+	planPath := base + "/test-plans/" + planID
+	assignment := map[string]any{"caseUpdate": map[string]any{"testCaseId": caseID, "assigneeEmail": "alice@example.com"}}
+	if r := web.do("PATCH", planPath, assignment, nil); r.code != 200 {
+		t.Fatalf("authorized assignment: %d %s", r.code, r.raw)
+	} else {
+		found := false
+		for _, item := range r.body["cases"].([]any) {
+			c := item.(map[string]any)
+			if c["testCase"].(map[string]any)["id"] == caseID {
+				found = c["assigneeEmail"] == "alice@example.com" && c["assignedBy"] == "alice@example.com"
+			}
+		}
+		if !found {
+			t.Fatalf("assignment DTO: %s", r.raw)
+		}
+	}
+	planViewer, _ := az.CreateUser(ctx, "plan-viewer@example.com")
+	_ = az.VerifyEmail(ctx, planViewer.ID)
+	_, _ = az.GrantRole(ctx, planViewer.ID, authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, authz.RoleViewer)
+	for _, email := range []string{"bob@example.com", "missing@example.com", "plan-viewer@example.com"} {
+		if r := web.do("PATCH", planPath, map[string]any{"caseUpdate": map[string]any{"testCaseId": caseID, "assigneeEmail": email}}, nil); r.code != 404 {
+			t.Fatalf("foreign/unknown assignment %s: %d %s", email, r.code, r.raw)
+		}
+	}
+	if r := bobc.do("PATCH", planPath, assignment, nil); r.code != 404 {
+		t.Fatalf("foreign writer assignment: %d %s", r.code, r.raw)
+	}
+	if r := web.do("PATCH", planPath, map[string]any{"caseUpdate": map[string]any{"testCaseId": caseID, "workStatus": "in_progress"}}, nil); r.code != 200 {
+		t.Fatalf("start case: %d %s", r.code, r.raw)
+	}
 	execR := web.post(base+"/test-plans/"+planID+"/executions", map[string]any{"testCaseId": caseID, "status": "passed", "note": "ok on staging"})
 	if execR.code != 201 || execR.body["executedBy"] != "alice@example.com" || len(execR.body["evidence"].([]any)) != 0 {
 		t.Errorf("execution: %d %s", execR.code, execR.raw)
@@ -671,6 +779,13 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 		evs := r.body["executions"].([]any)[0].(map[string]any)["evidence"].([]any)
 		if len(evs) != 1 || evs[0].(map[string]any)["id"] != evidence.body["id"] {
 			t.Errorf("plan evidence: %s", r.raw)
+		}
+	}
+	if r := web.do("PATCH", planPath, assignment, nil); r.code != 200 {
+		t.Fatalf("assignment after evidence: %d %s", r.code, r.raw)
+	} else {
+		if len(r.body["executions"].([]any)[0].(map[string]any)["evidence"].([]any)) != 1 {
+			t.Fatalf("patch lost evidence: %s", r.raw)
 		}
 	}
 	{
@@ -731,7 +846,8 @@ func TestDashboardContractEndToEnd(t *testing.T) {
 	// token, a foreign token and no token are all refused.
 	readTok, _ := az.IssueToken(ctx, authz.TokenSpec{Scope: authz.ScopeRef{Level: authz.LevelProject, ID: string(checkout.ID)}, Permissions: []authz.Permission{authz.PermProjectRead}, Name: "deploy"})
 	ci := newClient(t, srv)
-	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" {
+	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + readTok.Plaintext}); r.code != 200 || r.body["gate"].(map[string]any)["verdict"] != gate["verdict"] || r.body["status"] != "approved" ||
+		r.body["ci"].(map[string]any)["pass"] != true || r.body["ci"].(map[string]any)["reason"] != "release approved by carol@example.com" {
 		t.Errorf("CI gate: %d %s", r.code, r.raw)
 	}
 	if r := ci.do("GET", "/v1/releases/"+relID+"/gate", nil, map[string]string{"Authorization": "Bearer " + tok.Plaintext}); r.code != 404 {

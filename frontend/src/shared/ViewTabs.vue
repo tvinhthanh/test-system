@@ -4,7 +4,10 @@
 withDefaults(defineProps<{ label?: string }>(), { label: "Views" });
 </script>
 <template>
-  <nav :aria-label="label" class="mb-5 flex gap-1 overflow-x-auto border-b">
+  <nav
+    :aria-label="label"
+    class="mb-5 flex gap-1 overflow-x-auto overflow-y-hidden border-b"
+  >
     <slot />
   </nav>
 </template>

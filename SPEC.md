@@ -1,8 +1,15 @@
 # Automation Testing Platform — Spec hợp nhất
 
-> **Phiên bản:** v3.38 · **Ngày:** 29-09-2026 · **Trạng thái:** 13 ADR đã chốt (QĐ-13 28-09: JUnit backfill, ROI, shadow meter build sẵn; QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09, quản lý member ở cả ba tầng qua UI, MFA TOTP cho org owner và đăng nhập Google/GitHub (bật/tắt bằng cấu hình) từ 27-09, mời qua email và quên mật khẩu (SMTP, bật/tắt) từ 28-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 64 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61) và ba từ việc build P2 (N62–N64)
-> **Nguồn:** v3.0 (`docs/v3.0/`) + v3.1 (`docs/v3.1/`) + bản thẩm định 24-08 + review v3.2 (`docs/SPEC-v3.2-reviewed.md`) + bản đối ngoại `docs/external/`
-> **Quy tắc:** Đây là nguồn sự thật duy nhất. Mọi file trong `docs/` là lịch sử, chỉ để tra cứu. Tài liệu nào nói khác file này → file đó sai.
+> **Phiên bản:** v3.57 · **Ngày:** 07-11-2026 · **Tóm tắt:** P1-min + P2 Test Management + Auto test đã build, nằm trên `main` (tiến độ §0.5); 19 ADR đã chốt (§1); **04–07-11 (QĐ-19):** mọi loại test có phiên chạy được theo bốn tầng và có giao diện: bước `check_accessibility` / `check_performance` / `check_security`, ma trận Chromium/Firefox/WebKit × desktop/phone/tablet, load test chỉ vào host đã chứng minh sở hữu, và dự án Playwright hoặc script k6 của team chạy trong container sandbox (`sandboxd`, bật bằng `SANDBOX=on`; CI job `sandbox` chạy nó trên Docker thật); gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 chờ server (§14.1); identity precision 1,0000 · recall 0,9920 (§9.6); 65 phát hiện N (§0.2). **07-11:** kết quả sandbox có checkpoint trong lúc retry import JUnit, nên lỗi tạm thời không chạy script lần hai.
+>
+> <details><summary>Trạng thái đầy đủ của v3.53 (01-11)</summary>
+>
+> **Trạng thái:** kế hoạch tester dùng hằng ngày, demo Windows → pilot → VPS tại §4.11 và yêu cầu mở rộng §6.8.7 (chưa nghiệm thu); 18 ADR đã chốt (**QĐ-18 30–31-10: key của mọi nhà cung cấp AI — Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Groq, OpenRouter, hoặc endpoint tương thích OpenAI của người vận hành; organization chọn provider, model và key trên giao diện, host cố định trong code, mọi câu trả lời kiểm theo schema**; **QĐ-17 26–30-10: tự đăng ký có duyệt role — `SIGNUP=on` cần `MAIL=smtp`, tài khoản chỉ được tạo khi email đã được chứng minh qua link; trang đăng ký và hàng chờ duyệt trên màn hình Members**; **QĐ-16 25-10: Auto test — case server tự chạy trong trình duyệt thật (bước là dữ liệu, tài khoản test theo environment, AI soạn case từ trang và sửa bước mất phần tử), kết quả vào plan và Test runs, quét site, chạy từ CI bằng token `project:autorun`**; **QĐ-15 24-10: luồng Start testing — chọn loại test → site → case (thư viện, bộ mẫu, AI soạn từ site bằng Claude với key của organization hoặc của server, model chọn trên giao diện) → chạy từng case với site mở sẵn**; **QĐ-14 23-10: tester dùng không cần source — environment có địa chỉ site trên plan, URL check bằng Chromium sau guard SSRF, reporter tải từ chính server, hướng dẫn trong app**; QĐ-13 28-09: JUnit backfill, ROI, shadow meter build sẵn; QĐ-11: P1-min xây song song Phase 0, `backend/`; QĐ-9 sửa lần hai 14-09: client Vue 3, hệ giao diện Tailwind + shadcn-vue từ 21-09; **QĐ-12 ngày 21-09: P2 Test Management khởi công song song, backend §6.8 đã lên `main`; bằng chứng thủ công qua `Artifact` và RBAC 6 role từ 22-09, quản lý member ở cả ba tầng qua UI, MFA TOTP cho org owner và đăng nhập Google/GitHub (bật/tắt bằng cấu hình) từ 27-09, mời qua email và quên mật khẩu (SMTP, bật/tắt; đăng nhập AUTH PLAIN hoặc LOGIN) từ 28-09**); **P1-min đã build, nằm trên `main` từ 18-09 — tiến độ ở §0.5; gate kỹ thuật T0 T1 T3 T4 ✅, T2 T5 một phần, ở §14.1 (trích `backend/GATES.md`)**; ba plane đã đặc tả; bản đối ngoại sinh bằng pipeline (F12/F16 đóng thật); **Phase 0 — khởi động lại 15-09-2026, Gate-0 26-10-2026; lần chốt 26-08 không diễn ra, xem §5.8**; prototype identity ĐẠT (precision 1,0000 · recall 0,9920); loader Playwright đối chiếu report thật; code sang tiếng Anh (QĐ-3); resolve hai tầng sau N39; bố cục module monolith ở §6.9 (thi hành từ 11-09 theo QĐ-11); 65 phát hiện N đã xử lý, gồm hai vòng đối chiếu prototype ↔ Postgres (N49, N50), một vòng soát harness ↔ tài liệu (N56–N59), hai phát hiện từ việc build P1-min (N60–N61), ba từ việc build P2 (N62–N64) và một từ việc ghép nhánh tự đăng ký (N65)
+>
+> </details>
+>
+> **Nguồn:** v3.0 + v3.1 + bản thẩm định 24-08 + review v3.2 — các bản này đã gỡ khỏi repo 02-11 (§0.1)
+> **Quy tắc:** Đây là nguồn sự thật duy nhất. Tài liệu nào nói khác file này → file đó sai.
 
 ---
 
@@ -17,6 +24,8 @@
 | **SPEC.md**         | root         | **Bản gộp, đã vá lỗi khớp nối. Dùng bản này**                        |
 
 Việc tách `docs/v3.0/` và `docs/v3.1/` cũng xử lý luôn vụ va chạm đánh số: trước đó root có cả `01-ICP-Personas-and-JTBD.md` lẫn `01-decisions.md`, rất dễ mở nhầm.
+
+**02-11-2026 — gỡ tài liệu không còn dùng.** Repo chỉ giữ tài liệu mà việc build, vận hành hoặc bán sản phẩm hôm nay cần. Đã gỡ: `docs/v3.0/`, `docs/v3.1/`, `docs/SPEC-v3.1-merged.md`, `docs/SPEC-v3.2-reviewed.md` (đã gộp hết vào file này), `docs/pr-p1-min.md` (mô tả PR đã merge), `docs/external/` (bản đối ngoại v3.12 ngày 09-09 vẫn ghi "chưa có sản phẩm chạy được" — sai so với `main`; khi cần gửi ra ngoài thì sinh lại từ SPEC hiện tại), `docs/go/` (khóa học Go, không phải tài liệu dự án) và `phase0/` (mẫu outreach, phỏng vấn, baseline, biên bản Gate-0 — các bảng đều chưa điền; quy trình vẫn nằm ở §5). Mọi chỗ dưới đây còn nhắc tới các đường dẫn đó là **ghi chép lịch sử**. Lấy lại bản cũ: `git show b369287:<đường dẫn>` hoặc `git checkout b369287 -- <thư mục>`.
 
 ### 0.2 Nhật ký sửa lỗi qua các vòng review
 
@@ -69,11 +78,11 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N43 | **§9.4 gộp hai thao tác khác nhau vào một tên.** §9.4 gọi `Split` là "undo của auto-match sai" — không phải: `Merge` hồi tố có chủ đích, nên `Split(T)` chỉ sửa được từ T trở đi. Đo: gộp nhầm ngày 10, phát hiện ngày 30 → `SplitFrom` để lại **29/29 ngày** vẫn sai, `UndoMerge` để lại **0/29** | ✅ Tách hai thao tác trong `merge_split.go` | §9.4, §8.5 |
 | N44 | Hệ quả UX của N43: cửa sổ hỏng **vô hình** — lịch sử đã gộp vẫn trông như một test hợp lệ, không có gì báo sai. Người review dùng nhầm thao tác sẽ không bao giờ biết | ✅ UI **phải** đề xuất `UndoMerge` khi alias có `source = auto_match`, thay vì để người dùng tự chọn mốc T | §9.4 |
 | N45 | **§9.7 mô tả sai ca "xóa test rồi thêm lại sau 2 tháng".** §9.7 nói thành identity mới; đo thật: ứng viên 60 ngày, leaf đổi nhẹ → score **0.868, auto_match**. 90+ ngày mới xuống review, và không bao giờ chạm vùng identity mới. Nguyên nhân: §9.3 biện minh recency bằng lập luận trùng hợp thời điểm nhưng cài nó thành trọng số 10% | ✅ Thêm `RecencyGateDays` tùy chọn, chi phí đo được **bằng 0**. **Cần quyết:** bật gate hay sửa mô tả §9.7 | §9.3, §9.7 |
-| N46 | Race test mà §9.7 đánh dấu "bắt buộc" nay đã có và pass: 16 worker × 50 fingerprint → đúng **50 identity**, 750 lần thua race đọc lại đúng identity của bên thắng | 🔶 **Có giới hạn:** máy này thiếu gcc nên `go test -race` chưa chạy được. Đây là kiểm chứng **đúng đắn logic**, chưa phải kiểm chứng data-race ở tầng bộ nhớ. Cần chạy lại trong CI | §9.7 |
+| N46 | Race test mà §9.7 đánh dấu "bắt buộc" nay đã có và pass: 16 worker × 50 fingerprint → đúng **50 identity**, 750 lần thua race đọc lại đúng identity của bên thắng | 🔶 **Có giới hạn:** máy này thiếu gcc nên `go test -race` chưa chạy được. Đây là kiểm chứng **đúng đắn logic**, chưa phải kiểm chứng data-race ở tầng bộ nhớ. **02-11:** CI có bước `go test -race` cho `internal/identity/...`, `platform/queue`, `platform/metric` (runner Ubuntu có gcc) — đóng khi lần chạy CI đầu tiên xanh | §9.7 |
 | N47 | **§9.3 bước 2 lọc ứng viên bằng ba điều kiện mà §8.9 không index điều kiện nào.** Đo trên prototype (không có index nào), **3 lần chạy 09-09**: 50 rename tốn **163–252ms ở 500 test → 3,5–6,8s ở 10k → 8,3–30,5s ở 25k**. Đây là **cận trên**, không phải dự đoán production. Biên độ thật xem N55 — bản ghi cũ để "±15%" và một điểm duy nhất cho mỗi cỡ | ✅ Thêm 3 index vào §8.9 + cột `canonicalLeafTitle` vào §8.5. Ghi rõ: trần 50 ứng viên giới hạn chi phí **chấm điểm**, không giới hạn chi phí **lọc** | §8.5, §8.9, §9.3 |
 | N48 | Tầng 1 (exact match, inline) xử lý 10.000 event trong **7–17ms** (0,7–1,7 µs/event, 4 lần chạy) — ngân sách §7.6 dư hai bậc độ lớn, xác nhận việc tách hai tầng ở N39. Bản ghi cũ để "0,8 µs" như một hằng số dù biên độ thật là 2,4× | ✅ Tách assertion: tầng 1 giữ mốc 1s của §7.6; tầng 2 (spec không đặt deadline) dùng trần 5s chỉ để bắt hồi quy. Test cũ cộng cả hai tầng rồi so với mốc của riêng tầng 1 | §7.6 |
 | N49 | **Hàm trigram của prototype không phải `pg_trgm`.** Nó đệm cả chuỗi thay vì cắt thành từ rồi đệm từng từ như `generate_trgm()`, nên sinh trigram vắt qua dấu phân cách. Đo 100k cặp leaf title: lệch trung bình **0,013**, tối đa 0,054, 12 cặp đổi phía ngưỡng 0,4 — và luôn chấm **thấp hơn** Postgres | ✅ Viết lại đúng `generate_trgm()` + test khóa. Số §9.6 không đổi (precision 1,0000 · recall 0,9920) | §9.3 |
-| N50 | **Hai trong ba hàm của §9.3 không chạy được ở Postgres như §2 tuyên bố.** Jaccard trên tập describe cha: không có hàm stdlib nào. `fuzzystrmatch.levenshtein()`: **báo lỗi** khi title quá dài, kéo sập cả câu lệnh chấm điểm (đo trên title thật: 195 byte data-driven, 391 byte cho hai row fixture) | ✅ Chấm điểm về tầng ứng dụng — **348–587µs** cho trần 50 ứng viên, **3,5–5,9ms** cho cả run (6 lần chạy 09-09, xem N54); Postgres chỉ lo bước lọc. Sửa câu §2. 🔶 Đơn vị giới hạn (ký tự hay byte) cần verify trên Postgres đích | §2, §9.3 |
+| N50 | **Hai trong ba hàm của §9.3 không chạy được ở Postgres như §2 tuyên bố.** Jaccard trên tập describe cha: không có hàm stdlib nào. `fuzzystrmatch.levenshtein()`: **báo lỗi** khi title quá dài, kéo sập cả câu lệnh chấm điểm (đo trên title thật: 195 byte data-driven, 391 byte cho hai row fixture) | ✅ Chấm điểm về tầng ứng dụng — **348–587µs** cho trần 50 ứng viên, **3,5–5,9ms** cho cả run (6 lần chạy 09-09, xem N54); Postgres chỉ lo bước lọc. Sửa câu §2. ✅ **02-11 verify trên PostgreSQL 17.5:** giới hạn là **255 ký tự, không phải byte** — 200 ký tự tiếng Việt (600 byte) chạy được, 256 ký tự ASCII báo `levenshtein argument exceeds maximum length of 255 characters`; `levenshtein_less_equal()` cùng giới hạn nên không phải lối thoát. Title data-driven dài hơn 255 ký tự vẫn làm sập câu lệnh, kết luận không đổi | §2, §9.3 |
 | N51 | **Số đo §9.6 bị sao chép ra 5 chỗ và trôi.** Header, N39, N49, §6.9.10 và §7.6 ghi `recall 0,9950` và cặp `0,995 → 0,295`. Chạy lại prototype ngày 08-09: headline là **0,9920** (248/250 auto, 2 review) và 50% tầm nhìn là **0,3000**. `0,9950` là số của sweep mật độ ~128/~285 test/file, bị nhấc lên làm headline; cặp `0,995 → 0,295` chưa bao giờ khớp bảng của chính prototype | ✅ Sửa cả 5 chỗ về số đo được. **Quy tắc:** §9.6 là nơi duy nhất giữ số headline; chỗ khác trích thì phải ghi rõ là trích | §0.2, §7.6, §9.6, §6.9.10 |
 | N52 | **§13 và F16 vẫn gọi pipeline đối ngoại là `pandoc`,** trong khi §4.7 và `docs/external/` dùng `npm run build` → `build.mjs`. Nặng hơn: §13 vẫn liệt "chạy pandoc" là **blocker để gửi tài liệu**, mâu thuẫn với chính mục 3 của nó đã đánh ✅ (`.docx` đã sinh, `verify.sh` 11/11). Ai đọc đoạn kết §13 sẽ tưởng còn vướng một bước không tồn tại | ✅ Đổi tên pipeline; viết lại câu blocker — chỉ còn mục 4 (claim competitor) | §12.1, §13 |
 | N53 | **§9.6 gán tính ổn định cho sai biến, và bảng số không tái lập được.** §9.6 ghi "mật độ 11→285 test/file cho recall 0.97–0.996", dẫn từ bảng bốn dòng trong README prototype (0,9700 / 0,9850 / 0,9950 / 0,9950) kể một xu hướng **tăng đơn điệu**. Đo lại 09-09 đúng bốn mức đó: **0,9760 / 0,9960 / 0,9880 / 0,9920** — không đơn điệu, không mức nào khớp. Bảng cũ sinh từ harness `_test.go` đã bị thay bằng flag nên **không lệnh nào tái lập được nó**. Và sweep cũ để `-mutate=50` cố định trong khi `-suite` đổi, nên "mật độ 11" đồng thời là "**65% corpus bị rename**" — hai biến trộn vào nhau | ✅ Đo lại tách bạch: giữ rename 10% rồi quét mật độ; giữ mật độ rồi quét rename 1%→80%. **Cả hai trục đều phẳng**, precision 1,0000 khắp nơi. Viết lại §9.6 thành bảng bốn biến kèm lệnh tái lập trong README prototype | §9.6 |
@@ -88,6 +97,7 @@ Các lỗi N01–N10 đến từ lần gộp v3.1; N11–N19 từ review v3.2 ng
 | N62 | **§6.8.2 thiếu hai thứ mà §6.8.4 và §4.9.2 của chính nó dùng.** Rule 4 của gate nói "coverage của requirement `p0`" nhưng entity `Requirement` không có `priority`; §4.9.2 ước lượng "TestCase / **Suite** / Plan CRUD" và `TestCase.suiteId FK` trỏ vào một `Suite` chưa được định nghĩa ở đâu. Viết migration là lộ ngay: không có cột thì rule không tính được, không có bảng thì FK không có đích | ✅ Thêm `Requirement.priority` (p0..p3, mặc định p2) và entity `TestSuite` (tên, cha tuỳ chọn, unique theo project + cha) vào §6.8.2; migration `0013_testmgmt.sql` là bản chạy được | §6.8.2, §6.8.4 |
 | N63 | **Rule 3 của §6.8.4 — "còn failure chưa có `HYPOTHESIS_ACCEPTED`" — đọc theo nghĩa đen thì một failure đã `MARKED_KNOWN_ISSUE` chặn release mãi mãi.** §8.3 có bốn quyết định kết thúc triage (accept, flaky, known issue, resolved); `query.Triage` cũng chỉ đếm `HYPOTHESIS_ACCEPTED` là "đã triage" cho TTRC — đúng cho TTRC (chỉ có hypothesis mới có root cause), sai cho gate (known issue là quyết định ship có ý thức). Hai định nghĩa "đã triage" cho hai mục đích khác nhau, phải nói rõ | ✅ Gate đọc *decisive event* = `HYPOTHESIS_ACCEPTED \| MARKED_FLAKY \| MARKED_KNOWN_ISSUE \| RESOLVED`; TTRC/coverage §8.3 giữ định nghĩa hẹp. Ghi cả hai ở §6.8.4 | §6.8.4, §8.3 |
 | N64 | **§6.8.2 nói "Artifact dùng lại, không tạo bảng mới" cho bằng chứng thủ công, nhưng §8.4 định nghĩa `Artifact.runId` là `FK NOT NULL` với khóa tự nhiên `(runId, clientTestId, occurrenceIndex, attempt, name)` — trong khi §6.8.6 cấm manual execution tạo `Run`.** Hai mục đúng riêng, ghép lại thì không có chỗ đặt hàng: hoặc bịa một Run giả (vi phạm §6.8.6, làm bẩn flaky/TTRC), hoặc tạo bảng mới (vi phạm §6.8.2). Thêm nữa, sweep "unlinked > 1 h" của §6.4 sẽ báo động mãi mãi cho một artifact không bao giờ có attempt | ✅ Migration 0014: `runId`/`clientTestId`/`attempt` nullable, thêm `manualExecutionId`, CHECK buộc theo `kind` (`manual_evidence` ⇔ có execution, không run; kind khác ⇔ ngược lại); sweep và index unlinked chỉ xét `runId IS NOT NULL`. Upload đi **qua api** (`POST …/executions/{id}/evidence`, multipart, api sniff nội dung theo §11.5) chứ không presigned — trình duyệt PUT thẳng lên bucket cần CORS cho từng origin dashboard. Ghi ở §6.8.2, §8.4, §10.4 | §6.8.2, §8.4, §10.4, §6.4 |
+| N65 | **Tự đăng ký (PR #9) tạo tài khoản *đã verify* ngay khi gửi form, không có mail nào chứng minh địa chỉ — trong khi ba chỗ khác của hệ thống coi "email đã verify" là chủ địa chỉ.** Members thêm người theo email đã verify, lời mời vào một email đã có tài khoản thì gán role cho tài khoản đó, OAuth lần đầu liên kết theo email verify ở cả hai phía. Ghép lại: bật `SIGNUP=on` là ai cũng chiếm trước được `sep@congty.com`, rồi nhận role admin cấp cho người đó hoặc ngồi chung tài khoản khi chủ thật đăng nhập Google; `409 ACCOUNT_EXISTS` còn cho dò email nào đã có tài khoản (§11.2 cấm). Mỗi mảnh đúng riêng; lỗ chỉ lộ khi đặt cạnh nhau lúc ghép nhánh 29-10 | ✅ QĐ-17: form luôn trả `202` như quên mật khẩu; tài khoản và yêu cầu chỉ được tạo khi mở link mail (`signup_requests`, 0044); `SIGNUP=on` cần `MAIL=smtp`. 0044 bỏ verify + thu hồi phiên các tài khoản tạo kiểu cũ chưa từng reset mật khẩu. Test: `internal/authz/signup_test.go` (gồm migration trên dữ liệu kiểu cũ), `cmd/api/signup_test.go` | §1.17, §11.2 |
 
 ### 0.3 Những gì vẫn CẦN người chịu trách nhiệm quyết
 
@@ -120,7 +130,9 @@ README của bộ v3.1 đánh dấu F12 và F16 là "✅ Đóng". **Sai** — qu
 
 **Cấm gửi ba file đó ra ngoài cho đến khi regenerate theo §4.7.**
 
-### 0.5 Tiến độ thi hành QĐ-11 và QĐ-12 — cập nhật 27-09-2026
+> **02-11-2026:** ba file trên đã gỡ khỏi repo cùng `docs/v3.0/` (§0.1), nên không còn cách nào gửi nhầm. Bản đối ngoại kế tiếp sinh lại từ SPEC hiện tại theo §4.7.
+
+### 0.5 Tiến độ thi hành QĐ-11 và QĐ-12 — cập nhật 29-10-2026
 
 Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập nằm ở file bằng chứng; bảng này chỉ **trích** (quy tắc N51/N58). Cập nhật cùng mỗi lần merge vào `main`.
 
@@ -134,7 +146,7 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 | RBAC | §11.3, §4.4 "P2 mở rộng" | ✅ **22-09**: 6 role §11.3.1 (migration 0015 trải hàng P1-min), ma trận §11.3.2 là dữ liệu + test chép sáu cột, `authorize()` lấy hợp membership trên chuỗi, `GET /v1/projects` trả `actions[]`; UI ẩn nút theo `actions` (frontend `ProjectAccess`, xóa cache khi đổi user). ✅ **27-09 quản lý member** (§11.3.2 "tầng tương ứng"): 3 route `…/members` sau `member.manage` — danh sách cả role kế thừa từ workspace/org, cấp/đổi/thu hồi role cấp project (maintainer/member/viewer) theo email tài khoản đã verify, mỗi lần ghi `authz_audit` (`role.grant` kèm role cũ, `role.revoke`; migration 0016); màn hình Members chỉ hiện với ai có `member.manage`. ✅ **27-09 tầng workspace/org**: cùng bộ route cho `/v1/workspaces/{id}/members` (workspace_admin) và `/v1/organizations/{id}/members` (org_admin/org_owner), `GET /v1/member-scopes` dẫn vào màn hình Team; **luật owner**: chỉ owner (`org.manage`) được cấp/đổi/gỡ role owner (`403 OWNER_ONLY`), và tổ chức luôn giữ ít nhất một owner (`409 LAST_OWNER` — áp cả cho `cmd/admin`, khóa hàng owner để hai lần hạ quyền đồng thời không cùng lọt). ✅ **28-09 mời qua email**: `MAIL=smtp` thì thêm một email chưa có tài khoản sẽ gửi lời mời (xem hàng dưới) | `backend/internal/authz/rules.go`, `authz_test.go`, `cmd/api/api_test.go`, `frontend/src/features/reports/projectAccess.ts`, `cmd/api/members.go`, `members_test.go`, `frontend/src/features/members/` |
 | MFA TOTP | §11.2, §4.4 "P2" | ✅ **27-09**: TOTP RFC 6238 (SHA-1, 6 số, 30 s, lệch ±1 bước, mỗi mã dùng một lần), secret niêm phong AES-GCM bằng khóa dẫn từ `TOKEN_PEPPER`, 10 recovery code (lưu HMAC), đăng nhập hai bước (`202` + challenge 5 phút → `POST /v1/session/mfa`), mã sai chung rate limit với mật khẩu; **org owner bắt buộc** — phiên của owner chưa bật chỉ tới được route session/MFA (`403 MFA_ENROLLMENT_REQUIRED`), UI đưa thẳng tới trang Security; owner không tắt được; bật MFA thu hồi mọi phiên khác; audit `mfa.enable`/`mfa.disable`/`mfa.recovery_used` (migration 0017). Cũng 27-09: mã QR trên trang Security (vẽ bằng SVG từ ma trận `uqr`, không `v-html`; kiểm bằng giải mã ảnh chụp) và `admin user mfa-reset` cho operator (bắt buộc `-actor` + `-reason`, thu hồi mọi phiên, ghi `mfa.disable` kèm `via: operator reset`). OAuth: xem hàng dưới | `backend/internal/authz/mfa.go`, `totp.go`, `mfa_test.go`, `cmd/api/mfa_test.go`, `frontend/src/features/account/` |
 | OAuth Google/GitHub | §11.2, §4.4 "P2" | ✅ **27-09**: công tắc riêng từng provider ở backend (`OAUTH_GOOGLE` / `OAUTH_GITHUB` = on|off, mặc định off; bật mà thiếu client id/secret hoặc `PUBLIC_URL` thì api không khởi động); authorization code + PKCE S256, state trong cookie ký HMAC (không bảng nào để làm đầy); nhận người bằng subject ổn định của provider, lần đầu liên kết theo email **đã verify ở cả hai phía** (audit `identity.link`, migration 0018), **không tự tạo tài khoản**; tài khoản bật MFA vẫn phải nhập mã; gọi ra ngoài chỉ qua `platform/outbound` (allowlist host lấy từ cấu hình, không theo redirect). 28-09: trang Security có mục "Connected accounts" — xem và gỡ liên kết của chính mình (audit `identity.unlink`, migration 0019), không gỡ được cách đăng nhập cuối cùng (`409 LAST_SIGN_IN`) | `backend/internal/authz/oauth.go`, `oauth_http.go`, `internal/platform/outbound/`, `cmd/api/oauth_test.go` |
-| Mời qua email | §11.2 "mời member", §11.6 API6 | ✅ **28-09**: công tắc `MAIL=off|smtp` (mặc định off; SMTP chuẩn — dùng được SES, Resend, Mailgun, relay công ty; `SMTP_TLS=starttls|tls`, `none` chỉ dev). Mail bật: thêm email chưa có tài khoản vào project/workspace/org → `202 {invitation}`, gửi link `/invite#<token>` (fragment — token không bao giờ tới server trong URL hay log), token dùng một lần, lưu HMAC, hạn 7 ngày, một lời mời mở cho mỗi (email, node); gửi mail thất bại → lời mời bị thu hồi, `502 MAIL_FAILED`. Nhận lời mời: đặt mật khẩu → tài khoản tạo ở trạng thái đã verify, gán role, đăng nhập; email đã có tài khoản thì chỉ gán role và bảo đăng nhập (link không chiếm được tài khoản). Token sai tính vào giới hạn đăng nhập theo IP. Luật owner giữ nguyên (mời owner chỉ owner làm được). Danh sách lời mời đang chờ + rút lại trên trang Members; audit `invitation.create/revoke/accept` (migration 0020) | `internal/platform/mail/`, `internal/authz/invitations.go`, `invite_http.go`, `cmd/api/invitations.go`, `invitations_test.go`, `frontend/src/features/auth/InvitePage.vue` |
+| Mời qua email | §11.2 "mời member", §11.6 API6 | ✅ **28-09**: công tắc `MAIL=off|smtp` (mặc định off; SMTP chuẩn — dùng được SES, Resend, Mailgun, relay công ty; `SMTP_TLS=starttls|tls`, `none` chỉ dev; **30-10**: đăng nhập AUTH PLAIN, hoặc AUTH LOGIN khi máy chủ chỉ có LOGIN — Microsoft 365 và Outlook chỉ có `LOGIN XOAUTH2` (dò 12 nhà cung cấp thật, `backend/GATES.md`), OAuth chưa hỗ trợ). Mail bật: thêm email chưa có tài khoản vào project/workspace/org → `202 {invitation}`, gửi link `/invite#<token>` (fragment — token không bao giờ tới server trong URL hay log), token dùng một lần, lưu HMAC, hạn 7 ngày, một lời mời mở cho mỗi (email, node); gửi mail thất bại → lời mời bị thu hồi, `502 MAIL_FAILED`. Nhận lời mời: đặt mật khẩu → tài khoản tạo ở trạng thái đã verify, gán role, đăng nhập; email đã có tài khoản thì chỉ gán role và bảo đăng nhập (link không chiếm được tài khoản). Token sai tính vào giới hạn đăng nhập theo IP. Luật owner giữ nguyên (mời owner chỉ owner làm được). Danh sách lời mời đang chờ + rút lại trên trang Members; audit `invitation.create/revoke/accept` (migration 0020) | `internal/platform/mail/`, `internal/authz/invitations.go`, `invite_http.go`, `cmd/api/invitations.go`, `invitations_test.go`, `frontend/src/features/auth/InvitePage.vue` |
 | Quên mật khẩu | §11.2 | ✅ **28-09**: cùng công tắc `MAIL=smtp` (bootstrap `passwordReset`). `POST /v1/session/password/forgot` luôn trả cùng `202` cho email có hay không có tài khoản; mail gửi nền để thời gian trả lời cũng không lộ; mỗi yêu cầu (dù email có tồn tại) tính vào 5 lần/15 phút theo email và theo IP. Link `/reset#<token>`: dùng một lần, 30 phút, yêu cầu mới thay link cũ, lưu HMAC. `POST …/reset` đặt mật khẩu, đánh dấu email đã verify, thu hồi mọi phiên, mở khóa đếm sai mật khẩu, audit `password.reset` (migration 0021); không tự đăng nhập — MFA vẫn hỏi lần sau | `internal/authz/passwordreset.go`, `reset_http.go`, `cmd/api/invitations_test.go` (`TestPasswordReset`), `frontend/src/features/auth/PasswordPage.vue` |
 | Gate kỹ thuật | §14 | T0 T1 T3 T4 ✅ · T2 một phần · T5 một phần — cột "Trạng thái" §14.1 | `backend/GATES.md` |
 | Gate sản phẩm | §4.5, §5.8 | Không đổi: Gate-0 **26-10-2026**. Code không được nhắc tới ở đó (QĐ-11 #2) | §5.8 |
@@ -144,13 +156,23 @@ Một chỗ trả lời "plan tới đâu rồi". Con số và lệnh tái lập
 | Khối §4.9.2 | Trạng thái 21-09 | Bằng chứng |
 |---|---|---|
 | TestCase / Suite / Plan CRUD | ✅ backend: `internal/testmgmt` (migration 0013), 25 route dashboard + 1 route CI, hợp đồng trong `openapi.yaml` (53 operation; 56 từ 27-09 với 3 route member); ✅ UI: `frontend/src/features/testmgmt/` — 4 màn hình chính + 3 màn chi tiết, live-check bước 13 chạy trên api thật | `backend/README.md`, `frontend/PLAN.md` |
-| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối) + UI một nút mỗi verdict, ghi chú; ✅ **evidence 22-09**: `manual_evidence` vào enum §8.4 (migration 0014, N64), upload multipart qua api `POST …/executions/{id}/evidence` (cap 20 MB, sniff nội dung, plan closed → 409), đọc lại qua `GET …/artifacts/{id}/content`; UI: kẹp giấy trên hàng đã có verdict, ảnh hiện thumbnail, file khác là link; live-check bước 14 upload thật và kiểm thumbnail decode | `internal/artifact` (`PutEvidence`), `cmd/api/testmgmt.go`, `frontend/…/PlanDetailPage.vue` |
+| Manual execution + evidence | ✅ execution (append-only, verdict mới nhất theo case, plan closed từ chối) + UI một nút mỗi verdict, ghi chú; ✅ **evidence 22-09**: `manual_evidence` vào enum §8.4 (migration 0014, N64), upload multipart qua api `POST …/executions/{id}/evidence` (cap 20 MB, sniff nội dung, plan closed → 409), đọc lại qua `GET …/artifacts/{id}/content`; UI: kẹp giấy trên hàng đã có verdict, ảnh hiện thumbnail, file khác là link; live-check bước 14 upload thật và kiểm thumbnail decode | `internal/artifact` (`PutEvidence`), `cmd/api/testmgmt_plans.go`, `frontend/…/PlanDetailPage.vue` |
 | Automation mapping `TestCaseAutomationLink` | ✅ trỏ `TestIdentity.id`, kiểm qua contract của identity: khác project → 404, merged/retired → 409; case thành `automated` ở link đầu | test module + `cmd/api/api_test.go` |
 | Requirement mapping v0 + coverage | ✅ `requirement_coverage`, `coveredBy` trên requirement, p0 coverage tính cho gate | cùng trên |
-| Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; ✅ **JUnit backfill 28-09 (QĐ-13)**: token + dashboard, một file = một run qua pipeline reporter, idempotent, Surefire flaky/rerun thành attempt; UI nút "Import JUnit" trên trang Runs cho maintainer+; live-check CI upload thật | `internal/testmgmt/csv.go`, `internal/ingest/junit.go` |
+| Importer CSV/Excel | ✅ CSV upsert theo key/tiêu đề, tạo suite + requirement lạ, báo lỗi theo dòng; ✅ **JUnit backfill 28-09 (QĐ-13)**: token + dashboard, một file = một run qua pipeline reporter, idempotent, Surefire flaky/rerun thành attempt; 01-11 đọc được JUnit của test runner Node; UI nút "Import JUnit" trên trang Runs cho maintainer+; live-check CI upload thật | `internal/testmgmt/csv.go`, `internal/ingest/junit.go` |
 | Importer TestRail | — đúng luật §6.8.5: chỉ khi có khách nêu tên | |
 | Release + quality gate + API cho CI | ✅ 5 rule khai báo, mức riêng từng rule, verdict máy đọc, override ghi tên, `GET /v1/releases/{id}/gate` cho token `project:read`; ngưỡng 3 % là `[ASSUMPTION]` trong `testmgmt.DefaultPolicy`. UI: trang release hiện 5 rule (mức, áp dụng, chi tiết), nút Evaluate, quyết định Approve/Block/Ship kèm ghi chú, cảnh báo override có tên người, snippet curl cho CI | `internal/testmgmt/gate.go`, `frontend/…/ReleaseDetailPage.vue` |
 | ROI dashboard | ✅ **28-09 (QĐ-13)**: màn hình "Return on triage" theo tháng; coverage + untriaged đứng đầu (quy tắc 1); chỉ giờ, tiền chỉ từ đơn giá người xem gõ, không lưu/gửi (quy tắc 2); không có baseline đo được → "Not enough data" (quy tắc 3). Baseline §5.4 nhập tay, append-only, nhãn retrospective/prospective + người nhập (migration 0022). live-check CI: màn hình trống → maintainer nhập baseline → ra giờ | `internal/testmgmt/roi.go`, `query.ROIFacts` |
+| Environment có địa chỉ site + chọn trên plan (QĐ-14 #1) | ✅ **23-10**: `environments.base_url` (migration 0036), `GET/POST/PATCH …/environments` cho member trở lên, plan tạo/đổi environment (closed → 409, audit `plan.environment`, migration 0037), plan trả `environment` kèm địa chỉ; UI: chọn hoặc thêm environment ngay trong form plan, link mở site trên trang plan | `cmd/api/environments_test.go`, tenant walk |
+| URL check (QĐ-14 #2) | ✅ **23-10**: module `urlcheck` (migration 0038, queue `urlcheck.run`, 5 chờ/project, giữ 90 ngày, purge theo project) + service `checker/` (Playwright 1.63 Chromium, axe-core 4.14) sau proxy guard SSRF, network `checknet`; 4 route; UI danh sách + báo cáo + ảnh desktop/điện thoại; `URLCHECK=off` mặc định | `internal/urlcheck`, `cmd/api/urlchecks_test.go`, `checker/test` (Chromium thật, chặn loopback/link-local/private) |
+| Reporter tải từ server + hướng dẫn tester (QĐ-14 #3–#4) | ✅ **23-10**: `atp.sh up`/`reporter` đóng gói tarball vào `backend/deploy/downloads`, Caddy `/downloads/`; trang CI tokens in lệnh `npm install` từ chính server; trang "How to test" + khối "Connect a pipeline" | `reporter/playwright/scripts/pack-for-server.mjs`, `frontend/tests/environments-url-checks.test.ts` |
+| Start testing + chạy từng case (QĐ-15 #1, #2, #5) | ✅ **24-10**: `test_plans.test_type` (0039); trang Start testing (10 loại, environment, case từ thư viện/bộ mẫu/AI, chống trùng tiêu đề), màn hình chạy từng case (mở site, tiến độ, ghi theo bước, bằng chứng, URL check) | `cmd/api/ai_test.go`, `frontend/tests/start-testing.test.ts`, chạy thật bằng Playwright |
+| AI soạn case + AI settings (QĐ-15 #3, #4) | ✅ **24-10**: `internal/aisuggest` (0040), `internal/platform/llm` (anthropic-sdk-go v1.84.0, structured output, fallback), `internal/platform/secretbox`, checker `/outline`, audit 0041; model chọn trên UI, key riêng hoặc key server (`LLM_API_KEY`) | `internal/aisuggest`, `internal/platform/llm` (server Anthropic giả kiểm request), `checker/test` |
+| Auto test — case chạy được, tài khoản test, AI soạn và sửa bước (QĐ-16 #1–#6) | ✅ **25-10**: `internal/autotest` (0042: `environment_accounts`, `auto_specs`, `auto_drafts`, `auto_runs`, `auto_run_cases`), checker `/sessions` + `steps.mjs` (bước diễn giải bằng locator Playwright, giữ trình duyệt trong site), `llm.JSON` chuyển sang streaming; kết quả vào plan (execution + ảnh) và test run (JUnit import, link case); trang Auto test, Auto run | `internal/autotest`, `cmd/api/autotest_test.go`, `cmd/worker/autotest_test.go`, `checker/test/steps.test.mjs`, `frontend/tests/autotest.test.ts` |
+| Quét site + chạy từ CI (QĐ-16 #7, #8) | ✅ **25-10**: `site_scans` (0043, URL check theo tầng, có đăng nhập), quyền token `project:autorun`, `POST/GET /v1/auto-runs`, file Playwright tải về | `internal/urlcheck` (TestSiteScan), tenant walk |
+| Tự đăng ký có duyệt role (QĐ-17, ADR-001 phương án A `join_org`) | ✅ **26-10** (PR #9): hàng chờ `access_requests` (0035), `GET …/access-requests` + `POST …/{id}/decide` ở ba tầng sau `member.manage`, audit `access_request.*`; ✅ **29-10** (N65): `POST /v1/session/signup` luôn `202`, link `/signup#<token>` 24 giờ (`signup_requests`, 0044), `POST /v1/session/signup/complete` tạo tài khoản đã verify + yêu cầu; `SIGNUP=on` cần `MAIL=smtp`; ✅ **30-10**: trang `/signup` (xin + đặt mật khẩu từ link), link "Ask to join" trên trang đăng nhập, mục "Requests to join" trên Members; luật owner áp cả cho role người xin. Lát `create_org` chưa làm | `internal/authz/signup.go`, `cmd/api/access_requests.go`, `cmd/api/signup_test.go`, tenant walk |
+| Key của mọi nhà cung cấp AI (QĐ-18) | ✅ **31-10**: `platform/llm` có bảng 8 provider (Anthropic qua SDK; OpenAI, Google, xAI, Mistral, DeepSeek, Groq, OpenRouter qua Chat Completions trên `platform/outbound` — thêm `Send`) + endpoint `openai-compatible` của người vận hành (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`); câu trả lời kiểm theo schema ở `llm.Validate`; kiểm key bằng danh sách model (không tốn token), lùi về completion nhỏ nhất khi không đọc được; `ErrQuota` → `AI_KEY_NO_CREDIT`; key dán nhầm provider bị từ chối; `ai_settings.provider` (0045), `case_suggestions.provider` (0045), `auto_drafts.provider` (0046); trang AI settings chọn provider, tự nhận provider theo phần đầu key, gõ model id | `internal/platform/llm` (chat_test, providers_test, schema_test; `LLM_LIVE_HOSTS=1`: 8 host thật trả lời key giả là `ErrKey`), `internal/aisuggest` (TestProviders), `cmd/api/ai_test.go` (TestAISettingsAnyProvider), `frontend/tests/start-testing.test.ts`, chạy thật bằng Playwright |
+| Bước kiểm tra, ma trận trình duyệt, load test, script trong sandbox (QĐ-19 tầng 1–4) | ✅ **04–07-11** — giao diện đã có ba check step và note, bộ chọn Chromium/Firefox/WebKit × desktop/phone/tablet, ownership + load test, và upload/list/detail cho Playwright/k6. Tầng 4 nhận `.tar.gz`, chạy mỗi lần trong container `internal` riêng qua forwarder tới đúng host; không capability, rootfs chỉ đọc, uid 10001, có trần RAM/CPU/PID/thời gian; k6 cần ownership. Kết quả, timeout và log tail hiện trên Script runs, báo cáo JUnit liên kết Test runs; checkpoint 0050 cho phép retry import mà không chạy script lần hai. `SANDBOX=off` ẩn upload nhưng giữ kết quả cũ. | `checker/test/inspect.test.mjs`, `checker/test/engines.test.mjs`, `checker/test/load.test.mjs`; `internal/autotest`; `internal/platform/sandbox`; `cmd/sandboxd`; `cmd/api`; `sandbox/test/e2e.sh`; frontend unit + fixture route/workflow checks; tenant walk |
 
 Cross-tenant walk (§14.3) nay phân loại 70 route và đi 55 route tài nguyên (27-09: 2 route OAuth miễn vì là điều hướng ẩn danh, có test riêng; route member ba tầng, fixture `userId`/`workspaceId`/`organizationId`; route MFA và `member-scopes` miễn vì chỉ theo người dùng, có test riêng) với 3 principal lạ mỗi route; `test/arch` xác nhận `testmgmt` chỉ import `identity` + `platform/*` (gate đọc Intelligence Plane qua interface `Evidence` do `cmd/api` nối vào `query`).
 
@@ -204,6 +226,8 @@ Wedge 12 tháng đầu: **"Bộ nhớ dài hạn cho bộ test E2E của bạn"*
 
 ### 1.4 QĐ-4 — AI Triage v0 vào Phase 1.5 ✅ CHỐT
 
+> **Thiết kế triển khai Proposed (11-11-2026):** [`docs/ai-failure-investigation.md`](docs/ai-failure-investigation.md) khóa state machine, evidence tools, schema, API, quyền, ngân sách và evaluation gate. Thiết kế giữ `triage` là module sở hữu `AiHypothesis`; chưa đánh dấu đã build.
+
 Phạm vi v0 (cố ý hẹp):
 
 - **Input:** TestResult fail + error message + stack trace + diff so với lần pass gần nhất + lịch sử flaky của `stableTestId`.
@@ -225,6 +249,165 @@ Phạm vi v0 (cố ý hẹp):
 - Fail trùng fingerprint trong cùng ngày không chạy lại hypothesis; LLM có trần cứng §10.3.
 
 **Lý do:** 0,5–1 người-tháng một khi schema chuẩn; đây là lớp tăng tốc triage, không phải điều kiện tồn tại của Report Center.
+
+#### 1.4.1 Thiết kế AI Failure Investigation Agent — Proposed 11-11-2026
+
+> Bản chi tiết và các DTO mẫu: [`docs/ai-failure-investigation.md`](docs/ai-failure-investigation.md). Mục này là contract chuẩn trong spec; trạng thái **Proposed**, chưa được tính là đã build trong §0.5.
+
+**Quyết định module:** workflow investigation nằm trong `internal/triage`, không tạo domain `investigation` song song. `triage` đã sở hữu `TriageEvent` và `AiHypothesis` (§6.9.5); chia workflow sang module khác sẽ tạo hai chủ sở hữu cho cùng một nghiệp vụ. Implementation được phép tách thành các file/package `internal` bên trong `triage`, nhưng chỉ phơi qua `triage.Service`.
+
+**Luồng người dùng:** member mở một result fail → bấm **Investigate with AI** → API authorize project và enqueue → worker thu thập evidence bằng tool chỉ đọc → model trả đúng một hypothesis có cấu trúc → UI hiển thị để người duyệt Accept/Reject. Accept/Reject phải sinh `HYPOTHESIS_ACCEPTED`/`HYPOTHESIS_REJECTED`; `TriageEvent` tiếp tục là nguồn sự thật duy nhất của TTRC và metric AI. Agent không tự đóng issue, rerun, sửa test, chạy script, sửa source hoặc tạo PR.
+
+**State machine:**
+
+```text
+queued -> collecting -> investigating -> done
+   |          |               |
+   +----------+---------------+-> error
+```
+
+Queue key là investigation id. Worker khóa row và bỏ qua row terminal để delivery idempotent. Queue retry tiếp tục từ step đã commit cuối, không gọi lại tool đã xong và không tạo hypothesis thứ hai.
+
+Mỗi lượt model phải trả JSON khớp đúng một trong hai action:
+
+```json
+{"action":"call_tool","tool":"stable_history","arguments":{}}
+```
+
+hoặc:
+
+```json
+{
+  "action":"finish",
+  "hypothesis": {
+    "category":"flaky_timing",
+    "confidence":0.78,
+    "evidence":[{"source":"history","fact":"Identity này pass 18/20 run gần nhất"}],
+    "suggestedAction":"Kiểm tra readiness condition và bỏ fixed wait."
+  }
+}
+```
+
+Server validate taxonomy, confidence, số evidence và source id. Mọi fact phải trỏ tới observation mà tool đã trả; UI không hiển thị hidden reasoning, raw prompt hoặc model HTML.
+
+**Ngân sách cứng MVP:**
+
+| Hạng mục | Trần |
+|---|---:|
+| Model turn | 4 |
+| Tool call | 6 |
+| Wall time | 3 phút |
+| Tổng observation JSON | 64 KiB |
+| Evidence trong kết luận | 10 |
+| `suggestedAction` | 1.000 byte |
+| Investigation/org/ngày | Team 200, Free 20 |
+
+**Tool allowlist:** mọi tool bị bind vào `projectId` và `testResultId` đã authorize; model không được truyền project id, SQL, file path, host hoặc URL.
+
+| Tool | Evidence trả về | MVP |
+|---|---|---|
+| `failure_context` | Result/run, attempts, error + stack excerpt đã giới hạn, artifact metadata | Luôn chạy đầu tiên |
+| `stable_history` | Tối đa 20 result gần nhất của cùng stable identity: status, duration, branch, commit, environment | Có |
+| `compare_last_pass` | So sánh với lần pass gần nhất: error signature, duration, branch/commit, attempt count | Có |
+| `triage_history` | Tối đa 20 quyết định accept/reject trước của cùng stable identity | Có |
+| `text_artifact` | Tối đa 16 KiB log/text attachment đã verify và redact | Có |
+| `github_change_context` | Changed files + diff excerpt trong commit range bị giới hạn | P3, tắt ở MVP |
+
+MVP không gửi screenshot/video/trace/HAR body, secret, cookie, authorization header, environment variable hoặc attachment tùy ý sang provider. `text_artifact` chỉ nhận artifact id đã xuất hiện từ `failure_context`, cùng project/result attempt, kind `log` hoặc text `attachment`; redact secret trước khi truncate và trước khi lưu.
+
+**Contract phụ thuộc:** `triage` chỉ ghi bảng của nó và khai báo interface phía người dùng:
+
+```go
+type EvidenceReader interface {
+    FailureContext(ctx context.Context, projectID, resultID string) (FailureContext, error)
+    StableHistory(ctx context.Context, projectID, stableTestID string, limit int) ([]HistoryItem, error)
+    CompareLastPass(ctx context.Context, projectID, resultID string) (Comparison, error)
+    TriageHistory(ctx context.Context, projectID, stableTestID string, limit int) ([]Decision, error)
+    TextArtifact(ctx context.Context, projectID, resultID, artifactID string, maxBytes int64) (TextEvidence, error)
+}
+
+type CredentialSource interface {
+    Credentials(ctx context.Context, orgID string) (llm.Account, string, bool, error)
+}
+
+type InvestigatorLLM interface {
+    JSON(ctx context.Context, req llm.Request) (llm.Result, error)
+}
+```
+
+Cross-domain read nằm trong `query`; artifact byte vẫn đọc qua `artifact`/object store. Adapter phối hợp hai phía nằm ở `cmd/api`/`cmd/worker`. `aisuggest.Service.Credentials` cấp key của organization hoặc server mà không lộ sealed-key storage cho `triage`.
+
+`triage.Service` thêm `RequestInvestigation`, `GetInvestigation`, `ListInvestigations`, `DecideHypothesis` và `InvestigationWorker`.
+
+**Schema migration dự kiến `0051_ai_investigations.sql`, vẫn do `triage` sở hữu:**
+
+```sql
+CREATE TABLE ai_investigations (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id      uuid NOT NULL,
+    org_id          uuid NOT NULL,
+    test_result_id  uuid NOT NULL,
+    stable_test_id  uuid,
+    dedupe_key      text NOT NULL CHECK (length(dedupe_key) = 64),
+    requested_day   date NOT NULL,
+    status          text NOT NULL DEFAULT 'queued'
+                    CHECK (status IN ('queued','collecting','investigating','done','error')),
+    requested_by    text NOT NULL CHECK (length(requested_by) BETWEEN 1 AND 254),
+    provider        text NOT NULL DEFAULT '',
+    model           text NOT NULL DEFAULT '',
+    key_source      text NOT NULL DEFAULT '',
+    prompt_version  text NOT NULL DEFAULT 'investigation-v1',
+    turn_count      integer NOT NULL DEFAULT 0 CHECK (turn_count BETWEEN 0 AND 4),
+    tool_count      integer NOT NULL DEFAULT 0 CHECK (tool_count BETWEEN 0 AND 6),
+    input_tokens    integer NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens   integer NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    hypothesis_id   uuid,
+    error           text NOT NULL DEFAULT '' CHECK (octet_length(error) <= 1000),
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    started_at      timestamptz,
+    finished_at     timestamptz,
+    UNIQUE (project_id, dedupe_key, requested_day)
+);
+
+CREATE INDEX ai_investigations_result
+    ON ai_investigations (project_id, test_result_id, created_at DESC);
+CREATE INDEX ai_investigations_org_day
+    ON ai_investigations (org_id, requested_day);
+
+CREATE TABLE ai_investigation_steps (
+    investigation_id uuid NOT NULL,
+    sequence         integer NOT NULL CHECK (sequence BETWEEN 1 AND 12),
+    kind             text NOT NULL CHECK (kind IN ('tool','model')),
+    tool             text NOT NULL DEFAULT '',
+    request          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    observation      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    input_tokens     integer NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens    integer NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (investigation_id, sequence)
+);
+```
+
+`ai_hypotheses` thêm nullable `investigation_id` với unique index. Transaction cuối cùng phải đồng thời insert hypothesis, append `HYPOTHESIS_PROPOSED` và chuyển investigation sang `done`. Không tạo cross-module FK. `request`/`observation` chỉ lưu argument đã validate và fact đã redact/giới hạn; cấm API key, raw prompt, hidden reasoning và binary artifact. Purge theo thứ tự steps → investigations/hypotheses → triage events.
+
+**HTTP contract:**
+
+| Method + path | Quyền | Hành vi |
+|---|---|---|
+| `POST /v1/projects/{projectId}/results/{resultId}/investigations` | `triage` | `202` tạo queued; `200` trả investigation cùng dedupe key trong ngày |
+| `GET /v1/projects/{projectId}/results/{resultId}/investigations?limit=&cursor=` | `view` | Danh sách mới nhất trước, cursor paging |
+| `GET /v1/projects/{projectId}/results/{resultId}/investigations/{id}` | `view` | Status, public activity label, usage, error, hypothesis; không trả prompt/observation nội bộ |
+| `POST /v1/projects/{projectId}/results/{resultId}/hypotheses/{id}/decision` | `triage` | `{decision: accept|reject, category?, note?}`; một terminal decision, retry idempotent |
+
+Error code ổn định: `AI_NOT_CONFIGURED`, `AI_DAILY_LIMIT`, `RESULT_NOT_FAILED`, `INVESTIGATION_BUSY`, `HYPOTHESIS_DECIDED`; result khác project luôn trả `404`. Accept mặc định dùng category của hypothesis; override vẫn phải thuộc §8.7 và được ghi vào event payload.
+
+**UI:** thêm card **AI investigation** trong `ResultDetailPage.vue`, sau attempts và trước triage timeline. Chỉ hiện nút cho `failed|timed_out|interrupted` khi AI có key và người dùng có quyền `triage`; kết quả cũ vẫn đọc được nếu provider bị tắt. Poll queued/running theo pattern Script Runs. Hiển thị category, confidence, evidence có source và suggested action; Accept cho override category, Reject cho note ngắn. Mọi text render dạng plain text. Fixture bắt buộc: queued→done, low confidence, provider error, daily limit, không có stable identity, accept, reject và viewer không có quyền triage.
+
+**Security/operations:** worker xác minh lại project/result/org thay vì tin payload; mọi SQL read có `project_id`; unknown tool không chạy; provider host vẫn bị khóa trong `platform/llm`; daily limit giữ bằng advisory transaction lock; log không chứa evidence/prompt/key. Metric gồm request, terminal status, latency, tool count, token, provider error, acceptance, decision và coverage, không gắn label chứa project/result/model output/error text.
+
+**Evaluation gate:** trước khi bật mặc định phải có 20–30 case đã redact với category + evidence ground truth. Đo category accuracy/macro-F1, evidence support rate, unsupported-claim rate, tool success/unnecessary-call rate, p50/p95 latency, token và cost. Sau release áp đúng guardrail QĐ-4: chưa đủ 30 quyết định/14 ngày thì `insufficient_data`; acceptance < 40% với decision rate ≥ 60% trong hai cửa sổ liên tiếp thì chuyển opt-in.
+
+**Lát triển khai theo thứ tự:** (1) contract + migration + purge/OpenAPI/tenant tests; (2) deterministic evidence collector + redact + daily dedupe, chưa gọi LLM; (3) bounded agent worker + retry + terminal transaction; (4) API + UI + permission/polling states; (5) labelled evaluation harness và release decision; (6) GitHub read-only context sau MVP, qua review privacy/quyền riêng.
 
 ### 1.5 QĐ-5 — Không build managed agent trong 12 tháng đầu ✅ CHỐT
 
@@ -386,7 +569,150 @@ Biên triển khai     Caddy (TLS, phục vụ `frontend/dist`, proxy `/v1`) tr�
 
 **Hệ quả tới văn bản:** §6.8.3, §6.8.5, §10.6, §0.5, QĐ-12 #3/#4 (chú thích lật).
 
-### 1.14 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
+### 1.14 QĐ-14 — Tester dùng được mà không cần source: domain trên plan, URL check, reporter tải từ server, hướng dẫn trong app ✅ CHỐT *(chủ dự án quyết 23-10-2026)*
+
+**Bối cảnh:** chủ dự án: "t muốn cho tester dùng mà bắt phải có source mới test được thì đâu có được". Trước đó: plan không ghi được site đang test; reporter chỉ cài được từ thư mục `reporter/playwright` của repo; không có cách nào nhập một địa chỉ để hệ thống tự kiểm tra; tester không có chỗ đọc quy trình. Chủ dự án chọn cả bốn mục qua câu hỏi.
+
+**Quyết định:**
+
+1. **Environment mang địa chỉ site** (`environments.base_url`, migration 0036, tenancy). Member trở lên thêm/sửa environment (`testmgmt.write`) — người viết plan là người biết site. Key không đổi (lịch sử run gắn theo key; reporter gửi cùng key thì báo vào đúng environment). Plan chọn environment khi tạo hoặc sau đó (plan đóng thì giữ nguyên, 409), mọi thay đổi audit `plan.environment` (migration 0037). Plan trỏ environment của project khác → 400.
+2. **URL check** (module `urlcheck`, migration 0038; service `checker/`): tester nhập địa chỉ hoặc chọn environment, worker gọi checker — Chromium headless sau proxy có guard — trả báo cáo 9 mục (tải trang, chứng chỉ HTTPS, lỗi JavaScript, request hỏng, link hỏng, accessibility axe-core WCAG A/AA, tốc độ LCP/CLS, cơ bản title/lang/description/h1, vừa màn hình điện thoại) và hai ảnh chụp. **Không phải test suite**: một trang, một lần nhìn đầu; kết quả không vào Run, không vào gate.
+3. **Reporter phát từ chính server:** `server/atp.sh up` (và `reporter`) đóng gói tarball vào `backend/deploy/downloads`, Caddy phục vụ `/downloads/` công khai (không chứa bí mật); trang CI tokens đọc `index.json` và in lệnh `npm install <server>/downloads/<file>`. Tên file mang version + sha1 vì lockfile ghim integrity theo URL.
+4. **Hướng dẫn trong app:** trang "How to test" (quy trình thủ công từng bước, có link tới màn hình) và khối "Connect a pipeline" trên trang CI tokens.
+
+**Điều kiện ràng buộc:**
+
+1. **SSRF (§11.6 API7) là điều kiện của #2, không phải tối ưu.** Mọi kết nối của trình duyệt đi qua proxy riêng mỗi lần check: phân giải tên một lần, xét **mọi** địa chỉ trả về, kết nối đúng địa chỉ đã xét (không rebinding). Loopback, link-local (metadata cloud 169.254.169.254), multicast, reserved **không bao giờ** mở; dải private chỉ khi `URLCHECK_ALLOW_PRIVATE=on`. Checker nằm trên network Docker riêng (`checknet`, chỉ có worker) nên kể cả khi bật private cũng không thấy Postgres/api/Prometheus. WebRTC UDP và QUIC tắt; service worker chặn; không tải file. Request bị từ chối hiện ở mục "Not opened", không tính là lỗi trang.
+2. **Tắt mặc định** (`URLCHECK=off`); bật thì `atp.sh` mới build/chạy service `checker` (compose profile `urlcheck`, image ~1 GB). Tắt rồi vẫn đọc được check cũ; check giữ 90 ngày, purge theo project.
+3. **Địa chỉ checker là cấu hình** (`URLCHECK_URL`, gọi qua `platform/outbound`); địa chỉ người dùng nhập chỉ là dữ liệu trong body, api/worker không bao giờ tự fetch nó.
+4. **Giới hạn lạm dụng:** tối đa 5 check chờ mỗi project (429), checker chạy `CHECKER_CONCURRENCY` (mặc định 2) cùng lúc, mỗi check ≤ 150 s; ảnh chỉ lưu khi đúng JPEG và trả về với CSP `sandbox`; text trong báo cáo là dữ liệu không tin cậy, UI chỉ hiển thị dạng text.
+5. **Không phải bằng chứng ở gate nào** — QĐ-11 #2 áp nguyên văn; release gate §6.8.4 không đọc URL check.
+
+**Hệ quả tới văn bản:** §0.5 (bảng P2), §6.8 (environment trên plan), §11.6 API7 (đường outbound thứ hai: checker), `backend/deploy/openapi.yaml` (+7 operation), `backend/deploy/.env.example`, `server/README.md`.
+
+### 1.15 QĐ-15 — Luồng "Start testing", case gợi ý (thư viện, bộ mẫu, AI) và chạy từng case ✅ CHỐT *(chủ dự án quyết 23–24-10-2026)*
+
+**Bối cảnh:** chủ dự án: "Flow sẽ là chọn project xong -> chọn loại test -> lên test plan (tự lên) hoặc gợi ý -> run test (có domain để vào test luôn)". Hỏi hai điểm, chủ dự án chọn: gợi ý từ **cả ba nguồn** (case có sẵn, bộ mẫu, AI sinh từ website) với "mục thêm api key của khách hàng hoặc của tôi"; chạy test **cả hai kiểu** (màn hình chạy từng case + giữ trang plan). Sau đó: "phần lưu api key có chọn model sử dụng nữa", và model "tùy chọn cho người nhập", không cố định trong `.env`.
+
+**Quyết định:**
+
+1. **Loại test** = 10 giá trị của taxonomy case (migration 0033): smoke, regression, e2e + 7 purpose. Plan ghi loại (`test_plans.test_type`, migration 0039).
+2. **Start testing** (`/p/:project/start`): loại → environment (site) → case từ (a) thư viện lọc theo loại, (b) bộ mẫu viết sẵn cho từng loại, (c) AI soạn → tạo plan → mở màn hình chạy. Case mẫu/AI chỉ thành test case khi được tích và khi tạo plan, gắn taxonomy của loại; bản nháp trùng tiêu đề với thư viện không được tích sẵn.
+3. **AI soạn case** (module `aisuggest`, migration 0040; `platform/llm` dùng SDK Go chính thức `anthropic-sdk-go`): worker đọc outline trang qua checker (`POST /outline`, cùng guard SSRF, chỉ khi URLCHECK=on), gửi loại test + mô tả của tester + outline tới Messages API với structured output (`output_config.format`), effort medium, thinking mặc định của model, refusal fallback `"default"` cho Opus 5.5/Sonnet 5.5/Fable 5.1.
+4. **Key và model:** **model luôn chọn trên giao diện** theo organization (Team → organization → AI settings; mặc định `claude-opus-5-5`; danh sách cho phép Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1). **Key** do organization chọn: **key riêng** (niêm phong AES-GCM bằng khóa dẫn từ `TOKEN_PEPPER`, chỉ đọc lại được 4 ký tự cuối) hoặc **key của server** (`LLM_API_KEY` trong `.env` — key của người vận hành, bí mật cấp server, không có màn hình super-admin nên không nhập trên UI). Không có `LLM_MODEL`. Key sắp trả tiền được kiểm với Anthropic (Models API, không tốn token) trước khi lưu; chọn key server thì key riêng bị xóa. *(31-10, QĐ-18: provider cũng chọn trên giao diện — key riêng của bất kỳ provider nào trong danh sách; key server chỉ dùng cho `LLM_PROVIDER`; `LLM_MODEL` có lại nhưng chỉ là model key server dùng khi organization chưa chọn.)*
+5. **Chạy test:** `/p/:project/plans/:plan/run` — nút mở site (địa chỉ environment) ở tab mới, tiến độ, từng case với bước + kết quả mong đợi, ghi theo bước, đính kèm bằng chứng, tự sang case chưa chạy; loại có phần tự động (smoke, regression, performance, security, accessibility, compatibility) có nút URL check. Trang plan có nút Run và nhãn loại.
+
+**Điều kiện ràng buộc:**
+
+1. **Nội dung trang là dữ liệu không tin cậy:** system prompt nói rõ; output bị ép schema, cắt độ dài; UI chỉ hiện dạng text; tester duyệt trước khi thành case. Không có tool/hành động nào do model kích hoạt.
+2. **Dữ liệu gửi ra ngoài** chỉ khi tester bấm "Draft cases": loại test, mô tả, outline trang (nếu đọc được). Trang AI settings ghi rõ.
+3. **Giới hạn chi phí:** 2 yêu cầu chờ và 30/ngày mỗi project; tối đa 15 case/lần; `max_tokens` 16000; job retry 3 lần, key/model sai → báo lỗi ngay.
+4. **Chỉ `internal/platform/llm` được import SDK Anthropic** (test kiến trúc mới); quản lý key: org owner/admin (`member.manage` cấp org), audit `organization.ai_settings` (migration 0041) không bao giờ chứa key.
+5. **Không phải bằng chứng ở gate nào** — QĐ-11 #2.
+
+**Hệ quả tới văn bản:** §0.5 (bảng P2), §6.8 (plan có loại test), §11.6 API7/API10 (outbound thứ ba: Anthropic qua `platform/llm`), `openapi.yaml` (+6 operation), `.env.example` (`LLM_API_KEY`, `LLM_BASE_URL`).
+
+### 1.16 QĐ-16 — Auto test: case server tự chạy, AI soạn và sửa bước, quét site, chạy từ CI ✅ CHỐT *(chủ dự án quyết 24–25-10-2026)*
+
+**Bối cảnh:** sau QĐ-15 hệ thống mới tự kiểm một trang (URL check) và tự soạn case; bước của case vẫn do tester bấm tay. Chủ dự án chọn làm cả ba hướng — quét cả site, AI tự chạy case, sinh script chạy lại mỗi lần deploy — và mô tả: "testcase này test ở đâu thì cần người dùng nhập ví dụ test chat thì domain/message?to=… thì hệ thống tự sinh ra các testcase phù hợp và tự thực hiện test và có thể cho người dùng custom thêm testcase với input field". Hỏi bốn điểm, chủ dự án chọn: **đăng nhập bằng tài khoản test theo environment**; **cho chạy trên mọi environment** (không cần bật từng cái); **kết quả vào cả plan lẫn Test runs**; **làm tất cả**.
+
+**Quyết định:**
+
+1. **Case chạy được** = case testmgmt + *spec* (module `autotest`, migration 0042): nơi bắt đầu (`target`, đường dẫn trên site của environment, có `{{biến}}` — ví dụ `/message?to={{nguoi_nhan}}`), tài khoản test (`account`), input (`{{tên}}` = giá trị; `{{random}}`, `{{timestamp}}` mới mỗi lần) và các **bước** từ bộ hành động cố định: `goto`, `click`, `fill`, `select`, `check`, `uncheck`, `press`, `hover`, `wait`, `expect_visible/hidden/text/url/value/title`; phần tử gọi theo role + tên (như `getByRole`), label, placeholder, text, test id, CSS. Tạo case + spec trong một transaction; lưu spec viết lại bước chữ, điều kiện trước và test data của case cho người đọc.
+2. **Bước là dữ liệu, không bao giờ là code:** checker diễn giải từng bước bằng locator của Playwright (`checker/src/steps.mjs`), server và checker đều kiểm hình dạng bước; trình duyệt chỉ đi trong site của environment (cùng tên miền đăng ký, cho đăng nhập ở host anh em), điều hướng ra ngoài bị chặn và bước đó fail; vẫn qua proxy SSRF của QĐ-14. File Playwright tải về do ATP dịch từ bước (mọi chuỗi là literal JSON), không do model viết.
+3. **Tài khoản test theo environment** (`environment_accounts`): mật khẩu niêm phong AES-GCM (khóa dẫn từ `TOKEN_PEPPER`, associated data = environment + key), không bao giờ trả về, **không bao giờ gửi cho model** — model chỉ thấy `{{username}}`/`{{password}}`. Bước đăng nhập do AI tìm từ trang đăng nhập (một phiên trình duyệt phải đăng nhập được bằng chúng mới giữ) hoặc tester viết; "đã đăng nhập" = không còn ô mật khẩu trên màn hình.
+4. **AI soạn case chạy được** (`auto_drafts`): worker mở `target` (đăng nhập trước nếu có tài khoản), đọc cây accessibility (`ariaSnapshot`) và gửi cho model của organization (key và model theo AI settings, QĐ-15) cùng loại test, mô tả và tên input; bước không chạy được bị bỏ. Bản nháp chỉ thành case khi tester giữ.
+5. **Chạy** (`auto_runs`, `auto_run_cases`): một job một case trong một phiên trình duyệt của checker (`/sessions`); mỗi bước một lượt gọi. Bước **không tìm thấy/không dùng được phần tử** có thể được AI **sửa** từ trang hiện tại (1–3 bước thay, chỉ hành động, không bao giờ là bước kiểm tra, không điều hướng); bước kiểm tra fail là kết quả của case, không bao giờ được sửa. Bản sửa được báo trên trang run, chỉ vào case khi tester bấm "Keep the repair".
+6. **Kết quả:** mỗi case thành một execution của plan "Auto test · <environment> · <giờ>" (bước theo bước, ảnh chụp cuối và chỗ fail làm bằng chứng); cả run thành một test run qua JUnit import (framework `atp-auto`, file `atp-auto/<case id>`), test được link vào case — release gate và flaky đọc như run CI.
+7. **Quét site** (module `urlcheck`, migration 0043): URL check trang đầu và các trang link tới cùng host, theo chiều rộng, tối đa 50 trang và 3 tầng link, có thể đăng nhập bằng tài khoản test; không bao giờ theo link đăng xuất/xóa/file.
+8. **Chạy từ CI:** token mới quyền `project:autorun` → `POST /v1/auto-runs {environment}` và `GET /v1/auto-runs/{id}`; đoạn script mẫu trên trang Auto test.
+
+**Điều kiện ràng buộc:**
+
+1. **Cần checker** (`URLCHECK=on`) cho chạy, soạn và quét; AI (soạn, sửa bước, tìm đăng nhập) cần key như QĐ-15. Không có AI, case tự viết vẫn chạy.
+2. **Hành động là thật** trên site (chủ dự án cho phép mọi environment): prompt dặn model tránh thanh toán, xóa dữ liệu không phải của case, liên hệ người thật trừ khi mô tả yêu cầu; giới hạn: 40 bước/case, 10 s/phần tử, 30 s/trang, 2 run đang chạy và 100 run/ngày mỗi project, 100 case/run, sửa bước ≤ 2/case và ≤ 20/run, soạn 2 chờ và 30/ngày, 20 tài khoản/environment, 1 quét đang chạy, checker tối đa `CHECKER_SESSIONS` (4) phiên.
+3. **Nội dung trang và output model là dữ liệu không tin cậy:** prompt nói rõ, output ép schema, bước kiểm lại ở server và checker, UI chỉ hiện dạng text, ảnh chụp chỉ lưu JPEG và phục vụ với CSP `sandbox`.
+4. **Quyền:** member trở lên (`testmgmt.write`) quản lý tài khoản test, case chạy được, chạy, quét; mọi thay đổi tài khoản audit `project.configure` (không chứa mật khẩu); viewer đọc. Token CI chỉ khởi động và đọc run của project mình.
+5. **Không phải bằng chứng ở gate nào** — QĐ-11 #2.
+
+**Hệ quả tới văn bản:** §0.5 (bảng P2), §6.8 (case có spec chạy được; run ghi vào plan và test run), §11.6 API7 (checker giờ còn chạy phiên trình duyệt; outbound vẫn chỉ qua `platform/outbound`), §11.4 (quyền token `project:autorun`), `openapi.yaml` (+22 operation), `.env.example` (`CHECKER_SESSIONS`).
+
+### 1.17 QĐ-17 — Tự đăng ký có duyệt role (`join_org`) ✅ CHỐT *(chủ dự án merge PR #9 ngày 26-10-2026, ADR-001 phương án A; sửa 29-10-2026: email phải được chứng minh trước, N65)*
+
+**Bối cảnh:** §11.2 cũ không cho tự đăng ký — tài khoản chỉ đến từ seed/`cmd/admin`, lời mời qua mail, hoặc OAuth vào tài khoản đã có. Nhu cầu: người ngoài tự đăng ký và **xin** role trên một node có sẵn; admin node đó duyệt, đổi role hoặc từ chối. `docs/adr-001-self-serve-signup.md` so ba phương án và chọn A (hàng chờ yêu cầu); PR #9 build lát `join_org`.
+
+**Quyết định:**
+
+1. **Công tắc** `SIGNUP=on|off`, mặc định off. Bật cần `MAIL=smtp` — thiếu thì api không khởi động.
+2. **Form** `POST /v1/session/signup`: email, node (tầng + id), role xin (phải sống ở đúng tầng, §11.3.1), ghi chú ≤ 1000 ký tự. Luôn `202` cùng nội dung dù email đã có tài khoản hay chưa, như quên mật khẩu: trước câu trả lời chỉ có kiểm hình dạng và giới hạn (5 lần/15 phút theo IP **và** theo email, mọi yêu cầu đều đếm); tra cứu, ghi hàng và gửi mail chạy sau.
+3. **Chứng minh địa chỉ trước khi có tài khoản:** email chưa có tài khoản nhận link `/signup#<token>` (một lần, 24 giờ, yêu cầu mới thay link cũ, lưu HMAC — `signup_requests`, migration 0044). Mở link + đặt mật khẩu (`POST /v1/session/signup/complete`) → tài khoản **đã verify**, yêu cầu vào hàng chờ của node (audit `access_request.create`), phiên mở nhưng không thấy gì cho tới khi được duyệt. Email đã có tài khoản thì không nhận gì; link không bao giờ chiếm một tài khoản đã có (`409 ACCOUNT_EXISTS` chỉ trả cho người đang cầm link).
+4. **Duyệt:** admin của node (`member.manage`) duyệt với role xin hoặc role khác hợp tầng, hoặc từ chối; audit `access_request.approve` / `access_request.deny`. Owner chỉ owner cấp (`OWNER_ONLY`) — kể cả khi `org_owner` là role người xin, không chỉ khi admin chọn role khác (30-10: bản đầu chỉ kiểm role chọn thay, nên org admin duyệt ra được owner).
+5. **Giao diện (30-10):** `/signup` — form "Ask to join" (node lấy từ link admin chia sẻ `/signup?project=<id>`, không bao giờ đề nghị role owner) và `/signup#<token>` để đặt mật khẩu; trang đăng nhập có "New here? Ask to join" khi bootstrap báo `signup`; màn hình Members có mục "Requests to join": link đăng ký để chép, yêu cầu kèm ghi chú, chọn role, Approve, Deny bấm hai lần. **Chưa làm:** lát `create_org` (tự tạo tổ chức) — ADR-001 để nó cho duyệt cấp nền tảng, cần ADR riêng.
+
+**Vì sao bước 3 là bắt buộc (N65):** bản đầu tạo tài khoản *đã verify* ngay lúc gửi form. "Email đã verify" là thứ Members (thêm theo email), lời mời vào tài khoản đã có và lần đăng nhập OAuth đầu tiên tin là chủ địa chỉ — nên ai cũng chiếm trước được địa chỉ của người khác rồi nhận role cấp cho người đó; `409 ACCOUNT_EXISTS` trên form còn cho dò email. Migration 0044 bỏ verify và thu hồi phiên các tài khoản tạo theo kiểu cũ chưa từng chứng minh hộp thư (chưa reset mật khẩu); chủ thật vào lại bằng "Quên mật khẩu".
+
+**Hệ quả tới văn bản:** §0.5, §11.2, `openapi.yaml` (+2 operation, bootstrap `signup`), `deploy/routes.txt`, `.env.example` (`SIGNUP`).
+
+### 1.18 QĐ-18 — Key của mọi nhà cung cấp AI ✅ CHỐT *(chủ dự án quyết 30-10-2026)*
+
+**Bối cảnh:** QĐ-15 chỉ nói chuyện với Anthropic. Chủ dự án có key OpenAI và hỏi "t có key gpt được không"; được trả lời là chưa, rồi quyết: "sửa đi có thể dùng mọi loại key".
+
+**Quyết định:**
+
+1. **Danh sách provider cố định trong code** (`platform/llm`): Anthropic (Claude), OpenAI (GPT), Google (Gemini), xAI (Grok), Mistral, DeepSeek, Groq, OpenRouter — OpenRouter là đường cho "mọi model khác" bằng một key. Anthropic đi qua SDK chính thức như QĐ-15; bảy provider còn lại qua endpoint Chat Completions tương thích OpenAI của chính họ, nói bằng `net/http` qua `platform/outbound` (không SDK nhà cung cấp nào khác). Mỗi provider khác nhau ở vài chỗ — tên trường giới hạn output (`max_completion_tokens` / `max_tokens`), có stream không, có `stream_options`, có ép schema không — và bảng ghi theo tài liệu của họ ngày 30-10-2026.
+2. **Endpoint riêng của người vận hành:** `LLM_PROVIDER=openai-compatible` + `LLM_BASE_URL` + `LLM_MODEL` (gateway công ty, Ollama, vLLM, LiteLLM). Chỉ người vận hành đặt được; organization không bao giờ nhập URL (§11.6 API7).
+3. **Organization chọn provider, model, key** trên AI settings. Anthropic chỉ nhận 4 model của QĐ-15; provider khác nhận mọi model id key dùng được (gợi ý vài model; OpenRouter phải gõ). Key riêng gắn với provider nó được lưu — đổi provider thì phải dán key mới. Key server (`LLM_API_KEY`) chỉ phục vụ `LLM_PROVIDER`; `LLM_MODEL` là model nó dùng khi organization chưa chọn.
+4. **Kiểm key trước khi lưu** bằng danh sách model của provider (không tốn token); OpenRouter kiểm key ở `/key` vì danh sách model là công khai; không đọc được danh sách (endpoint không có `/models`, key OpenAI bị giới hạn quyền) thì gọi một completion 16 token. Model gõ sai → lỗi kể vài model key dùng được. Key có phần đầu riêng của provider khác (`sk-ant-`, `sk-proj-`, `AIza`, `xai-`, `gsk_`, `sk-or-`) → từ chối kèm tên provider đúng; giao diện tự chuyển provider khi dán.
+5. **Mọi câu trả lời kiểm theo schema** ở `platform/llm` (`llm.Validate`: type, enum, required, additionalProperties, items) — provider chỉ hứa JSON (DeepSeek, JSON mode) cũng không lọt câu trả lời sai hình. Provider từ chối schema hoặc giới hạn output quá lớn trả 400 → gọi lại một lần không có phần đó.
+6. **Lỗi nói đúng chuyện:** hết tiền / vượt hạn mức (402, `insufficient_quota`, "credit balance" của Anthropic) là `ErrQuota` → `AI_KEY_NO_CREDIT`, không retry; key sai báo theo tên provider; 400 kiểu xAI/Google cho key sai vẫn là key sai. Suggestion và auto draft ghi provider bên cạnh model (0045, 0046).
+
+**Điều kiện ràng buộc:** QĐ-15 điều kiện 1–3 và 5 giữ nguyên cho mọi provider (nội dung trang là dữ liệu không tin cậy; dữ liệu gửi ra chỉ khi tester bấm; 2 chờ / 30 mỗi ngày; giới hạn output 16000 / 32000 vẫn gửi theo mọi lần gọi — chỉ khi provider từ chối chính trường đó bằng 400 mới gọi lại không có nó, và trần khi đó là của model). Điều kiện 4 giữ: chỉ `platform/llm` được import SDK Anthropic; HTTP ra ngoài của nó đi qua `platform/outbound` (test kiến trúc). Model id gợi ý sẽ cũ dần — danh sách là gợi ý, kiểm lúc lưu mới là thật.
+
+**Chưa kiểm:** lần gọi thành công với key thật của từng provider (`TestLive`, `LLM_LIVE_PROVIDER`). Đã kiểm: 8 host thật trả lời key giả và đều được đọc là `ErrKey` (`LLM_LIVE_HOSTS=1`, `backend/GATES.md`).
+
+**Hệ quả tới văn bản:** §0.5 (bảng P2), QĐ-15 #4, §11.6 API7/API10, `openapi.yaml` (AI settings: `providers`, `provider`, `AI_KEY_NO_CREDIT`; `provider` trên suggestion và auto draft), `.env.example` (`LLM_PROVIDER`, `LLM_MODEL`), `HUONG_DAN_SU_DUNG.md` §2.3.
+
+### 1.18b QĐ-19 — Mọi loại test có phiên chạy được, theo bốn tầng ✅ CHỐT *(chủ dự án yêu cầu 04-11-2026: "triển khai cho hệ thống hỗ trợ chạy các phiên test các loại test script test luôn đi")*
+
+**Bối cảnh:** plan có 10 loại test (QĐ-15), và Auto test (QĐ-16) chạy được cả 10. Nhưng với sáu loại phi chức năng, nó chỉ làm những gì một chuỗi thao tác trên trình duyệt làm được: performance chỉ là "mỗi bước chờ tối đa 10 giây", accessibility chỉ là "tìm được theo role". Phần đo thật vẫn phải chạy tool ngoài rồi nhập kết quả (ATP report v1). Script test của team (Playwright, k6) cũng chỉ chạy được trong CI của họ.
+
+**Quyết định — bốn tầng, làm theo thứ tự rủi ro tăng dần:**
+
+1. **Bước kiểm tra trong case** ✅ **04-11**. Có ba action mới, không cần phần tử:
+   - `check_accessibility`: axe-core WCAG 2.0/2.1/2.2 A và AA. Fail khi có lỗi từ mức impact chọn trở lên; mặc định là serious.
+   - `check_performance`: LCP, FCP, TTFB, load và CLS của lần tải trang gần nhất, so với ngân sách viết dạng `lcp=2500 cls=0.1 ttfb=800`. Mặc định là ngưỡng "good" của Core Web Vitals.
+   - `check_security`: kiểm thụ động những gì trình duyệt thấy được — HTTPS, HSTS, CSP, chống clickjacking, nosniff, header lộ phiên bản, CORS `*` kèm credentials, cờ cookie, mixed content. Fail khi có finding mức high; `strict` thì fail cả mức medium.
+
+   Kết quả chi tiết nằm ở `note` của bước, kể cả khi bước đạt. Bước kiểm tra vẫn là dữ liệu, không phải code. AI soạn case dùng chúng cho đúng loại test, và AI sửa bước không bao giờ thay chúng.
+2. **Ma trận trình duyệt và thiết bị** ✅ **04-11**: run có `variants`, mỗi variant dạng `trình duyệt/thiết bị` — Chromium, Firefox, WebKit × desktop, phone, tablet; tối đa 9 variant, số case × số variant ≤ 300.
+   - Mỗi case chạy một lần cho mỗi variant (migration 0047: `auto_runs.variants`, `auto_run_cases.variant` nằm trong khóa chính).
+   - Variant mặc định `""` (chromium/desktop) giữ nguyên tên test và identity như trước. Variant khác thành test riêng, tên là `Title [firefox/phone]`, nối vào cùng case qua `CaseFile`.
+   - Mọi engine đi sau cùng proxy guard; checker `src/engines.mjs`, `CHECKER_BROWSERS`. Firefox không có `isMobile`, nên phone/tablet của Firefox chỉ có cỡ màn hình và cảm ứng.
+   - Giao diện chưa có ô chọn variant: hiện dùng qua API và CI.
+3. **Load test có chứng minh quyền sở hữu** ✅ **04-11**:
+   - **Chứng minh quyền sở hữu:** organization chứng minh mình sở hữu host của environment (đúng host, có cổng). Có hai cách: đặt `atp-verification=<token>` vào `/.well-known/atp-verification.txt` (checker đọc qua guard, phải trả 200, không theo redirect), hoặc tạo bản ghi TXT tại `_atp-verification.<host>`. Bảng `site_ownership` (0048) lưu chứng minh.
+   - **Kiểm lại trước mỗi lần chạy:** worker kiểm lại chứng minh **ngay trước** mỗi load run. Mất chứng minh thì không gửi tải và đánh dấu `failed`.
+   - **Cách chạy:** `vus` user ảo gửi GET lần lượt các `paths` trên đúng host đó trong `seconds`, khởi động dần trong `rampSeconds`, không theo redirect, mọi request đi qua proxy guard (checker `src/load.mjs`, request API của Playwright).
+   - **Kết quả:** requests, rps, p50/p90/p95/p99, lỗi (không trả lời hoặc 5xx; 4xx đếm riêng), status, timeline từng giây. Verdict so với `maxP95Ms` / `maxErrorRate`.
+   - **Trần:** `LOAD_MAX_VUS` (20, tối đa 200) và `LOAD_MAX_SECONDS` (60, tối đa 600); mỗi organization một load cùng lúc; 20 load một ngày mỗi project; `CHECKER_LOADS=1`.
+   - **Còn thiếu:** giao diện chưa có. Chứng minh sở hữu là của organization: purge project giữ lại, purge organization xóa (05-11).
+4. **Chạy script test của team** ✅ **05-11** (dự án Playwright, script k6) trong một container sandbox riêng:
+   - **Đường đi:** tester upload `.tar.gz` (`POST …/script-runs`, multipart, ≤ 10 MB; ≤ 100 MB và 5000 file khi giải nén; chỉ file và thư mục, đường dẫn tương đối — kiểm trước khi xếp hàng). Worker gửi job cho `sandboxd` (`cmd/sandboxd`), service duy nhất có Docker socket. `sandboxd` chỉ nhận một dạng job, có `SANDBOX_TOKEN`, và từ chối mọi request đến từ mạng của một job.
+   - **Không đọc được DB hay secret của server:** `sandboxd` không có `.env` của app; container của job không có mount, không có socket, không có biến môi trường nào ngoài địa chỉ environment và tham số của job.
+   - **Mạng chỉ tới site của environment:** mỗi job có một mạng Docker `internal` riêng (không gateway). Tên host của environment trỏ về forwarder của `sandboxd` (`platform/sandbox`); DNS không trả lời tên nào khác. Forwarder phân giải host một lần, xét mọi địa chỉ bằng cùng luật guard với checker (loopback, link-local/metadata, multicast, reserved không bao giờ; private chỉ khi `SANDBOX_ALLOW_PRIVATE=on`), rồi chuyển TCP tới đúng địa chỉ đã xét. TLS giữ nguyên hai đầu, nên script không cần cấu hình proxy. Environment phải có địa chỉ theo tên, không theo IP.
+   - **Trần:** không capability, `no-new-privileges`, rootfs chỉ đọc, uid 10001, `/work` và `/tmp` là tmpfs, RAM (`SANDBOX_MEMORY_MB`), CPU (`SANDBOX_CPUS`), PID, thời gian (`SCRIPT_MAX_SECONDS`, quá thì kill). `SANDBOX_RUNTIME=runsc` thêm gVisor nếu host có. Mỗi organization một script cùng lúc, 30 một ngày mỗi project.
+   - **Không giữ gì giữa hai lần chạy:** container và mạng bị xóa khi job xong (và khi `sandboxd` khởi động lại); archive trong `script_runs` (0049) đặt về NULL khi run kết thúc.
+   - **Playwright:** image `atp/sandbox-playwright` (Node 22, `@playwright/test` 1.63.0, Chromium/Firefox/WebKit). `@playwright/test` của image thay bản trong archive, reporter JUnit luôn bật, `BASE_URL` là địa chỉ environment, `project`/`grep` đi qua biến môi trường, không bao giờ nằm trong dòng lệnh shell.
+   - **k6:** `grafana/k6:1.0.0`. `vus`/`seconds` của run thay scenario của script (trần `LOAD_MAX_*`). Vì là tải thật, k6 cần chứng minh sở hữu của tầng 3, và chứng minh được kiểm lại ngay trước khi chạy. Threshold và check thành testcase JUnit; exit code của k6 quyết định threshold có fail hay không.
+   - **Kết quả:** báo cáo đi qua JUnit import thành test run (framework `playwright` hoặc `k6`, `localRunId` là id của script run), cùng exit code, `timedOut`, số test và fail, 64 KB cuối của log.
+   - **Kiểm chứng:** unit test với Docker giả và script thật trong `sh`; CI job `sandbox` (`sandbox/test/e2e.sh`) chạy trên Docker thật — Chromium + Firefox tới site fixture theo tên, không DNS, không route ra 1.1.1.1 / 169.254.169.254 / Docker host, api của `sandboxd` từ chối job, uid 10001, rootfs chỉ đọc, k6 bị ép về 2 VU dù script đòi 500, run quá giờ bị dừng, không còn container hay mạng nào sót lại.
+   - **Còn thiếu:** giao diện (`frontend/PLAN.md`). Mặc định tắt (`SANDBOX=off`): người vận hành bật sau khi đọc phần rủi ro trong `sandbox/README.md`.
+
+**Điều kiện ràng buộc:** tầng 1 không chạy code của người dùng, nên được làm ngay. Tầng 3 và 4 làm server bắn tải hoặc chạy code lạ, nên không lên nếu thiếu chứng minh quyền sở hữu (tầng 3) hoặc sandbox (tầng 4). Hai thứ đó là điều kiện để làm, không phải tính năng thêm sau. Kiểm tra bảo mật ở tầng 1 không phải pentest; `note` nói rõ điều đó.
+
+**Hệ quả tới văn bản:** §0.5 (bảng P2), `openapi.yaml` (`AutoStep.do` thêm 3 action, `AutoStepResult.note`; tầng 2: `variants` trên tạo run và `AutoRun`, `variant` trên run case, ảnh chụp và apply-heal; tầng 3: +5 operation ownership và load-runs; tầng 4: +3 operation script-runs, schema `ScriptRun`), `deploy/routes.txt`, `.env.example` + compose (`CHECKER_BROWSERS`, `LOAD_MAX_VUS`, `LOAD_MAX_SECONDS`, `CHECKER_LOADS`; tầng 4: `SANDBOX`, `SANDBOX_TOKEN`, `SCRIPT_MAX_SECONDS`, `SANDBOX_*`, service `sandboxd` profile `scripts`, mạng `sbxapi`/`sbxegress`), `server/atp.sh` (profile `scripts`, sinh `SANDBOX_TOKEN`), CI (job `sandbox`, `-race` cho sandbox), `sandbox/README.md`, `checker/README.md`, `HUONG_DAN_SU_DUNG.md` và `frontend/PLAN.md` (giao diện tiers 1–4 và bằng chứng kiểm tra).
+
+### 1.19 Phụ lục — 5 câu hỏi mở của v3.0, đã chốt
 
 | **Câu hỏi** | **Quyết định** | **Ghi chú** |
 | ------------------------------------ | ------------------------ | ------------------------------------------------------- |
@@ -666,13 +992,7 @@ Chỉ viết chi tiết khi gate trước pass. Mỗi gate phải có: (a) số 
 ### 4.7 Quy tắc tài liệu đối ngoại
 
 1. **Không cắt roadmap.** Bản tóm tắt/deck được rút gọn nhưng phải hiện đủ P0–P6; P5–P6 gắn nhãn *"Vision 3–5 năm, gated by demand"*. Cắt hẳn tạo cảm giác sản phẩm không có đường lên enterprise.
-2. **Một nguồn sinh nhiều định dạng.** `SPEC.md` là gốc nội bộ; bản đối ngoại là `docs/external/Automation-Testing-Platform-Summary.md`, sinh từ SPEC chứ không viết tay song song. `.docx`/`.pptx` sinh bằng pipeline, **cấm copy-paste tay Markdown vào Word** — đó là nguyên nhân lỗi `**` literal trong bản v3.0 cũ:
-
-   ```bash
-   cd docs/external
-   npm install && npm run build   # sinh .docx từ Markdown
-   ./verify.sh                     # gác checklist §4.7, exit code là cổng
-   ```
+2. **Một nguồn sinh nhiều định dạng.** `SPEC.md` là gốc nội bộ; bản đối ngoại sinh từ SPEC chứ không viết tay song song. `.docx`/`.pptx` sinh bằng pipeline, **cấm copy-paste tay Markdown vào Word** — đó là nguyên nhân lỗi `**` literal trong bản v3.0 cũ. *02-11:* bản đối ngoại v3.12 và pipeline `build.mjs`/`verify.sh` đã gỡ khỏi repo vì nội dung đã lạc hậu (§0.1); lần gửi ra ngoài kế tiếp lấy lại pipeline bằng `git checkout b369287 -- docs/external`, viết lại nguồn Markdown theo SPEC hiện tại rồi chạy `npm run build` và `./verify.sh`.
 
 3. **Checklist trước khi gửi ra ngoài:**
    - [ ] Không còn ký tự `**`, `#`, ` ``` ` literal trong bản Word/PowerPoint
@@ -681,7 +1001,7 @@ Chỉ viết chi tiết khi gate trước pass. Mỗi gate phải có: (a) số 
    - [ ] **Đã xóa "Production Safety Guard" khỏi mục MVP** (QĐ-8)
    - [ ] Không có khẳng định `[CHƯA KIỂM CHỨNG]` nào về đối thủ
    - [ ] Ghi version + ngày, trỏ về commit của `SPEC.md`
-4. Cho đến khi checklist trên xanh hết: **ba file trong ****`docs/v3.0/`**** bị cấm gửi ra ngoài.**
+4. Cho đến khi checklist trên xanh hết: **không gửi tài liệu nào ra ngoài.** (Ba file `docs/v3.0/` từng bị cấm ở đây đã gỡ khỏi repo 02-11.)
 
 ### 4.8 Khả thi theo quy mô đội
 
@@ -784,12 +1104,64 @@ GATE KỸ THUẬT             ·    T0 T1 T4          ·    T2-EX     ·      ·
 
 **Đường đi ngắn nhất tới câu trả lời "có nên làm tiếp không":** 6 tuần Phase 0 → Gate-0. Không cần build gì để tới đó ngoài prototype identity.
 
+### 4.11 Kế hoạch tester dùng hằng ngày — demo Windows, pilot, rồi VPS (13-10-2026)
+
+**Mục tiêu được chủ dự án xác nhận:** tester dùng platform làm nơi làm việc chính, từ requirement, lập kế hoạch, thực hiện test, ghi bằng chứng, liên kết bug và retest tới quyết định release. Hỗ trợ quản lý nhiều loại testing và giữ kết quả đủ rõ để người dùng kiểm chứng. Đây là kế hoạch triển khai bổ sung cho P2 và tích hợp kết quả; không phải tuyên bố đã hoàn thành hoặc production-ready.
+
+**Điểm xuất phát:** các chức năng đã có theo §0.5 gồm case/suite/requirement/plan, manual execution và evidence, automation mapping, release gate, reporter Playwright và import JUnit XML. Chúng cần kiểm chứng trên stack thật và mở rộng nghiệp vụ theo §6.8.7. Không dùng kết quả unit test/build thay cho bằng chứng E2E, vận hành hoặc pilot.
+
+**Thứ tự triển khai:** GĐ1 → GĐ2 → GĐ3 → GĐ4 → GĐ5 → GĐ6. Các giai đoạn này là mốc triển khai, không đổi tên phase P0–P6; gate sản phẩm §4.5 và gate kỹ thuật §14 vẫn độc lập. Chốt lịch và capacity sau khi rà soát khoảng trống GĐ2; chưa cam kết số tuần khi chưa biết người triển khai và tải pilot.
+
+| Giai đoạn | Trạng thái (15-10-2026) | Phạm vi triển khai | Tiêu chí nghiệm thu / bằng chứng |
+|---|---|---|---|
+| **GĐ1 — Nền tảng demo nội bộ** | `in_progress` — CI #42 của 76f6df0 xanh toàn bộ kể cả security/E2E; còn deployment bền vững, restart/restore trên host demo được chọn | Kiểm chứng sửa reporter: occurrence theo `TestCase` xuyên retry, timeout gồm response body; audit dependency sạch. Chạy E2E stack thật. Dựng host demo bằng Docker + `server/atp.sh`; Windows dùng Docker Desktop + Git Bash, có thể dùng máy khác khi laptop thiếu tài nguyên. Cấu hình artifact bền vững, backup; project demo có manual, automation, failed, flaky, blocked | Tester đăng nhập, hoàn thành vòng test và xem evidence; retry/artifact đúng test; restart giữ database và artifact; restore backup thành công. Lưu kết quả CI/E2E và biên bản demo. Bản sửa chỉ được đánh hoàn tất khi có bằng chứng tương ứng |
+| **GĐ2 — Công việc tester hằng ngày** | `in_progress` — snapshot, step result, retest/lịch sử, plan membership/phân công, context/audit và bulk/export đã kiểm chứng; còn nghiệm thu luồng đầy đủ với team | Precondition, test data, phân công, kết quả từng bước; danh sách case và tiến độ plan; phiên bản case tại execution; liên kết bug và retest; lịch sử, lọc, thao tác hàng loạt, export | Team hoàn thành requirement → case → plan → execution → bug → retest → release trong platform. Case chưa chạy hiện rõ; sửa case không đổi bằng chứng cũ; retest không ghi đè lần trước. Các bước chính không cần Excel để bù |
+| **GĐ3 — Phân loại testing** | `in_progress` — source đã triển khai và kiểm chứng local; chờ CI của commit mới và nghiệm thu người dùng | Các chiều cấp độ, mục đích, nhãn sử dụng, cách thực hiện; subtype Performance theo §6.8.7. API/UI, filter, plan selection, migration và import/export cùng hiểu taxonomy | Một case có thể là System + Functional + E2E + Regression + Automated; dữ liệu cũ vẫn đọc được, không đoán loại từ framework; truy vấn/lập plan theo taxonomy hoạt động |
+| **GĐ4 — Kết quả chuyên biệt** | `in_progress` — ATP report v1 cho 6 nhóm đã kiểm chứng local; CI/nghiệm thu và parser vendor còn riêng | Ưu tiên Performance, sau đó Security, Accessibility, Compatibility, Recovery, Usability theo nhu cầu pilot. Thiết kế contract kết quả, lưu báo cáo gốc, nguồn và phiên bản công cụ; tích hợp công cụ chạy ngoài platform | Mỗi adapter có fixture thật, kiểm mapping và đối chiếu báo cáo gốc; giữ đơn vị/ngưỡng/cấu hình; thiếu dữ liệu hoặc lỗi import không thành passed. Một nhóm chỉ được ghi là hỗ trợ khi có workflow và bằng chứng riêng |
+| **GĐ5 — Pilot và độ tin cậy** | `planned` — chưa nghiệm thu pilot | Một nhóm tester dùng project thật ít nhất hai chu kỳ kiểm thử/release; kiểm quyền và tenant isolation, audit, ingest trùng/mất mạng, restart API/worker, restore. Đo tải pilot và soak 24–72 h theo §14 | Không còn lỗi nghiêm trọng chưa xử lý về mất dữ liệu, gắn nhầm kết quả, truy cập sai quyền hoặc quyết định release. Gate chỉ rõ evidence và dữ liệu thiếu; override có actor/lý do. Có báo cáo pilot thật và kết quả vận hành; không tự điền số đo |
+| **GĐ6 — VPS** | `planned` — triển khai sau pilot | Dựng staging trước, HTTPS, database/artifact bền vững, monitoring, backup ngoài host, rollback; diễn tập di chuyển rồi chuyển dữ liệu pilot và chạy smoke/E2E | Đối chiếu dữ liệu và artifact sau chuyển; restore và rollback đã thử; smoke/E2E xanh trên VPS; đo lại capacity trên host đích. Chuyển VPS không tự động đồng nghĩa đủ điều kiện production hoặc khách trả tiền |
+
+**Ưu tiên hiện tại:** GĐ3 taxonomy và GĐ4 ATP report v1 cho 6 nhóm đã kiểm chứng local; đóng CI mới trước khi nghiệm thu. CI 38707032612 trên 86cb699 fail ở fixture ingest ngày 14/9 đã ra ngoài cửa sổ flaky 30 ngày, E2E skipped; đã tái hiện rồi sửa timestamp tương đối ổn định trong test, package ingest pass lại, không đổi logic production. CI/E2E xanh gần nhất vẫn là 76f6df0. Song song: preflight host → deployment bền vững/restart/backup/restore → team nghiệm thu → pilot → VPS. Không quảng bá parser vendor, benchmark/scan thật hoặc nghiệm thu nhóm khi chưa có bằng chứng. Pentest trước khách trả tiền đầu tiên vẫn theo §11.6; giữ security gate go1.26.10/x/text 0.41/govulncheck v1.9.0 (21-10: go1.26.10 vá GO-2026-6809, `backend/GATES.md` dependency review 21-10).
+
+**Điều chỉnh triển khai source ngày 15-10 theo yêu cầu chủ dự án:** tiếp tục xây phần còn lại song song với nghiệm thu hạ tầng, ưu tiên taxonomy rồi kết quả Performance và các nhóm GĐ4. Không đợi pilot để viết toàn bộ source, nhưng không bỏ CI/security gate hoặc đánh GĐ1/GĐ2/GĐ5/GĐ6 hoàn tất khi chưa có host/team/bằng chứng thật. Taxonomy đã có ở migration 0033; nhãn Stress/Load không phải engine chạy tải hay kết quả đo.
+
+**Đóng E2E GĐ4 (15-10, issue #3):** CI 38749084024 trên 84d6337 đã pass backend/frontend/reporter/server, gồm sửa fixture ingest; E2E dừng ở selector checkbox quá rộng của live-check (13 ô sau khi thêm taxonomy). Đã tái hiện trên Chrome local: một form, một ô Critical flow có tên truy cập duy nhất. Sửa script chọn đúng ô và kiểm response giữ critical độc lập taxonomy; thêm cuộn tới thumbnail lazy và timeout chờ ảnh sau khi tái hiện ảnh ngoài viewport không tải. Không đổi logic sản phẩm hoặc bỏ bước nghiệm thu; CI mới phải chạy đủ live-check/manual-history/bulk/specialized trước khi ghi gate xanh.
+
+**Phạm vi vận hành demo:** laptop cắm nguồn, không sleep khi phục vụ; cấu hình địa chỉ LAN, firewall và chứng chỉ HTTPS cho máy truy cập. Artifact phải ở object storage bền vững khi cần giữ bằng chứng; không dùng bộ nhớ API làm kho evidence của pilot. Backup database và artifact phải có bản ngoài laptop, có chính sách retention và diễn tập restore. Chỉ mở phạm vi truy cập đã cấu hình cho demo nội bộ.
+
+**Ranh giới:** mở rộng quản lý và tích hợp kết quả không kéo managed runner, scheduling, agent hay production execution guard lên trước QĐ-5/QĐ-8/QĐ-10. Luật importer theo khách cụ thể ở §6.8.5 vẫn áp dụng; từng adapter mới phải chốt nguồn, contract và phạm vi trước khi build. Gate release hiện tại không tự động đánh giá các nhóm mới cho tới khi có evidence contract và rule tương ứng được nghiệm thu.
+
+**Theo dõi thực thi:** dùng đồng thời PLAN/SPEC và GitHub Issues theo yêu cầu chủ dự án. [#3 GĐ4/CI](https://github.com/tvinhthanh/test-system/issues/3) đang thực hiện; [#4 host demo bền vững](https://github.com/tvinhthanh/test-system/issues/4) → [#5 team nghiệm thu](https://github.com/tvinhthanh/test-system/issues/5); [#6 pilot/load/soak/security](https://github.com/tvinhthanh/test-system/issues/6) cần host/workload thật; [#7 VPS/rollback](https://github.com/tvinhthanh/test-system/issues/7) sau #5/#6. Mỗi giai đoạn cần người chịu trách nhiệm, trạng thái (`planned`, `in_progress`, `verified`) và liên kết bằng chứng. Chỉ cập nhật §0.5 thành đã hoàn thành sau nghiệm thu; kế hoạch này không thay bằng chứng trong `backend/GATES.md`.
+
+#### 4.11.1 Lát triển khai đã kiểm chứng — 13-10-2026
+
+| Hạng mục | Trạng thái | Bằng chứng / phần còn lại |
+|---|---|---|
+| Snapshot case tại execution | `verified` | Migration `0030_manual_execution_history.sql`, test Postgres `TestExecutionSnapshotRetestAndHistory`; thay tên/steps không đổi snapshot cũ. Execution cũ giữ NULL và UI báo thiếu snapshot; kiểm version case để từ chối ghi theo dữ liệu đã bị sửa |
+| Kết quả từng bước, bug URL, retest | `verified` | Contract execution POST bổ sung stepResults/bugUrl/retestOf; retest phải cùng case/plan/project. Passed không chứa step failed/blocked; URL chỉ HTTP(S), không credentials. UI không bỏ âm thầm actual result chưa chọn status |
+| Lịch sử execution và evidence cũ | `verified` | Plan GET trả 200 execution mới nhất, giữ dữ liệu cũ và báo historyTruncated; test giới hạn 201 dòng. UI xem snapshot, actual result, bug và artifact của lần trước |
+| Kiểm chứng UI/API thật cho lát này | `verified` | `frontend/scripts/live-manual-history.mjs`: login thật → execution failed → upload evidence → sửa case → retest passed → đọc lại snapshot/evidence. Chrome desktop 1440×960, mobile 390×844; ảnh `frontend/test-results/manual-history-*.png`; không overflow ngang/page error |
+| Kiểm tra hồi quy | `verified` trong phạm vi đã chạy | Frontend 77 test pass, build/bundle gate pass; reporter 20 pass/1 opt-in skip; npm audit 0. Backend chạy Postgres thật; lần chạy rộng gặp trùng cổng harness restore trên Windows, restore chạy riêng với RESTORE_TEST=1 đã pass. Không coi test S3/load/soak opt-in chưa bật là đã nghiệm thu |
+| Phạm vi case cố định của plan | `verified` | Migration `0031_plan_membership.sql` đóng băng plan cũ, giữ case obsolete có execution; POST nhận caseIds, PATCH thay scope. Test case mới không tự vào plan; không gỡ case có execution; UI lấy case từ plan, không từ danh sách project bị giới hạn |
+| Phân công tester và trạng thái công việc | `verified` | PATCH kiểm email đã verify và quyền testmgmt.write trong project; user ngoài project/viewer/không tồn tại cùng trả 404. Start không tạo verdict; execution đặt completed. Ghi actor/action/details vào test_plan_audit trong transaction; expectedUpdatedAt chặn ghi đè phiên bản cũ |
+| Hồi quy lát membership | `verified` | 81 test frontend pass; build/bundle gate 52,2 KiB gzip; test migration từ schema 0030 giữ evidence/case obsolete, test Postgres testmgmt/API/arch và OpenAPI lint pass (7 warning đã có). live-manual-history.mjs kiểm scope rỗng → chọn case → phân công → start → execution → retest/evidence trên Chrome desktop/mobile |
+| Precondition/test data và audit case | `verified` | Migration 0032, case POST/PATCH/CSV và snapshot execution; giới hạn 16.000 byte UTF-8 mỗi trường. CSV thiếu cột không xóa context cũ; audit actor/action/changedFields và trước/sau trong transaction; API trả 50 summary và báo truncation; không dựng lại lịch sử cũ |
+| Hồi quy lát context/audit | `verified` | 84 test frontend pass; build/bundle gate 52,4 KiB gzip; Postgres testmgmt/API/arch và OpenAPI lint pass. Chrome live kiểm editor/audit và snapshot cũ ở desktop/tablet/mobile (1440/768/360 px); test scope, stale edit, CSV, byte limit và audit 50+ dòng |
+| Bulk metadata và export case | `verified` | POST bulk tối đa 100 case/batch, version bắt buộc, kết quả từng case và audit transaction; không retry tự động khi kết quả chưa xác nhận. GET export kiểm project/tenant, chọn tối đa 200 hoặc toàn bộ filter, giới hạn 5000 dòng/8 MiB không trả CSV một phần; steps_json và chống formula, import round-trip |
+| Hồi quy lát bulk/export | `verified` trong phạm vi đã chạy | Local 90 test frontend pass gồm 1 test fixture không thuộc commit; 89 test thuộc phần commit pass, build/bundle gate 52,7 KiB gzip. Postgres testmgmt/API/arch pass; Chrome 1440/768/360 px kiểm conflict/success, selection/report, audit và download selected/filter thật. CI #42 của 76f6df0 đã pass cả frontend và live-case-bulk.mjs trong job E2E |
+| Luồng GĐ2 xuyên suốt qua UI | `verified` kỹ thuật local | live-manual-history.mjs tạo requirement/case/plan bằng UI, link coverage, assignment → execution failed/bug/evidence → sửa case → retest → gate và quyết định release giữ actor/note sau reload. Manual pass không biến thành automation evidence: branch không có run vẫn no_evidence. Chrome desktop/tablet/mobile pass; đã thêm harness vào CI E2E, chưa đồng nghĩa nghiệm thu team |
+| Đồng bộ nguồn và gate CI | `verified` trên commit 76f6df0 | [CI #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965) completed/success: frontend, backend, reporter và E2E đều pass; backend gồm security, Postgres/S3 thật, image/compose/promtool/OpenAPI. Log E2E xác nhận manual workflow và bulk/export pass. Đối chiếu lại job/log ngày 15-10; không dùng CI memory-store thay nghiệm thu persistence trên host demo |
+| Preflight host demo/pilot | `implemented` — test mô phỏng pass, chưa nghiệm thu host | `server/atp.sh doctor [--pilot]` chỉ đọc: Docker/Compose/config/secret/object store; pilot từ chối memory/dev/cookie không Secure. 11 kịch bản test với fake Docker pass, không in secret/sửa config; thêm job server trong CI. Chạy thật trên laptop: fail đúng Docker engine unavailable, memory artifact, APP_ENV=dev; không tự khởi động Docker. Checklist nghiệm thu ở server/README.md |
+| Taxonomy case nhiều chiều | `verified` kỹ thuật local | Migration 0033; create/edit/bulk có xác nhận; query/export theo 5 chiều và tìm case cho plan; CSV taxonomy_json round-trip, thiếu cột không xóa dữ liệu. Snapshot execution giữ taxonomy cũ, legacy không dựng lại; không tự đổi automationStatus/gate. 92 test frontend thuộc commit pass, build 53,3 KiB gzip; test Postgres/API/arch và OpenAPI lint pass; Chrome 1440/768/360 px kiểm luồng thật. CI commit mới chưa xác nhận |
+| GĐ4 ATP structured report v1 | `verified` kỹ thuật local; CI mới pending | Migration 0034, 6 typed forms/assessments, append-only/idempotency/retest/original text; Postgres/API/arch, 10 test frontend mới, build 54,9 KiB gzip, OpenAPI và restore drill pass. live-specialized-results.mjs kiểm 6 nhóm bằng fixture tổng hợp ở 1440/768/360 px. Không phải parser vendor, runner hoặc benchmark/scan thật |
+| Hoàn tất GĐ1 / GĐ2 | `in_progress` | Docker chưa khởi động thành công; native demo chỉ loopback và artifact trong memory. Còn deployment bền vững/E2E toàn stack và nghiệm thu luồng đầy đủ GĐ2 với team. Chưa nghiệm thu pilot, soak dài hoặc VPS |
+
 ---
 
 ## 5. Phase 0 Playbook
 
 > Mục tiêu: chứng minh hoặc bác bỏ 3 giả thuyết bằng dữ liệu, trong 6 tuần, **không viết code sản phẩm**.
-> **Khởi động lại 15-09-2026.** Lần chốt 26-08 không diễn ra — xem §5.8. Lịch ngày thật ở §5.8; bộ công cụ thi hành ở `phase0/`.
+> **Khởi động lại 15-09-2026.** Lần chốt 26-08 không diễn ra — xem §5.8. Lịch ngày thật ở §5.8; bộ công cụ thi hành từng nằm ở `phase0/` (gỡ 02-11 khi các bảng vẫn trống, §0.1).
 
 ### 5.1 Ba giả thuyết phải kiểm chứng
 
@@ -882,7 +1254,7 @@ Dùng **cả hai** phương pháp cho mỗi partner:
 ### 5.8 Lịch Phase 0 — ngày thật, khởi động lại
 
 > **Phase 0 bắt đầu 15-09-2026** — lần chốt thứ hai. Người giữ quyền kill gate: `tvinhthanhsg@gmail.com` (§1.6, ký 26-08-2026).
-> Mọi mốc dưới đây là **ngày cứng**, không phải ước lượng. Bộ công cụ thi hành nằm ở `phase0/`.
+> Mọi mốc dưới đây là **ngày cứng**, không phải ước lượng. Bộ công cụ thi hành từng nằm ở `phase0/` (gỡ 02-11, §0.1).
 
 **Lần chốt đầu không diễn ra.** Ngày 26-08-2026 từng được ghi là ngày bắt đầu, nhưng đến 11-09 — ngày 17/42 — tracker vẫn 0/30 contact, 0 phỏng vấn, 0 partner. Hai mốc 01-09 và 08-09 trượt không phải vì kết quả xấu, mà vì **chưa có hành động nào để có kết quả**. Ngày 11-09, chủ dự án chọn đường C trong `phase0/README.md`: thừa nhận Phase 0 chưa khởi động và chốt lại ngày. **Đây không phải quyền gia hạn một lần của §5.6** — gia hạn là kéo dài một Phase 0 đang chạy; đây là ghi nhận nó chưa chạy. Quyền gia hạn vẫn còn nguyên, và vẫn chỉ có một lần.
 
@@ -1289,7 +1661,7 @@ Ba ràng buộc thiết kế:
 2. **Kết quả gate là API máy đọc được**, để CI của khách gọi và tự chặn deploy. Nếu chỉ hiện trên UI thì nó là báo cáo, không phải gate.
 3. **`warn` không được âm thầm thành `blocked`.** Mỗi rule khai báo rõ mức, không suy diễn.
 
-**Như đã cài (21-09):** `POST …/releases/{id}/evaluate` đọc run **đã kết thúc mới nhất** của project (thu hẹp theo `Release.branch` nếu đặt) qua `query.GateEvidence`, chấm 5 rule, ghi kết quả vào `Release.lastGate` và **không đổi** `Release.status` — gate khuyên, người quyết (`POST …/decision`, admin, ghi `decidedBy`). Rule không có nghĩa (prod smoke trước P3, p0 coverage ở release đầu, không có run) trả `applies: false` — được báo, không được đếm. CI đọc `GET /v1/releases/{id}/gate` bằng token `project:read`. Verdict `no_evidence` khi chưa có run nào kết thúc.
+**Như đã cài (21-09):** `POST …/releases/{id}/evaluate` đọc run **đã kết thúc mới nhất** của project (thu hẹp theo `Release.branch` nếu đặt) qua `query.GateEvidence`, chấm 5 rule, ghi kết quả vào `Release.lastGate` và **không đổi** `Release.status` — gate khuyên, người quyết (`POST …/decision`, admin, ghi `decidedBy`). Rule không có nghĩa (prod smoke trước P3, p0 coverage ở release đầu, không có run) trả `applies: false` — được báo, không được đếm. CI đọc `GET /v1/releases/{id}/gate` bằng token `project:read`. Verdict `no_evidence` khi chưa có run nào kết thúc. **Từ 29-10** câu trả lời cho CI mang `ci {pass, reason}` do server quyết, CI chỉ cần `jq -e .ci.pass`: quyết định của người thắng gate (`approved`/`shipped` → qua, `blocked` → dừng), release `open` chỉ qua khi gate đã chấm và là `approved`/`warn`; chưa chấm và `no_evidence` → dừng. Trước đó đoạn `jq` trong tài liệu để lọt cả ba ca này (rà soát 21-10, mục 4).
 
 #### 6.8.5 Import — đường vào, và cái đuôi dài phải nhìn thẳng
 
@@ -1304,13 +1676,52 @@ Không import được thì chi phí chuyển đổi quá cao, P2 vô nghĩa. Nh
 
 **Quy tắc:** chỉ build importer thứ hai trở đi khi có **khách cụ thể yêu cầu**, không build sẵn cho tương lai. *(QĐ-13 lật riêng cho JUnit XML.)*
 
-**JUnit XML như đã cài (28-09, QĐ-13):** `POST /v1/imports/junit` (token `project:ingest`, cho CI/script backfill từng file) và `POST /v1/projects/{id}/imports/junit` (dashboard, `project.configure`), cùng `ingest.ImportJUnit`: một file → một run qua create → events → finish như reporter, nên identity tier 1/2, flaky fold, TTRC chạy y hệt. `<testcase>` → một result: `file` (hoặc classname đổi `.` thành `/`) là file, phần classname ngoài file là describe, `[...]` cuối tên là `paramSignature`; `<failure>`/`<error>` → failed (timed_out nếu tên/type nói timeout), `<skipped>` → skipped; Surefire `<flakyFailure>` → attempt fail trước lần pass (outcome flaky, N36), `<rerunFailure>` → thêm attempt fail. Thời gian lấy từ `timestamp` của testsuite (không zone = UTC) cộng dồn `time`; file không có ngày thì bắt buộc `startedAt` — lịch sử không được mang ngày hôm nay. `localRunId` suy từ nội dung file + environment + framework → import lại là cùng run; `localRunId` của run do reporter tạo → 409 `RUN_CONFLICT`. XML: `encoding/xml` không DTD/entity ngoài (XXE, billion laughs bị từ chối — có test), ≤ 20 MiB.
+**JUnit XML như đã cài (28-09, QĐ-13):** `POST /v1/imports/junit` (token `project:ingest`, cho CI/script backfill từng file) và `POST /v1/projects/{id}/imports/junit` (dashboard, `project.configure`), cùng `ingest.ImportJUnit`: một file → một run qua create → events → finish như reporter, nên identity tier 1/2, flaky fold, TTRC chạy y hệt. `<testcase>` → một result: `file` (hoặc classname đổi `.` thành `/`) là file, phần classname ngoài file là describe, `[...]` cuối tên là `paramSignature`; `<failure>`/`<error>` → failed (timed_out nếu tên/type nói timeout), `<skipped>` → skipped; Surefire `<flakyFailure>` → attempt fail trước lần pass (outcome flaky, N36), `<rerunFailure>` → thêm attempt fail. Test runner của Node (`node --test --test-reporter=junit`, sửa 01-11): `<testcase>` nằm thẳng dưới `<testsuites>` cũng được đọc — trước đó test ở gốc bị bỏ mà không báo, còn file chỉ có test ở gốc thì bị từ chối; Node không ghi file và luôn ghi `classname="test"`, nên các `<testsuite>` bao quanh (các `describe`) là describe của test. Thời gian lấy từ `timestamp` của testsuite (không zone = UTC) cộng dồn `time`; file không có ngày thì bắt buộc `startedAt` — lịch sử không được mang ngày hôm nay. `localRunId` suy từ nội dung file + environment + framework → import lại là cùng run; `localRunId` của run do reporter tạo → 409 `RUN_CONFLICT`. XML: `encoding/xml` không DTD/entity ngoài (XXE, billion laughs bị từ chối — có test), ≤ 20 MiB.
 
 #### 6.8.6 Ranh giới với plane khác
 
 - Test Management **không** được tự định nghĩa khái niệm test riêng. Mọi liên kết tới automation đi qua `TestIdentity`.
 - Manual execution **không** tạo `Run`. Nó là `ManualExecution`, có thể gom vào một `TestPlan` — trộn vào `Run` sẽ làm bẩn mọi metric flaky và TTRC vốn giả định execution là tự động.
 - Release gate **đọc** từ Intelligence Plane, không tự tính lại flaky hay TTRC.
+
+#### 6.8.7 Mở rộng nghiệp vụ tester và loại testing — kế hoạch theo §4.11
+
+**Trạng thái ngày 15-10:** các lát manual và taxonomy đã có schema/API theo migration 0030–0033 và bảng bằng chứng §4.11.1; contract ATP report v1 GĐ4 đã có ở migration 0034 và kiểm chứng local, chưa đồng nghĩa tích hợp công cụ vendor hoặc nghiệm thu pilot. Giữ các bất biến §6.8.6 và modular monolith §6.9; chốt migration, API contract và quyền cho từng lát nghiệp vụ trước khi sửa code.
+
+**Phân loại nhiều chiều:** không có một enum duy nhất trộn tất cả loại test. `Manual`/`Automated` là cách thực hiện; framework và định dạng báo cáo là nguồn tích hợp, không phải cấp độ hoặc mục đích.
+
+| Chiều | Giá trị khởi đầu | Quy tắc |
+|---|---|---|
+| Cấp độ | Unit, Integration, System, Acceptance | Có thể chưa phân loại; không tự suy từ Playwright/JUnit |
+| Mục đích | Functional, Performance, Security, Usability, Accessibility, Compatibility, Recovery | Có thể gắn nhiều mục đích khi có nghĩa; chỉ chọn giá trị không tạo workflow chuyên biệt |
+| Nhãn sử dụng | Smoke, Regression, E2E | Nhiều nhãn trên cùng case; E2E mô tả phạm vi luồng, không thay thế cấp độ |
+| Cách thực hiện | Manual, Automated | Case có thể được thực hiện theo cả hai cách; giữ `automationStatus` hiện tại và phân biệt cách thực hiện của từng execution |
+| Subtype Performance | Load, Stress, Spike, Soak/Endurance, Volume, Scalability | Chỉ áp dụng khi có mục đích Performance; lưu định nghĩa kịch bản và ngưỡng trước chạy |
+
+**Luồng manual cần bổ sung:** precondition và test data; plan có membership rõ, người được phân công và tiến độ (`not_run`, `in_progress` là trạng thái công việc, không thêm vào verdict hoàn tất một cách ngầm định). Execution giữ phiên bản/snapshot case, kết quả thực tế từng bước, actor, thời điểm và evidence. Verdict hoàn tất tiếp tục passed/failed/blocked/skipped; append-only và plan closed theo contract hiện tại. Sửa case sau chạy không đổi execution cũ; migration execution cũ phải ghi rõ khi không có snapshot hoặc kết quả từng bước, không dựng lại lịch sử từ case hiện tại.
+
+**Bug và retest:** trước tiên hỗ trợ liên kết bug bằng external key/URL, trạng thái và quan hệ tới case/execution; không mặc định xây issue tracker đầy đủ. Retest tạo execution mới có liên kết lần trước; giữ nguyên evidence cũ. Đồng bộ tracker hai chiều là scope riêng cần nguồn cụ thể. Thao tác hàng loạt phải kiểm quyền/tình trạng từng tài nguyên và trả lỗi rõ; export tuân thủ project/tenant và phân quyền.
+
+**Contract kết quả chuyên biệt tối thiểu:**
+
+| Nhóm | Nội dung bắt buộc để người dùng đánh giá |
+|---|---|
+| Performance | Kịch bản/subtype, môi trường và phiên bản ứng dụng, cấu hình tải/dữ liệu, thời lượng, latency p95/p99, throughput, error rate với đơn vị và cửa sổ đo; ngưỡng đã chọn, giá trị thực tế và báo cáo gốc. Scalability ghi cấu hình tài nguyên từng lần so sánh |
+| Security | Phát hiện, severity theo nguồn, vị trí, bằng chứng được kiểm soát quyền truy cập, trạng thái xử lý và retest |
+| Accessibility | Bộ tiêu chí/phiên bản được áp dụng, vị trí vi phạm, evidence; phân biệt kiểm tự động và đánh giá thủ công |
+| Compatibility | Ma trận trình duyệt/hệ điều hành/thiết bị/phiên bản; kết quả và evidence theo từng tổ hợp, tổ hợp chưa chạy hiển thị rõ |
+| Recovery | Sự cố được tạo, điều kiện ban đầu, mục tiêu phục hồi, thời gian thực tế, mất dữ liệu và evidence |
+| Usability | Nhiệm vụ, tiêu chí đánh giá, phương pháp, quan sát/phản hồi và kết luận; không tự suy passed chỉ từ số người tham gia |
+
+Mọi kết quả nhập giữ source, phiên bản adapter/công cụ, môi trường, thời gian chạy, báo cáo gốc và trạng thái import; có khóa idempotency và lỗi mapping rõ ràng. Dữ liệu thiếu, import lỗi, không chạy và không áp dụng phải phân biệt; không biến thành passed hoặc bằng chứng release đầy đủ.
+
+**Lát ATP structured report v1 (15-10):** triển khai trong module testmgmt, bảng `specialized_results` append-only (DB chặn UPDATE); read theo project/view, write theo testmgmt.write. Tester nhập biểu mẫu hoặc import JSON ATP schemaVersion=1 cho cả 6 nhóm, giữ source/toolVersion/adapterVersion, actor/time, original text và retest cùng project/kind/case. Outcome do server tính: passed/failed/inconclusive/not_run/not_applicable/import_error; dữ liệu thiếu không thành passed. Mapping sai trả 400, không lưu một kết quả thành công giả; có thể ghi import_error với notes và original text. Idempotency theo project+key: payload chuẩn hóa giống nhau trả lại ID cũ, khác payload trả 409.
+
+List tối đa 50 kết quả/trang, cursor ràng buộc project/filter; list không mang details/report gốc. Details ≤64 KiB, original UTF-8 text ≤512 KiB và chỉ tải dưới text/plain attachment/nosniff/no-store; không render HTML/fetch URL bên ngoài. Performance dùng ms, requests/s, %, giây và timestamp khai báo ngưỡng trước start; timestamp này là khai báo của nguồn, **không chứng minh đăng ký ngưỡng độc lập trước chạy**. Chỉ số không hợp lệ bị từ chối; thiếu dữ liệu/ngưỡng là inconclusive, vượt ngưỡng biết trước là failed. Findings giữ severity theo nguồn, scope/standard/method; resolved chưa retest không passed. Compatibility giữ từng tổ hợp; Recovery đối chiếu thời gian/mất dữ liệu; Usability cần tiêu chí/quan sát/kết luận, không dựa vào số người.
+
+Bằng chứng local: Postgres/API/architecture tests, 10 frontend regression tests, typecheck/build/bundle gate, OpenAPI lint (7 warning cũ), restore drill sau migration 0034 và Chrome 1440/768/360px qua `live-specialized-results.mjs` (fixtures tổng hợp, không phải benchmark hay scan thật). **Không có runner hoặc parser native k6/JMeter/Locust/SARIF/axe** trong lát này; adapter vendor cần contract và fixture thực riêng. CI mới còn phải xác nhận, không tự mở rộng release gate.
+
+Không ép findings hoặc time series vào `TestResult`/`Attempt` và metric flaky/TTRC. Chốt model theo domain cho nhóm mới; chỉ liên kết automation qua `TestIdentity` khi có identity phù hợp. Gate tiêu thụ evidence qua contract; từng rule khai báo phạm vi, độ mới dữ liệu, ngưỡng và xử lý thiếu dữ liệu. Bổ sung audit cho sửa case, phân công, verdict, bug link, retest, policy và override theo quyền; không tự động mở rộng gate hiện có chỉ vì thêm taxonomy.
 
 ### 6.9 Bố cục module của monolith — thi hành từ 11-09-2026 theo QĐ-11
 
@@ -1985,7 +2396,7 @@ Ingest token mặc định: `scopeLevel = project`, `permissions = {project:inge
 | Gộp parameterized   | `TestIdentity(templateKey)`                                       |
 | Lọc ứng viên — cùng file (§9.3 b2) | `TestIdentity(projectId, canonicalFilePath) WHERE status='active'` |
 | Lọc ứng viên — trùng leaf title | `TestIdentity(projectId, canonicalLeafTitle) WHERE status='active'` |
-| Lọc ứng viên — trigram leaf title | `GIN (canonicalLeafTitle gin_trgm_ops) WHERE status='active'` — **cần `canonicalLeafTitle` là cột thật** (§8.5); không GIN-index được một phần tử của `text[]` |
+| Lọc ứng viên — trigram leaf title | `GIN (projectId, canonicalLeafTitle gin_trgm_ops) WHERE status='active'` (cần `btree_gin` cho cột uuid) — **cần `canonicalLeafTitle` là cột thật** (§8.5); không GIN-index được một phần tử của `text[]`. **Sửa 07-10 (migration 0029):** bản đầu chỉ index `canonicalLeafTitle`, nên `%` khớp tên test của **mọi tenant** rồi mới lọc `projectId` — tìm ứng viên chậm dần theo số khách, và tên kiểu "should login" thì khách nào cũng có. Đo 20 project × 5 000 identity, cache ấm: 31 ms → 14 ms mỗi fingerprint lạ |
 
 
 > **Vì sao ba index này bắt buộc (N47):** §9.3 bước 2 lọc ứng viên bằng đúng ba điều kiện trên. Thiếu index thì mỗi fingerprint lạ phải quét toàn bộ `TestIdentity` đang active của project. Đo trên prototype không index, 3 lần chạy 09-09: một đợt refactor đổi tên 50 test tốn **3,5–6,8 s ở project 10.000 test** và **8,3–30,5 s ở 25.000**. Biên độ giữa các lần chạy tới **3,7×** ở cỡ lớn nhất (N55), nên đọc bậc độ lớn chứ đừng đọc chữ số — kết luận "phải có index" không đổi ở bất kỳ đầu nào của dải.
@@ -2057,7 +2468,7 @@ flowchart TD
 
 **Bước 3 — Chấm điểm.**
 
-> **Bước 3 chạy ở tầng ứng dụng, không phải trong SQL (N50).** Bước 2 thuộc về Postgres vì nó cần index GIN của §8.9 để lọc. Bước 3 thì không: nó chấm nhiều nhất 50 ứng viên, đo được **348–587µs** cho đủ trần và **3,5–5,9ms** cho 10 fingerprint lạ của một run bình thường (§9.7) — **dưới 0,6%** ngân sách 1s của §7.6 kể cả ở đầu xấu nhất của dải (6 lần chạy, N54). Đổi lại, tránh được hai thứ: `fuzzystrmatch.levenshtein()` **báo lỗi** khi title vượt giới hạn độ dài (title data-driven đo được đã 195 byte, hai row fixture là 391 byte), và `S_title` cần Jaccard trên **tập describe cha** — thứ mà `pg_trgm` không tính được, vì `similarity()` là Jaccard trên trigram của một chuỗi.
+> **Bước 3 chạy ở tầng ứng dụng, không phải trong SQL (N50).** Bước 2 thuộc về Postgres vì nó cần index GIN của §8.9 để lọc. Bước 3 thì không: nó chấm nhiều nhất 50 ứng viên, đo được **348–587µs** cho đủ trần và **3,5–5,9ms** cho 10 fingerprint lạ của một run bình thường (§9.7) — **dưới 0,6%** ngân sách 1s của §7.6 kể cả ở đầu xấu nhất của dải (6 lần chạy, N54). Đổi lại, tránh được hai thứ: `fuzzystrmatch.levenshtein()` **báo lỗi** khi một đối số vượt **255 ký tự** (đo trên PostgreSQL 17.5 ngày 02-11, đếm ký tự chứ không đếm byte; title data-driven đo được đã 195 byte, hai row fixture là 391 byte), và `S_title` cần Jaccard trên **tập describe cha** — thứ mà `pg_trgm` không tính được, vì `similarity()` là Jaccard trên trigram của một chuỗi.
 
 ```
 score = 0.45·S_title + 0.25·S_file + 0.20·S_param + 0.10·S_recency
@@ -2234,6 +2645,7 @@ Với retention §10.4: **storage thường trực ≈ 12–15 GB/team chuẩn**
 - Vượt cap sau xử lý → artifact bị từ chối `413`, **run vẫn hợp lệ**, dashboard hiện "video exceeded limit" kèm hướng dẫn cấu hình. **Không bao giờ** làm fail run của khách vì artifact.
 - Quota tổng theo gói (§10.5): chạm 80% → email + banner; chạm 100% → artifact mới bị từ chối, **metadata + kết quả test vẫn nhận**. Suy giảm có kiểm soát, không chết.
 - Kịch bản 400 MB/video của v3.0 không thể xảy ra nữa vì cap chặn ở tầng sản phẩm.
+- **Như đã cài (05-10, migration 0027):** project được giữ **ngắn hơn** bảng trên, không bao giờ dài hơn — gói là thứ được trả tiền (§11.3.2 "Sửa retention"). Override theo (project, kind) trong `artifact_retention`, đọc ngay trong câu INSERT ghi artifact nên ingest không thêm round trip; số áp dụng = `min(override, gói)`, nên hạ gói sau khi đặt override vẫn không vượt gói. Áp cho artifact ghi từ lúc đổi; artifact đã lưu giữ `expiresAt` cũ.
 
 ### 10.5 Packaging `[ASSUMPTION — phải validate trước billing]`
 
@@ -2298,6 +2710,8 @@ Dữ liệu test E2E nhạy cảm hơn vẻ ngoài. Nó chứa: URL môi trườ
 
 **Như đã cài — OAuth Google/GitHub (27-09, migration 0018):** mỗi provider một công tắc ở backend (`OAUTH_GOOGLE`, `OAUTH_GITHUB` = on|off, mặc định off, kèm `…_CLIENT_ID`/`…_CLIENT_SECRET`; `PUBLIC_URL` dựng redirect URI `…/v1/session/oauth/<provider>/callback`); provider tắt thì không có nút trên trang đăng nhập (bootstrap trả `providers`) và route trả "disabled". Luồng: authorization code + PKCE S256; state, verifier và đường quay về nằm trong một cookie HttpOnly ký HMAC (khóa dẫn từ pepper), sống 10 phút, dùng một lần — không có gì lưu server trước khi provider trả lời. Người được nhận bằng **subject ổn định** của provider (`user_identities`), không bằng email hôm nay; lần đầu liên kết với tài khoản có cùng email khi email **đã verify ở cả hai phía** (Google `email_verified`, GitHub email primary đã verify), ghi `identity.link`. Không tự tạo tài khoản (§11.2 chưa có đăng ký): email lạ → `/sign-in?oauth=no_account`; một tài khoản Google khác cùng email với tài khoản đã liên kết → `conflict` (không chiếm được). Tài khoản bật MFA: callback không mở phiên mà đưa tới bước nhập mã, challenge nằm trong cookie HttpOnly `atp_mfa`. Đường quay về chỉ là path trong app (URL ngoài, `//…`, `/v1/…` → `/`). Gọi Google/GitHub đi qua `platform/outbound` — client chỉ tới được host lấy từ cấu hình provider, không theo redirect, giới hạn thời gian và kích thước; `test/arch` vẫn cấm HTTP ra ngoài ở mọi module khác (§11.6 API7). 28-09: trang Security liệt kê liên kết của chính người dùng và cho gỡ (`GET`/`DELETE /v1/session/identities`, audit `identity.unlink`, migration 0019); tài khoản không có mật khẩu không gỡ được liên kết cuối (`409 LAST_SIGN_IN`) để khỏi tự khóa mình. Chưa có: liên kết thêm provider khi đang đăng nhập (hiện liên kết xảy ra lúc đăng nhập bằng provider có email trùng).
 
+**Như đã cài — tự đăng ký (QĐ-17; 26-10, sửa 29-10; migration 0035, 0044):** công tắc `SIGNUP=on|off` (mặc định off, bật cần `MAIL=smtp`). `POST /v1/session/signup` nhận email, node, role xin, ghi chú và luôn trả cùng một `202` — không phân biệt email đã có tài khoản (chống enumeration, như forgot-password); giới hạn 5/15 phút theo IP và theo email. Chỉ email chưa có tài khoản nhận link `/signup#<token>` (một lần, 24 giờ, lưu HMAC); tài khoản đã verify và yêu cầu vào hàng chờ chỉ được tạo khi mở link và đặt mật khẩu (`…/signup/complete`), phiên mở không có role nào cho tới khi admin node duyệt. Tài khoản do bản đầu tạo mà chưa từng chứng minh hộp thư bị bỏ verify và thu hồi phiên (N65).
+
 ### 11.3 RBAC
 
 #### 11.3.1 Vai trò (cố ý phẳng; custom role là P6)
@@ -2339,6 +2753,10 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 
 **Như đã cài — tạo project trên dashboard (29-09):** nửa "tạo" của dòng "Tạo/xóa project": `POST /v1/workspaces/{id}/projects {name, defaultBranch?}` cho `project.manage` trên workspace (workspace admin, org admin/owner); trùng tên → 409. UI: trang workspace ở Team có "New project", tạo xong chuyển thẳng sang CI tokens của project mới — hai bước là đủ để một team tự nối CI, không cần người vận hành. **Xóa project (29-09, migration 0025, chủ dự án chọn xóa mềm):** `DELETE /v1/projects/{id} {confirmName}` (phải gõ lại đúng tên) — `project.manage`. Xóa là **mềm**: tenancy thôi trả project ở `GetProject`/`ProjectScope`/`ListProjects`, nên mọi route (dashboard lẫn ingest bằng CI token) thành 404 ngay lập tức, không phải sửa từng route; tên được giải phóng (unique index chỉ trên project sống). Khôi phục trong **30 ngày** từ trang workspace (`GET …/workspaces/{id}/projects/deleted`, `POST …/projects/{id}/restore`; tên đã bị chiếm → 409). Hết hạn, worker gọi `PurgeProject` của từng module — artifact (object trong bucket trước, rồi hàng), triage, flaky, identity, testmgmt, results, authz (token của project và environment, membership, lời mời) — tenancy cuối cùng; dừng giữa chừng thì lần sau làm nốt. Lịch sử shadow meter được giữ (là cái đã đếm, không phải dữ liệu project) và project đã xóa không bị đếm trong thời gian chờ. Xóa / khôi phục / purge ghi `authz_audit` (`project.*`, người làm hoặc `system`). **Xóa run (29-09, migration 0026, `data.delete` — owner, org admin, maintainer; không phải workspace admin, đúng §11.3.2):** `DELETE /v1/projects/{id}/runs/{runId}`, `GET …/runs/deleted`, `POST …/runs/{runId}/restore`. Cũng mềm, 30 ngày. Khác project ở chỗ run được đọc từ nhiều nơi, nên **mọi** truy vấn đọc run hoặc kết quả của nó mang `deleted_at IS NULL`: danh sách, chi tiết, kết quả, lịch sử identity (cả sparkline 30 lần gần nhất), trend, triage metrics, ROI, release gate, meter, và lịch sử flaky trong `results` — flaky signal của các test trong run được đánh dấu tính lại, sweep kế tiếp dựng lại không có run đó (có test: 2 run → 1 run, 0 fail). Run còn đang nhận kết quả → 409 `RUN_OPEN`. Hết hạn: artifact (object trước), triage của các result, review item của run, rồi result và run; identity của test giữ nguyên. Audit `run.delete/restore/purge`.
 
+**Như đã cài — cấu hình project (05-10, migration 0027):** dòng "Sửa retention/cấu hình project". `GET /v1/projects/{id}/settings` cho mọi người xem được project: tên, nhánh mặc định, gói của org và retention từng kind (`planDays`, `days`, `override`). `PATCH` cùng đường cho `project.configure` (maintainer trở lên): `name`, `defaultBranch`, `retention {kind: days}` — days từ 1 tới số của gói, `0` = quay về số của gói, lớn hơn gói → `400 RETENTION_ABOVE_PLAN`; mọi giá trị được kiểm trước khi ghi, nên body bị từ chối không đổi gì (kể cả tên đi kèm); trùng tên → 409. Mỗi lần đổi thật ghi `authz_audit` `project.configure` kèm cũ → mới; body không đổi gì thì không ghi.
+
+**Như đã cài — xóa tổ chức (05-10, migration 0028):** dòng "Billing, xóa org", chủ dự án chọn xóa mềm 30 ngày như project. `DELETE /v1/organizations/{id} {confirmName}` chỉ cho `org.manage` (org owner — owner đã bắt buộc MFA, §11.2), phải gõ đúng tên tổ chức. Từ lúc trả lời, tenancy không còn trả về tổ chức, workspace hay project dưới nó (mọi đọc project mang điều kiện "org còn sống"), nên mọi route và mọi CI token bên dưới → 404, meter (§10.6) cũng không đếm. Chỉ owner của tổ chức thấy nó ở `GET /v1/organizations/deleted` và khôi phục bằng `POST …/{id}/restore` (người khác, org còn sống hoặc đã purge → 404). Project đã bị xóa riêng trước đó vẫn ở trạng thái xóa sau khi khôi phục tổ chức. Slug vẫn giữ chỗ trong cửa sổ nên khôi phục không bao giờ đụng trùng. Hết 30 ngày, worker purge từng project như purge một project (mỗi project một dòng `project.purge`), rồi membership / lời mời / token ở tầng org và workspace, rồi workspace và tổ chức; lịch sử meter giữ lại như với project. Audit `organization.delete|restore|purge`. Lời mời còn mở vào tổ chức đã xóa vẫn chấp nhận được trong cửa sổ (role nằm trong tổ chức bị ẩn; purge xóa nó) — cố ý, để khôi phục không làm mất lời mời.
+
 **Như đã cài — ingest token trên dashboard (29-09):** dòng "Tạo/thu hồi ingest token" có đường cho người dùng (trước đó chỉ `cmd/admin token issue/revoke`, nên khách không tự nối CI được). `GET|POST /v1/projects/{id}/tokens`, `DELETE …/tokens/{tokenId}`, cần `token.manage` (maintainer trở lên). Mặc định `project:ingest`, thêm `project:read` cho pipeline đọc release gate; hạn 30/90/365 ngày (mặc định 365, §11.4). Secret chỉ nằm trong câu trả lời của POST (mọi câu trả lời `/v1` là `no-store`); danh sách chỉ có prefix `atp_ing_xxxxxxxx…`, ngày dùng cuối, hạn, trạng thái. Thu hồi ghi `authz_audit` `token.revoke` với người đang đăng nhập; token của project khác không với tới qua project này (404). UI: "CI tokens" trong menu project.
 
 **Như đã cài (22-09, migration 0015):** sáu role đúng bảng §11.3.1, mỗi role gắn ở **một** tầng (`RoleLevel`; `GrantRole` và CHECK trong DB cùng từ chối gán sai tầng) và kế thừa xuống. Ma trận §11.3.2 là bảng dữ liệu `authz/rules.go` — **không phải bậc thang**: hàng "xóa dữ liệu run/artifact" cho maintainer mà không cho ws_admin, nên `authorize()` lấy **hợp** của mọi membership trên chuỗi org → workspace → project thay vì "role mạnh nhất". `TestMatrixMatchesSpec` chép nguyên sáu cột. Hàng cũ của P1-min: `admin` ở org → `org_owner` (P1-min org admin có `org.manage`, nay chỉ owner có), ở workspace → `workspace_admin`, ở project → `maintainer`; `member`/`viewer` gán trên org/workspace được **trải** thành một hàng mỗi project bên dưới rồi xóa (chạy thật trên DB có dữ liệu 22-09). "Ẩn nút": `GET /v1/projects` trả `actions[]` tính từ chính các membership đã đi qua để liệt kê project (không thêm query), UI dựa vào đó; server vẫn kiểm mọi call. **Quản lý member (27-09, migration 0016):** `GET|POST /v1/projects/{id}/members`, `DELETE …/members/{userId}`, đều sau `member.manage` (ws_admin trở lên — maintainer không có). Danh sách gồm mọi membership trên chuỗi org → workspace → project (hàng kế thừa chỉ đọc từ project). Cấp role chỉ nhận role tầng project; người được thêm phải là tài khoản **đã verify** (chưa có mailer/tự đăng ký, §11.2), nên `404 USER_NOT_FOUND` cho người quản lý biết email chưa dùng — chấp nhận, xem §11.6 API6. Cấp lại với role khác là đổi role (có thể hạ quyền), nên mỗi lần cấp do người làm cũng ghi `authz_audit` (`role.grant`, kèm role cũ) cùng transaction. **Tầng workspace/org (27-09):** cùng ba route cho `/v1/workspaces/{id}/members` (cấp `workspace_admin`) và `/v1/organizations/{id}/members` (cấp `org_admin`, `org_owner`), sau `member.manage` của node đó; danh sách gồm hàng kế thừa từ tầng trên (chỉ đọc). `GET /v1/member-scopes` trả org + workspace người gọi quản lý (org admin/owner thấy org và mọi workspace; ws admin thấy workspace đó) — màn hình Team. **Luật owner** (chốt với chủ dự án 27-09): chỉ owner (`org.manage`) được cấp role owner, đổi hay gỡ người đang là owner (`403 OWNER_ONLY`); tổ chức luôn còn ít nhất một owner — hạ quyền hay gỡ owner cuối bị từ chối (`ErrLastOwner` → `409 LAST_OWNER`) ở cả api lẫn `cmd/admin`, trong transaction khóa các hàng owner. Owner mới bị giữ ở bước bật MFA (§11.2). **Mời qua email (28-09, migration 0020):** khi `MAIL=smtp`, `POST …/members` cho một email chưa có tài khoản tạo lời mời thay vì `USER_NOT_FOUND` (người quản lý vẫn biết email đó chưa có tài khoản — như trước). Token `atp_inv_…` 256 bit, chỉ lưu HMAC(pepper), dùng một lần, hạn 7 ngày; mời lại cùng (email, node) thay lời mời cũ. Link là `${PUBLIC_URL}/invite#<token>` — phần fragment không bao giờ được trình duyệt gửi lên server nên token không vào access log của api hay proxy; trang đọc rồi xóa nó khỏi thanh địa chỉ và lịch sử, chỉ gửi trong body `POST /v1/invitations/lookup|accept` (Origin + CSRF như login; token sai tính vào giới hạn theo IP). Nhận lời mời tạo tài khoản đã verify (link chứng minh sở hữu email), gán role, mở phiên; nếu trong lúc đó email đã có tài khoản thì chỉ gán role và trả `409 ACCOUNT_EXISTS` — link không bao giờ thay cho mật khẩu của tài khoản có sẵn. Nội dung mail: văn bản thuần, người mời, tên node, role, link, hạn; tên tổ chức/project do người dùng đặt được lọc ký tự điều khiển trước khi vào Subject và `platform/mail` từ chối mọi CR/LF trong header. Gửi mail lỗi → thu hồi lời mời ngay (`502 MAIL_FAILED`), không để lại link không ai nhận. **Quên mật khẩu (28-09, migration 0021):** đúng hai luật §11.2 ở trên — "forgot-password luôn trả 'nếu email tồn tại, đã gửi'" (một câu trả lời `202` giống hệt; trước câu trả lời chỉ có phần đếm giới hạn — tra tài khoản, ghi token và gửi mail chạy sau, nên cả thời gian trả lời cũng không phân biệt) và "rate limit theo IP và theo account" (mọi yêu cầu đều đếm, kể cả email không tồn tại, nên chính giới hạn cũng không lộ gì). Token `atp_rst_…` một lần, 30 phút, lưu HMAC; link `/reset#<token>` (fragment như lời mời). Đặt lại: mật khẩu mới (chính sách cũ), email thành đã verify, thu hồi **mọi** phiên, xóa bộ đếm khóa đăng nhập của email, audit `password.reset`; không mở phiên mới. Chưa có: custom role (P6).
@@ -2371,10 +2789,10 @@ Kế thừa xuống theo cây Org → Workspace → Project. Một người có 
 | API4 Resource                          | Trần §7.4 + cap artifact §10.4 + quota + LLM cap §10.3                                                                                                      | Test vượt từng trần trả đúng `413`/`429`           |  28-09: giới hạn theo IP đếm client thật sau proxy (`TRUSTED_PROXIES`); argon2 chỉ chạy sau khi qua giới hạn — `backend/GATES.md` "Rà soát bảo mật 28-09" |
 | API5 Function-level                    | Ma trận §11.3.2; admin action check **role**, không chỉ check login                                                                                         | Test viewer gọi endpoint maintainer → `403`        |   |
 | API6 Business flow                     | Đăng ký + mời member + forgot-password có rate limit; Free quota chặn farm storage                                                                          | Ngưỡng ghi trong config, có test                   |  27-09: thêm member theo email sau rate limit 600/phút/user; `USER_NOT_FOUND` lộ email có tài khoản cho người có `member.manage` (chấp nhận). 28-09: lời mời qua email — token sai tính vào giới hạn đăng nhập theo IP (`TestInvitations`: lần thứ 6 → 429), token chỉ trong fragment/body |
-| API7 SSRF                              | Server không fetch URL client cung cấp (§7.10); `ciRunUrl` chỉ render                                                                                       | Grep codebase: không outbound fetch từ input       |  27-09: HTTP ra ngoài chỉ ở `platform/objstore` và `platform/outbound` (allowlist host từ cấu hình OAuth, không theo redirect, body ≤ 1 MiB) — `TestNoOutboundHTTPFromDomainModules` |
+| API7 SSRF                              | Server không fetch URL client cung cấp (§7.10); `ciRunUrl` chỉ render                                                                                       | Grep codebase: không outbound fetch từ input       |  27-09: HTTP ra ngoài chỉ ở `platform/objstore` và `platform/outbound` (allowlist host từ cấu hình OAuth, không theo redirect, body ≤ 1 MiB) — `TestNoOutboundHTTPFromDomainModules`. 31-10 (QĐ-18): `platform/llm` gọi Chat Completions qua `platform/outbound.Send` — host cố định trong bảng provider, cộng `LLM_BASE_URL` của người vận hành; organization không bao giờ nhập URL; không theo redirect; câu trả lời ≤ 16 MiB 04-11 (QĐ-19): Firefox và WebKit đi sau cùng proxy guard như Chromium (loopback theo IP, tên, IPv6 đều bị chặn — `checker/test/engines.test.mjs`); load test và file chứng minh sở hữu cũng đi qua proxy đó (`load.test.mjs`); load chỉ vào host organization đã chứng minh, kiểm lại trước khi gửi tải. 05-11 (QĐ-19 tầng 4): script của team chạy trong container trên mạng `internal` riêng, chỉ ra được qua forwarder của `sandboxd` tới đúng host environment đã qua guard (`platform/sandbox`, `sandbox/test/e2e.sh` trên Docker thật); worker gọi `sandboxd` qua `platform/outbound` với địa chỉ cố định trong cấu hình. |
 | API8 Misconfig                         | §11.5; review config đủ lớp app → proxy → container → cloud → DB                                                                                            | Checklist ký trước release                         |   |
 | API9 Inventory                         | Chỉ `/v1/`; OpenAPI là nguồn sự thật; token có `lastUsedAt`; endpoint bỏ = chặn thật + ghi ngày tắt                                                         | Diff OpenAPI mỗi release                           |   |
-| API10 Unsafe consumption               | P1 phụ thuộc ngoài duy nhất: LLM provider + OAuth. Response LLM **validate schema** trước khi lưu `AiHypothesis` (category ∈ enum §8.7, confidence ∈ [0,1]) | Test LLM trả rác → hypothesis bị loại, không crash |  27-09 OAuth: trả lời provider decode JSON có giới hạn, thiếu `sub`/`id` → từ chối, email chỉ dùng khi đã verify — `cmd/api/oauth_test.go`, `platform/outbound` test |
+| API10 Unsafe consumption               | P1 phụ thuộc ngoài duy nhất: LLM provider + OAuth. Response LLM **validate schema** trước khi lưu `AiHypothesis` (category ∈ enum §8.7, confidence ∈ [0,1]) | Test LLM trả rác → hypothesis bị loại, không crash |  27-09 OAuth: trả lời provider decode JSON có giới hạn, thiếu `sub`/`id` → từ chối, email chỉ dùng khi đã verify — `cmd/api/oauth_test.go`, `platform/outbound` test. 31-10 (QĐ-18): mọi câu trả lời LLM, của mọi provider, kiểm theo schema trong `platform/llm` (`llm.Validate`) trước khi tới module — `schema_test.go`, `TestChatErrors` |
 
 ### 11.7 Rủi ro còn lại (cố ý chưa làm ở P1)
 
@@ -2431,7 +2849,7 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 | 9 | Xây P1-min song song Phase 0 (QĐ-11) | Owner dự án | ✅ code trên `main` 18-09-2026 (§0.5); T2/T5 phần cần server còn mở (§14.1) |
 
 **Phase 0 khởi động lại 15-09-2026** (§5.8) — lần chốt 26-08 không diễn ra. Mục 1 và 2 đã đóng. Mốc kế tiếp: **14-09 đủ 30 tên trong tracker**, **21-09 chốt ≥ 3 booking**, **12-10 hạn chót partner #3**, rồi **26-10 họp Gate-0**.  
-**Blocker để gửi tài liệu đối ngoại:** chỉ còn mục 4 — mọi claim competitor chưa kiểm chứng. Mục 3 đã đóng: `.md` và `.docx` đều sẵn sàng, `verify.sh` gác 11/11. `.pptx` chưa có nguồn, và đó là lựa chọn có lý do ghi ở `docs/external/README.md`.  
+**Blocker để gửi tài liệu đối ngoại:** chỉ còn mục 4 — mọi claim competitor chưa kiểm chứng. Mục 3 đã đóng: `.md` và `.docx` đều sẵn sàng, `verify.sh` gác 11/11. `.pptx` chưa có nguồn, và đó là lựa chọn có lý do ghi ở `docs/external/README.md`. *02-11:* bản đó đã lạc hậu và đã gỡ (§0.1) — mục 3 phải làm lại trước lần gửi kế tiếp.  
 **P1-min đã build song song theo QĐ-11 (§0.5); Gate-0 không đổi và code không được nhắc tới ở đó (QĐ-11 #2). P1-full chỉ xét sau Gate-0 PASS.**
 
 ---
@@ -2445,7 +2863,7 @@ Trước đây mục này giữ một bản tóm tắt song song của đúng 50
 
 | Gate | Chứng minh được điều gì | Phase áp dụng | Trạng thái 18-09-2026 — trích `backend/GATES.md` |
 |---|---|---|---|
-| **T0** | Core flow chạy end-to-end: reporter đẩy được run thật lên, dashboard hiện đúng | P1, trước partner đầu tiên | ✅ 16-09 — reporter thật đẩy run, dashboard hiện đúng; CI `e2e` chạy lại toàn bộ trên compose (reporter → api → UI, 12 bước) |
+| **T0** | Core flow chạy end-to-end: reporter đẩy được run thật lên, dashboard hiện đúng | P1, trước partner đầu tiên | ✅ 16-09 — reporter thật đẩy run, dashboard hiện đúng; CI `e2e` chạy lại toàn bộ trên compose (reporter → api → UI, 12 bước). **30-10:** job này chưa từng kết thúc run hay upload artifact (`OBJSTORE_ENDPOINT` mẫu R2; live check chấp nhận `running`) và sẽ đỏ vì `/downloads/index.json` 404 — đã sửa CI, chạy lại từng bước không Docker: đạt (`backend/GATES.md`) |
 | **T1** | **Không mất dữ liệu** + idempotency + retry an toàn | P1, trước partner đầu tiên | ✅ 16-09 — 3 kịch bản kill/drop trên binary thật + unit cho phần còn lại; tìm và sửa deadlock 40P01 (N61) |
 | **T2** | Load/concurrency đạt target §14.2 | P1, trước partner thứ ba | ⏳ 17-09 — dashboard 100k–1M ✅, resolver p99 ✅, ingest 100 đồng thời **✗ trên laptop** (p95 ≈ 2 s, từ 8,4 s) — cần server + máy phát tải riêng |
 | **T3** | Failure recovery + observability đủ để biết mình đang hỏng | P1, trước Gate-1 | ✅ 17-09 — alert §6.4 trên tên metric thật, gauge phía api, 4 kịch bản hỏng nhìn thấy ở `/metrics`, log không lộ bí mật |
@@ -2478,10 +2896,10 @@ Mỗi kịch bản phải giữ đúng invariant, không chỉ "không crash":
 | Kill API giữa batch ingest | Client retry cùng `(localRunId, sequence)` → không nhân đôi event (§7.1) | ✅ `TestKillAPIMidBatchThenReplay` — kill giữa dòng, replay 40 batch: `accepted + duplicates = 1000`, không nhân đôi |
 | Restart kết nối DB | Không run nào kẹt vĩnh viễn ở `running` | ✅ `TestDBConnectionsDroppedUnderTraffic` — `pg_terminate_backend` ×4 giữa traffic; 503 rồi retry qua; 0 run kẹt `running`; 28-09: job cũng không kẹt tới hết lease — worker ghi lỗi thử lại khi pool còn connection chết (CI bắt, `backend/GATES.md` T1) |
 | Queue không khả dụng 30 s | Ingest vẫn nhận, xử lý trễ; không trả 5xx cho reporter | ✅ đọc là *worker vắng* (queue P1 là bảng Postgres) — 108 request 201/200 khi không có worker, xử lý hết khi worker lên |
-| S3/R2 timeout khi upload | Artifact về trạng thái retry được; **run vẫn hợp lệ** (§10.4) | 🔶 unit với `memory.Fail`; S3/R2 thật chờ staging |
+| S3/R2 timeout khi upload | Artifact về trạng thái retry được; **run vẫn hợp lệ** (§10.4) | ✅ 30-09 `test/failure` `TestObjectStoreHangKeepsRunValid` — api + worker thật, SeaweedFS (S3 thật) sau proxy treo: `complete` → 503 `STORE_UNAVAILABLE` sau 8 s (trước sửa: treo quá 30 s của reporter), artifact `pending`, run vẫn xử lý; store hồi → `verified` + link. R2/S3 nhà cung cấp thật chờ staging. **30-10, phía reporter:** trước đây reporter chờ mọi upload rồi mới finish, nên store hỏng hay treo làm run nằm mở tới khi server tự đóng sau 6 giờ với `error`; nay upload có hạn trong `flushTimeoutMs` và finish vẫn gửi (`reporter.test.ts`: URL hỏng, store treo) |
 | Duplicate event/webhook | Idempotency key chặn; không double-count | ✅ `internal/ingest` `TestIngestEndToEnd`; soak 2 h: 90/90 bit lật → `422 CHECKSUM_MISMATCH`, run vẫn hợp lệ |
 | Hai run song song gửi cùng fingerprint lạ | Chỉ một `TestIdentity` được tạo (§9.7, `ON CONFLICT`) | ✅ `TestRaceOnUnknownFingerprint` + harness T1 trên binary thật (N61) |
-| Reporter mất mạng toàn bộ | Spool local, **test run của khách vẫn xanh** — bất biến sản phẩm §7.5 | ✅ test của reporter (spool `.jsonl`, không bao giờ fail run); chưa có bài cắt mạng thật của binary |
+| Reporter mất mạng toàn bộ | Spool local, **test run của khách vẫn xanh** — bất biến sản phẩm §7.5 | ✅ test của reporter (spool `.jsonl`, không bao giờ fail run); ✅ 30-09 `reporter/playwright/test/outage.test.ts` trên `playwright test` thật (CI job `reporter`): cổng đóng +2 s, server treo +30 s (= `flushTimeoutMs`), cùng exit code, đủ event trong spool — **trước sửa server treo cộng +313 s** vào bộ test 13 s |
 | User A gọi mọi endpoint với resource của org B | 100% trả `403`/`404` (§11.3.3) — đây là gate release | ✅ `cmd/api/tenant_walk_test.go` — mọi pattern router đã đăng ký; route chưa phân loại = test fail |
 | Restore backup Postgres | Restore thật thành công trước Gate-1 (§11.5) — backup chưa restore thử = chưa có backup | ✅ `test/restore` 17-09 — dump → DB mới → 24/24 bảng checksum bằng nhau → api trả đúng byte → worker tiếp job |
 
@@ -2503,4 +2921,4 @@ Gate kỹ thuật trượt thì **không** kill dự án — nó chặn việc m
 
 ---
 
-*Hết. Lịch sử: `docs/v3.0/` (gốc), `docs/v3.1/` (viết lại rời), `docs/SPEC-v3.1-merged.md`, `docs/SPEC-v3.2-reviewed.md`.*
+*Hết. Lịch sử (gỡ khỏi repo 02-11, lấy lại bằng `git show b369287:<đường dẫn>`): `docs/v3.0/` (gốc), `docs/v3.1/` (viết lại rời), `docs/SPEC-v3.1-merged.md`, `docs/SPEC-v3.2-reviewed.md`.*

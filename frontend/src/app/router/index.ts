@@ -25,6 +25,10 @@ export function makeRouter(
         component: () => import("../../features/auth/PasswordPage.vue"),
       },
       {
+        path: "/signup",
+        component: () => import("../../features/auth/SignupPage.vue"),
+      },
+      {
         path: "/",
         component: () => import("../AppShell.vue"),
         meta: { protected: true },
@@ -79,6 +83,11 @@ export function makeRouter(
               import("../../features/testmgmt/TestCasesPage.vue"),
           },
           {
+            path: "p/:project/specialized-results",
+            component: () =>
+              import("../../features/testmgmt/SpecializedResultsPage.vue"),
+          },
+          {
             path: "p/:project/cases/:case",
             component: () =>
               import("../../features/testmgmt/TestCaseDetailPage.vue"),
@@ -91,6 +100,15 @@ export function makeRouter(
           {
             path: "p/:project/plans",
             component: () => import("../../features/testmgmt/PlansPage.vue"),
+          },
+          {
+            path: "p/:project/start",
+            component: () =>
+              import("../../features/testmgmt/StartTestingPage.vue"),
+          },
+          {
+            path: "p/:project/plans/:plan/run",
+            component: () => import("../../features/testmgmt/RunPlanPage.vue"),
           },
           {
             path: "p/:project/plans/:plan",
@@ -107,12 +125,66 @@ export function makeRouter(
               import("../../features/testmgmt/ReleaseDetailPage.vue"),
           },
           {
+            path: "p/:project/url-checks",
+            component: () =>
+              import("../../features/testmgmt/UrlChecksPage.vue"),
+          },
+          {
+            path: "p/:project/url-checks/:check",
+            component: () =>
+              import("../../features/testmgmt/UrlCheckDetailPage.vue"),
+          },
+          {
+            path: "p/:project/auto",
+            component: () => import("../../features/autotest/AutoTestPage.vue"),
+          },
+          {
+            path: "p/:project/auto/runs/:run",
+            component: () => import("../../features/autotest/AutoRunPage.vue"),
+          },
+          {
+            path: "p/:project/auto/scans/:scan",
+            component: () => import("../../features/autotest/SiteScanPage.vue"),
+          },
+          {
+            path: "p/:project/auto/ownership/:environment",
+            component: () =>
+              import("../../features/autotest/OwnershipPage.vue"),
+          },
+          {
+            path: "p/:project/load-runs",
+            component: () => import("../../features/autotest/LoadRunsPage.vue"),
+          },
+          {
+            path: "p/:project/load-runs/:loadRun",
+            component: () => import("../../features/autotest/LoadRunPage.vue"),
+          },
+          {
+            path: "p/:project/script-runs",
+            component: () =>
+              import("../../features/autotest/ScriptRunsPage.vue"),
+          },
+          {
+            path: "p/:project/script-runs/:scriptRun",
+            component: () =>
+              import("../../features/autotest/ScriptRunPage.vue"),
+          },
+          {
+            path: "p/:project/guide",
+            component: () => import("../../features/guide/TesterGuidePage.vue"),
+          },
+          {
             path: "team",
             component: () => import("../../features/members/TeamPage.vue"),
           },
           {
             path: "team/organizations/:organization",
             component: () => import("../../features/members/MembersPage.vue"),
+          },
+          {
+            path: "team/organizations/:organization/ai",
+            component: () =>
+              import("../../features/members/AiSettingsPage.vue"),
           },
           {
             path: "team/organizations/:organization/usage",

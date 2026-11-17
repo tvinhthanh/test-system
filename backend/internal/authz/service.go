@@ -653,7 +653,7 @@ func (s *service) PurgeProject(ctx context.Context, projectID string, environmen
 
 func (s *service) AuditProject(ctx context.Context, action, projectID, workspaceID, actor string, details map[string]any) error {
 	switch action {
-	case "project.delete", "project.restore", "project.purge":
+	case "project.delete", "project.restore", "project.purge", "project.configure":
 	default:
 		return fmt.Errorf("%w: audit action %q", ErrInvalid, action)
 	}
@@ -673,4 +673,35 @@ func (s *service) AuditRun(ctx context.Context, action, runID, projectID, actor 
 		return fmt.Errorf("%w: run, project and actor", ErrInvalid)
 	}
 	return s.audit(ctx, action, "run", runID, string(LevelProject), projectID, actor, details)
+}
+
+func (s *service) AuditOrganization(ctx context.Context, action, orgID, actor string, details map[string]any) error {
+	switch action {
+	case "organization.delete", "organization.restore", "organization.purge", "organization.ai_settings":
+	default:
+		return fmt.Errorf("%w: audit action %q", ErrInvalid, action)
+	}
+	if !isUUID(orgID) || actor == "" {
+		return fmt.Errorf("%w: organization and actor", ErrInvalid)
+	}
+	return s.audit(ctx, action, "organization", orgID, string(LevelOrganization), orgID, actor, details)
+}
+
+func (s *service) PurgeOrganization(ctx context.Context, orgID string, workspaceIDs []string) error {
+	if !isUUID(orgID) {
+		return ErrNotFound
+	}
+	scopes := append([]string{orgID}, workspaceIDs...)
+	return s.db.WithTx(ctx, func(ctx context.Context) error {
+		for _, q := range []string{
+			`DELETE FROM api_tokens WHERE scope_level IN ('organization', 'workspace') AND scope_id::text = ANY($1)`,
+			`DELETE FROM memberships WHERE scope_level IN ('organization', 'workspace') AND scope_id::text = ANY($1)`,
+			`DELETE FROM invitations WHERE scope_level IN ('organization', 'workspace') AND scope_id::text = ANY($1)`,
+		} {
+			if _, err := s.db.Q(ctx).Exec(ctx, q, scopes); err != nil {
+				return fmt.Errorf("authz: purge organization: %w", err)
+			}
+		}
+		return nil
+	})
 }

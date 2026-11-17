@@ -165,6 +165,29 @@ func TestRunsPageAndFilters(t *testing.T) {
 	if _, err := f.q.Runs(ctx, f.project, query.RunFilter{Status: "exploded"}); !errors.Is(err, query.ErrInvalid) {
 		t.Errorf("bad status: %v", err)
 	}
+	if _, err := f.q.Runs(ctx, f.project, query.RunFilter{Source: "unknown"}); !errors.Is(err, query.ErrInvalid) {
+		t.Errorf("bad source: %v", err)
+	}
+	// Source filters use stored ingest metadata and must keep the cursor bound
+	// to the chosen source across pages.
+	for i, metadata := range []struct{ framework, trigger string }{
+		{`{"name":"playwright"}`, `{}`},
+		{`{"name":"junit"}`, `{"source":"junit-import","importedBy":"tester"}`},
+		{`{"name":"atp-auto"}`, `{"source":"junit-import","importedBy":"autotest:tester"}`},
+	} {
+		if _, err := f.db.Q(ctx).Exec(ctx, `UPDATE runs SET framework = $2::jsonb, trigger = $3::jsonb WHERE id = $1`, f.runs[i].ID, metadata.framework, metadata.trigger); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for source, want := range map[string]string{"playwright": string(f.runs[0].ID), "junit": string(f.runs[1].ID), "auto": string(f.runs[2].ID)} {
+		got, err := f.q.Runs(ctx, f.project, query.RunFilter{Source: source})
+		if err != nil || len(got.Items) != 1 || got.Items[0].ID != want {
+			t.Errorf("source=%s: %+v %v", source, got.Items, err)
+		}
+	}
+	if _, err := f.q.Runs(ctx, f.project, query.RunFilter{Limit: 2, Cursor: page.NextCursor, Source: "playwright"}); !errors.Is(err, query.ErrBadCursor) {
+		t.Errorf("cursor across source filters: %v", err)
+	}
 	if p, _ := f.q.Runs(ctx, f.other, query.RunFilter{}); len(p.Items) != 0 {
 		t.Error("another project sees runs")
 	}

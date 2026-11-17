@@ -78,25 +78,29 @@ const atRate = (h: number) => (money(h) ? `= ${money(h)} at your rate · ` : "")
     <template v-if="data">
       <!-- Rule 1: the denominator first. -->
       <section
-        class="roi-coverage mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4"
+        class="roi-coverage mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-0 lg:overflow-hidden lg:rounded-lg lg:border lg:bg-card"
         aria-label="Triage coverage"
       >
         <StatTile
+          variant="segment"
           label="Failures this month"
           :value="data.failures"
           :note="`${data.triaged} with an accepted root cause`"
         />
         <StatTile
+          variant="segment"
           label="Triage coverage"
           :value="percent(data.triageCoverage)"
           note="failures with a decision"
         />
         <StatTile
+          variant="segment"
           label="Untriaged"
           :value="percent(data.untriagedRate)"
           note="left out of every figure below"
         />
         <StatTile
+          variant="segment"
           label="Median time to root cause"
           :value="minutesLabel(data.ttrcMedianMinutes)"
           :note="

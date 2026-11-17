@@ -88,11 +88,7 @@ func (s *service) Declare(ctx context.Context, in Declare) (Artifact, Upload, bo
 		return Artifact{}, Upload{}, false, &TooLargeError{Kind: in.Kind, Limit: cap, Got: in.SizeBytes}
 	}
 	now := s.now().UTC()
-	plan := RetentionDays[in.Plan]
-	if plan == nil {
-		plan = RetentionDays["free"]
-	}
-	expires := now.Add(time.Duration(plan[in.Kind]) * 24 * time.Hour)
+	keep := planDays(in.Plan)[in.Kind]
 	// The key is ours: tenant, run, then a random id — never the client's name.
 	key := fmt.Sprintf("%s/%s/%s", in.ProjectID, in.RunID, newID())
 
@@ -102,10 +98,10 @@ func (s *service) Declare(ctx context.Context, in Declare) (Artifact, Upload, bo
 		q := s.db.Q(ctx)
 		row := q.QueryRow(ctx, `
 			INSERT INTO artifacts (project_id, run_id, client_test_id, occurrence_index, attempt, kind, name, content_type, declared_bytes, sha256, storage_key, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, `+expiresSQL("$12", "$13", "$6")+`)
 			ON CONFLICT (run_id, client_test_id, occurrence_index, attempt, name) DO NOTHING
 			RETURNING `+columns,
-			in.ProjectID, in.RunID, in.ClientTestID, in.OccurrenceIndex, in.Attempt, string(in.Kind), in.Name, in.ContentType, in.SizeBytes, in.SHA256, key, expires)
+			in.ProjectID, in.RunID, in.ClientTestID, in.OccurrenceIndex, in.Attempt, string(in.Kind), in.Name, in.ContentType, in.SizeBytes, in.SHA256, key, now, keep)
 		var err error
 		a, err = scan(row)
 		if err == nil {
@@ -439,11 +435,7 @@ func (s *service) PutEvidence(ctx context.Context, in Evidence, body []byte) (Ar
 	}
 	sum := sha256.Sum256(body)
 	now := s.now().UTC()
-	plan := RetentionDays[in.Plan]
-	if plan == nil {
-		plan = RetentionDays["free"]
-	}
-	expires := now.Add(time.Duration(plan[KindManualEvidence]) * 24 * time.Hour)
+	keep := planDays(in.Plan)[KindManualEvidence]
 	// Tenant, execution, random id — the key is ours, as for every kind.
 	key := fmt.Sprintf("%s/manual/%s/%s", in.ProjectID, in.ExecutionID, newID())
 	// Object first, row second: a crash between the two leaves an orphan
@@ -454,9 +446,9 @@ func (s *service) PutEvidence(ctx context.Context, in Evidence, body []byte) (Ar
 	}
 	a, err := scan(s.db.Q(ctx).QueryRow(ctx, `
 		INSERT INTO artifacts (project_id, manual_execution_id, kind, name, content_type, declared_bytes, actual_bytes, sha256, storage_key, status, expires_at, verified_at)
-		VALUES ($1, $2, 'manual_evidence', $3, $4, $5, $5, $6, $7, 'verified', $8, $9)
+		VALUES ($1, $2, 'manual_evidence', $3, $4, $5, $5, $6, $7, 'verified', `+expiresSQL("$9", "$8", "'manual_evidence'")+`, $9)
 		RETURNING `+columns,
-		in.ProjectID, in.ExecutionID, in.Name, in.ContentType, len(body), hex.EncodeToString(sum[:]), key, expires, now))
+		in.ProjectID, in.ExecutionID, in.Name, in.ContentType, len(body), hex.EncodeToString(sum[:]), key, keep, now))
 	if err != nil {
 		_ = s.store.Delete(ctx, key)
 		return Artifact{}, mapErr(err)
@@ -622,7 +614,12 @@ func newID() string {
 }
 
 func (s *service) PurgeProject(ctx context.Context, projectID string) (int, error) {
-	return s.purgeWhere(ctx, `project_id = $1`, projectID)
+	n, err := s.purgeWhere(ctx, `project_id = $1`, projectID)
+	if err != nil {
+		return n, err
+	}
+	_, err = s.db.Q(ctx).Exec(ctx, `DELETE FROM artifact_retention WHERE project_id = $1`, projectID)
+	return n, err
 }
 
 func (s *service) PurgeRun(ctx context.Context, runID string) (int, error) {

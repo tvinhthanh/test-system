@@ -48,6 +48,84 @@ tags:
 security: []
 
 paths:
+  /v1/projects/{projectId}/specialized-results:
+    get:
+      operationId: listSpecializedResults
+      tags: [testmgmt]
+      summary: Specialized results, newest first with scoped cursor pagination
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/SpecializedKind" } }
+        - { name: outcome, in: query, schema: { $ref: "#/components/schemas/SpecializedOutcome" } }
+        - { name: testCaseId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string }, description: "Opaque cursor bound to project and filters; changing filters requires restarting pagination." }
+      responses:
+        "200":
+          description: Up to 50 summaries; input.details is null and originalReport is empty. Fetch detail/original separately.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/SpecializedResult" } }
+                  nextCursor: { type: string, description: Empty when there are no further rows. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addSpecializedResult
+      tags: [testmgmt]
+      summary: Record or import an append-only ATP structured report v1
+      description: "Needs testmgmt.write. Not a runner or a vendor parser. 4 MiB body, 64 KiB details and 512 KiB original text. Same project/idempotencyKey and normalized content returns the original record; different content is 409. Retest must reference the same project, kind and case. Outcome computed by server; no automatic gate or flaky changes."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpecializedInput" }
+      responses:
+        "201":
+          description: Recorded or idempotently replayed result. Original report is downloaded separately.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SpecializedResult" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/specialized-results/{specializedId}:
+    get:
+      operationId: getSpecializedResult
+      tags: [testmgmt]
+      summary: Read a specialized result with typed details and its recorded actor
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: specializedId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Immutable recorded result, no-store.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SpecializedResult" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/specialized-results/{specializedId}/original:
+    get:
+      operationId: getSpecializedOriginal
+      tags: [testmgmt]
+      summary: Download the original UTF-8 text report under the same project permission
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: specializedId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Text attachment, nosniff and no-store; never rendered as HTML.
+          content: { text/plain: { schema: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /healthz:
     get:
       operationId: healthz
@@ -160,10 +238,13 @@ paths:
         Surefire `<flakyFailure>` → earlier failed attempts of a flaky pass,
         `<rerunFailure>` → more failed attempts. Times come from the
         testsuite timestamp (UTC when zoneless) plus case durations.
+        Node's test runner (`--test-reporter=junit`) writes top-level tests
+        straight under `<testsuites>` and no file: they are read too, and
+        the suites around a case are its describes.
       security: [{ ingestToken: [] }]
       parameters:
         - { name: environment, in: query, schema: { type: string, default: ci }, description: "Environment key (a slug); created if new." }
-        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest… Keep one per suite so its history stays one set of tests." }
+        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest, node… Keep one per suite so its history stays one set of tests." }
         - { name: branch, in: query, schema: { type: string } }
         - { name: commit, in: query, schema: { type: string, maxLength: 64 } }
         - { name: startedAt, in: query, schema: { type: string, format: date-time }, description: "Required only when no testsuite has a timestamp — history must not be dated today." }
@@ -348,7 +429,7 @@ paths:
         `email_verified`; GitHub: user id and the primary verified email).
         The account is the one linked to that provider subject, or — the
         first time — the verified account with the same verified email, which
-        links them (audited `identity.link`). There is no self-signup.
+        links them (audited `identity.link`). OAuth never creates an account.
         Answers are redirects: success → `redirect` with the session cookie;
         MFA on → `/sign-in?step=mfa&redirect=…` with the challenge in an
         HttpOnly `atp_mfa` cookie for `POST /v1/session/mfa`; failure →
@@ -566,6 +647,89 @@ paths:
         "403": { $ref: "#/components/responses/CSRF" }
         "404":
           description: "`RESET_NOT_FOUND` — used, replaced, or older than 30 minutes."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/signup:
+    post:
+      operationId: requestSignup
+      tags: [session]
+      summary: Ask to sign up and join a node — a link to finish is mailed
+      description: |
+        Self-serve sign-up with role approval (ADR-001, QĐ-17), only with
+        `SIGNUP=on`, which needs `MAIL=smtp` (bootstrap `signup`); otherwise
+        `404 SIGNUP_OFF`. Always `202` with the same body, whether or not the
+        email has an account — like forgot password, the lookup and the mail
+        happen after the answer. An email with no account gets a link
+        `/signup#<token>` (single use, 24 hours, replaced by a newer request);
+        nothing is created until it is opened. `requestedRole` must live at
+        `scopeLevel` (org_owner/org_admin → organization, workspace_admin →
+        workspace, maintainer/member/viewer → project). Every request counts
+        toward 5 per 15 minutes per email and per IP (`429`). Guarded like the
+        login (Origin + double-submit CSRF).
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, scopeLevel, scopeId, requestedRole]
+              properties:
+                email: { type: string }
+                scopeLevel: { type: string, enum: [organization, workspace, project] }
+                scopeId: { type: string, format: uuid }
+                requestedRole: { type: string, enum: [org_owner, org_admin, workspace_admin, maintainer, member, viewer] }
+                note: { type: string, maxLength: 1000, description: Shown to the admins who decide. }
+      responses:
+        "202":
+          description: Taken — a link is on its way if the email can sign up.
+          content: { application/json: { schema: { type: object, properties: { message: { type: string } } } } }
+        "400":
+          description: "`INVALID_SIGNUP` (email, note, or a role that does not live at the level) or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`SIGNUP_OFF` — sign-up is not open here."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/session/signup/complete:
+    post:
+      operationId: completeSignup
+      tags: [session]
+      summary: Finish signing up with the mailed token — choose a password and sign in
+      description: |
+        Creates the account verified (the mailed link proved the address)
+        with the chosen password, files the access request for the node's
+        admins (`GET …/access-requests`, audited `access_request.create`) and
+        opens a session, answering like `POST /v1/session`. The account holds
+        no role until an admin approves, so the session reaches nothing yet.
+        If the email has an account by now, `409 ACCOUNT_EXISTS` — a link
+        never takes an account over. Unknown tokens count toward the per-IP
+        limit.
+      security: [{ csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 12 }
+      responses:
+        "200":
+          description: Signed in.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400":
+          description: "`INVALID_PASSWORD` (at least 12 characters; the token is not spent) or `INVALID_PAYLOAD`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403": { $ref: "#/components/responses/CSRF" }
+        "404":
+          description: "`SIGNUP_NOT_FOUND` — used, replaced, or older than 24 hours; or `SIGNUP_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: "`ACCOUNT_EXISTS` — sign in with that account."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/session/mfa:
@@ -886,6 +1050,1153 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/settings:
+    get:
+      operationId: getProjectSettings
+      tags: [dashboard]
+      summary: The project's name, default branch and artifact retention (§11.3.2)
+      description: |
+        Anyone who may view the project. `retention` has one row per artifact
+        kind in §10.4 order: `planDays` is what the organization's plan keeps,
+        `days` what new artifacts of the kind get — the plan's number, or a
+        shorter one a maintainer set (`override`).
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The settings.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProjectSettings" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateProjectSettings
+      tags: [dashboard]
+      summary: Rename, change the default branch, or shorten retention (§11.3.2 "Sửa retention/cấu hình project")
+      description: |
+        Needs `project.configure` (maintainers and up). Every field is
+        optional. A retention value is days between 1 and the plan's number
+        for that kind, or 0 to go back to the plan's; it applies to artifacts
+        recorded from then on — stored ones keep their expiry. Every value is
+        checked before anything is written, so a refused body changes nothing.
+        A change is audited as `project.configure` with old → new; a body that
+        changes nothing is not.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                defaultBranch: { type: string, minLength: 1, maxLength: 200 }
+                retention:
+                  type: object
+                  description: "Kind → days. Kinds: screenshot, video, trace, har, log, attachment, manual_evidence."
+                  additionalProperties: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: The settings after the change.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProjectSettings" } } }
+        "400":
+          description: "`RETENTION_ABOVE_PLAN` (details carry `kind`, `planDays`, `days`) or `INVALID_PAYLOAD` (`details.field`)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`CONFLICT` — another project in the workspace has that name."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/environments:
+    get:
+      operationId: listEnvironments
+      tags: [dashboard]
+      summary: The project's environments with the address of the system under test (QĐ-14)
+      description: |
+        Anyone who may view the project. Ordered by key. Includes the
+        environments reporters created by key (§7.3) — `baseUrl` is "" until
+        someone records the address.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Every environment of the project (no paging; a project has a handful).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Environment" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createEnvironment
+      tags: [dashboard]
+      summary: Add an environment, with the address testers open there
+      description: |
+        Needs `testmgmt.write` (members and up — the people who write plans).
+        `baseUrl` is trimmed, lower-cased in scheme and host, and loses a
+        trailing slash. Audited as `project.configure`. A reporter that later
+        sends the same key (`ATP_ENVIRONMENT`) reports into this environment.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 64, description: "staging, production, qa-2 … — the reporter's environment key." }
+                baseUrl: { type: string, maxLength: 2048, description: "http(s) address with a host; no user or password. Optional." }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Environment" } } }
+        "400":
+          description: "`INVALID_PAYLOAD` — `details.field` is `key` or `baseUrl`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`CONFLICT` — the project already has an environment with that key."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/environments/{environmentId}:
+    patch:
+      operationId: updateEnvironment
+      tags: [dashboard]
+      summary: Change or clear an environment's address
+      description: |
+        Needs `testmgmt.write`. The key never changes — run history is filed
+        under it. `baseUrl: ""` clears the address. Plans show the new address
+        from then on. Audited as `project.configure` with old → new.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseUrl]
+              properties:
+                baseUrl: { type: string, maxLength: 2048 }
+      responses:
+        "200":
+          description: The environment after the change.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Environment" } } }
+        "400":
+          description: "`INVALID_PAYLOAD` — `details.field` is `baseUrl`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/url-checks:
+    post:
+      operationId: createUrlCheck
+      tags: [dashboard]
+      summary: Have a page opened and checked by the URL checker (QĐ-14)
+      description: |
+        Needs `testmgmt.write` and `URLCHECK=on` on the server. Give `url`, or
+        `environmentId` alone to check that environment's address (both: the
+        url is checked, the environment recorded). Queued for the worker; the
+        checker (headless Chromium behind a guarded proxy) reports page load,
+        HTTPS certificate, JavaScript errors, failed requests, broken links,
+        accessibility (axe-core, WCAG A/AA), speed, page basics and phone fit,
+        with a desktop and a phone screenshot. Addresses on loopback and
+        link-local are never opened; private ranges only when the operator
+        set `URLCHECK_ALLOW_PRIVATE=on`. At most 5 checks wait per project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: { type: string, maxLength: 2048, description: "http(s) address with a host; no user or password." }
+                environmentId: { type: string, format: uuid }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/UrlCheck" } } }
+        "400":
+          description: "`INVALID_PAYLOAD` — bad url, an environment of another project, or an environment without an address and no url."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`URL_CHECKS_OFF` — the server runs without URLCHECK=on."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_URL_CHECKS` — 5 checks are already waiting in this project (`details.max`)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listUrlChecks
+      tags: [dashboard]
+      summary: The project's 50 newest URL checks, without reports
+      description: Anyone who may view the project, also with URL checks off — `enabled` says whether new ones can be asked for.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Newest first; `nextCursor` is always null.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    required: [enabled]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/UrlCheck" } }
+                      enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/url-checks/{checkId}:
+    get:
+      operationId: getUrlCheck
+      tags: [dashboard]
+      summary: One URL check with its full report
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/CheckId" }
+      responses:
+        "200":
+          description: The check; `report` is present once `status` is `done`.
+          content: { application/json: { schema: { $ref: "#/components/schemas/UrlCheck" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/url-checks/{checkId}/screenshots/{which}:
+    get:
+      operationId: getUrlCheckScreenshot
+      tags: [dashboard]
+      summary: A check's screenshot as a JPEG
+      description: "Only JPEG bytes are ever stored; served with `Content-Security-Policy: default-src 'none'; sandbox`."
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/CheckId" }
+        - { name: which, in: path, required: true, schema: { type: string, enum: [desktop, mobile] } }
+      responses:
+        "200":
+          description: The image.
+          content: { image/jpeg: { schema: { type: string, format: binary } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/ai-settings:
+    get:
+      operationId: getAiSettings
+      tags: [dashboard]
+      summary: The organization's AI choices — provider, model and whose key — and what projects use now (QĐ-15, QĐ-18)
+      description: |
+        Organization owners and admins (`member.manage` at the organization).
+        `providers` is what this server offers: every provider platform/llm
+        lists, plus the operator's own OpenAI-compatible endpoint when
+        `LLM_PROVIDER=openai-compatible`. `organization` is null until they
+        save once — then the server's key applies if `server.available`,
+        with `server.model` (`defaultModel` says the same). The server's key
+        serves `server.provider` only. A key is never returned; `keyHint` is
+        an own key's last four characters. `models` is Anthropic's list, kept
+        for dashboards from before providers.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/OrganizationId" }]
+      responses:
+        "200":
+          description: The settings.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiSettings" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: saveAiSettings
+      tags: [dashboard]
+      summary: Choose the provider, the model and whose API key pays
+      description: |
+        The provider and model are always chosen here. `provider` omitted:
+        the one that offers `model` by name, else Anthropic; `model` omitted:
+        the provider's suggestion. Anthropic takes only its listed models;
+        the others take any model id the key may use. `keySource: server`
+        uses the server's LLM_API_KEY (only when it has one, and only for
+        `LLM_PROVIDER`; any stored own key is forgotten); `organization` uses
+        the organization's own key — give `apiKey` the first time and when
+        the provider changes, omit it to keep the stored one. A key whose
+        beginning is another provider's alone (`sk-ant-`, `sk-proj-`,
+        `AIza`, `xai-`, `gsk_`, `sk-or-`) is refused as `INVALID_PAYLOAD`.
+        Whichever key will pay is checked with the chosen provider for the
+        model — its model list, no tokens spent; where no list can be read,
+        the smallest completion — before anything is stored; an own key is
+        sealed with a key derived from `TOKEN_PEPPER`. Audited as
+        `organization.ai_settings` with the provider, model, key source and
+        hint.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/OrganizationId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider: { type: string, enum: [anthropic, openai, gemini, xai, mistral, deepseek, groq, openrouter, openai-compatible], description: "Omitted: the one that offers `model` by name, else anthropic. openai-compatible only where the server has that endpoint." }
+                model: { type: string, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$", description: "Anthropic: one of its listed models. Others: any model id the key may use. Omitted: the provider's suggestion." }
+                keySource: { type: string, enum: [organization, server], default: organization }
+                apiKey: { type: string, maxLength: 500, description: "keySource organization only; required the first time and when the provider changes." }
+      responses:
+        "200":
+          description: The settings after saving.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiSettings" } } }
+        "400":
+          description: "`INVALID_PAYLOAD` (e.g. keySource server on a server without a key or with another provider's, a key that is another provider's), `AI_KEY_REJECTED` (the provider refused the own key), `AI_SERVER_KEY_REJECTED` (it refused the server's), `AI_KEY_NO_CREDIT` (the key's account is out of credit or over a spending limit) or `AI_MODEL_UNAVAILABLE` (the key cannot use that model; `details.available` lists some it can, when the provider listed them) — `details.field` names the input, `details.provider` the provider."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: "`AI_UNREACHABLE` — the provider could not be reached to check the key; nothing was stored."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    delete:
+      operationId: deleteAiSettings
+      tags: [dashboard]
+      summary: Forget the organization's own key (the server's applies again, if any)
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/OrganizationId" }]
+      responses:
+        "200":
+          description: The settings after removing.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AiSettings" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/ai-status:
+    get:
+      operationId: getAiStatus
+      tags: [dashboard]
+      summary: Whether AI drafting is available in this project, with whose key, which provider and which model
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: "`readsPages`: the site's outline is read through the URL checker (URLCHECK=on); otherwise drafts come from the description alone."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, source, provider, model, readsPages]
+                properties:
+                  available: { type: boolean }
+                  source: { type: string, enum: ["", organization, server] }
+                  provider: { type: string }
+                  model: { type: string }
+                  readsPages: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/case-suggestions:
+    post:
+      operationId: createCaseSuggestion
+      tags: [testmgmt]
+      summary: Ask the model to draft test cases for a test type and a site (QĐ-15)
+      description: |
+        Needs `testmgmt.write`. Queued for the worker: it reads the page's
+        outline through the URL checker (same SSRF guard; only with
+        URLCHECK=on), sends it with the test type and `context` to the model
+        of the organization's key (else the server's), and stores the drafts.
+        Drafts are not test cases — the client creates the ones the tester
+        keeps through `createTestCase`. `environmentId` alone means its
+        address. At most 2 waiting and 30 per day per project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [testType]
+              properties:
+                testType: { $ref: "#/components/schemas/TestType" }
+                environmentId: { type: string, format: uuid }
+                url: { type: string, maxLength: 2048 }
+                context: { type: string, maxLength: 4000, description: "What to cover, in the tester's words (any language; the drafts follow it)." }
+                count: { type: integer, minimum: 1, maximum: 15, default: 8 }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/CaseSuggestion" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AI_NOT_CONFIGURED` — neither the organization nor the server has a key."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_SUGGESTIONS` — 2 waiting, or 30 in the last 24 hours, in this project."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/case-suggestions/{suggestionId}:
+    get:
+      operationId: getCaseSuggestion
+      tags: [testmgmt]
+      summary: One suggestion with its drafts once done
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: suggestionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The suggestion.
+          content: { application/json: { schema: { $ref: "#/components/schemas/CaseSuggestion" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/accounts:
+    get:
+      operationId: listTestAccounts
+      tags: [testmgmt]
+      summary: The environment's test accounts, without passwords (QĐ-16)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      responses:
+        "200":
+          description: By key.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/TestAccount" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: saveTestAccount
+      tags: [testmgmt]
+      summary: Add or change a test account the runner signs in with
+      description: |
+        Needs `testmgmt.write`. Upsert by `key`. The password is required
+        for a new account and omitted to keep the stored one; it is sealed
+        (AES-256-GCM, key derived from `TOKEN_PEPPER`), never returned and
+        never sent to a model — sign-in steps use `{{username}}` and
+        `{{password}}`. `loginSteps` omitted keeps the steps, `[]` forgets
+        them (found again on next use). Anything that changes how the
+        account signs in makes `loginStatus` `unknown` again. At most 20 per
+        environment. Audited as `project.configure` (never the password).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, username]
+              properties:
+                key: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 40 }
+                username: { type: string, minLength: 1, maxLength: 254 }
+                password: { type: string, maxLength: 1000 }
+                loginUrl: { type: string, maxLength: 2048, description: "The sign-in page: a path or an address on the environment's site; \"\" = its address." }
+                loginSteps: { type: array, maxItems: 40, items: { $ref: "#/components/schemas/AutoStep" } }
+      responses:
+        "200":
+          description: The account.
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestAccount" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/accounts/{accountKey}:
+    delete:
+      operationId: deleteTestAccount
+      tags: [testmgmt]
+      summary: Remove a test account
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+        - { $ref: "#/components/parameters/AccountKey" }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/accounts/{accountKey}/find-login:
+    post:
+      operationId: findTestAccountLogin
+      tags: [testmgmt]
+      summary: Have the model read the sign-in page and write the sign-in steps
+      description: |
+        Needs `testmgmt.write`, `URLCHECK=on` and an AI key. Queued: the
+        worker opens the sign-in page in the checker, the model writes steps
+        with `{{username}}` / `{{password}}` (it never sees the values), and
+        a session must sign in with them before they are kept. Follow
+        `loginStatus` (`finding` → `ok` | `failed` with `loginError`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+        - { $ref: "#/components/parameters/AccountKey" }
+      responses:
+        "202":
+          description: Queued (or already being found).
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestAccount" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF` (no URLCHECK=on) or `AI_NOT_CONFIGURED`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/auto-specs:
+    get:
+      operationId: listAutoSpecs
+      tags: [testmgmt]
+      summary: The project's runnable cases with their last result (QĐ-16)
+      description: "`enabled`: cases can run on this server (the checker service, URLCHECK=on)."
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Newest change first; obsolete cases are left out.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    required: [enabled]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/AutoSpec" } }
+                      enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createAutoCase
+      tags: [testmgmt]
+      summary: Create a runnable test case — the testmgmt case and its steps in one transaction
+      description: |
+        Needs `testmgmt.write`. Keeps a draft or a case a tester wrote. The
+        case's human-readable steps, preconditions (start page, account) and
+        test data (inputs) are written from the spec; it is filed under
+        `testType` with execution mode `automated`. Every `{{variable}}` in
+        `target` and the steps must be an input, `random`, `timestamp`, or —
+        with an `account` — `username` / `password`.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, target, steps]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 500 }
+                priority: { type: string, enum: [p0, p1, p2, p3], default: p2 }
+                testType: { $ref: "#/components/schemas/TestType" }
+                suiteId: { type: string, format: uuid }
+                target: { type: string, maxLength: 2048, description: "Where the case starts: a path such as /message?to={{recipient}}, or an address on the environment's site." }
+                account: { type: string, maxLength: 40, description: "An environment test account key; \"\" = not signed in." }
+                inputs: { type: object, additionalProperties: { type: string, maxLength: 2000 }, maxProperties: 30 }
+                steps: { type: array, minItems: 1, maxItems: 40, items: { $ref: "#/components/schemas/AutoStep" } }
+                source: { type: string, enum: [manual, ai], default: manual }
+      responses:
+        "201":
+          description: Created.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoSpec" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/auto-specs/export:
+    get:
+      operationId: exportAutoSpecs
+      tags: [testmgmt]
+      summary: Runnable cases as a Playwright test file, for a team's own CI
+      description: |
+        Generated from the steps (never by a model); every string is a
+        JavaScript string literal. Accounts sign in with
+        `ATP_USER_<KEY>` / `ATP_PASS_<KEY>` from the environment — no
+        password is written. `environmentId` gives the base address and the
+        accounts' sign-in steps.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: environmentId, in: query, schema: { type: string, format: uuid } }
+        - { name: caseIds, in: query, schema: { type: string }, description: "Comma-separated case ids; all runnable cases when absent." }
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [filename, content]
+                properties:
+                  filename: { type: string }
+                  content: { type: string }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-cases/{testCaseId}/auto-spec:
+    get:
+      operationId: getAutoSpec
+      tags: [testmgmt]
+      summary: A case's runnable steps
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      responses:
+        "200":
+          description: The spec.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoSpec" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: saveAutoSpec
+      tags: [testmgmt]
+      summary: Save a case's runnable steps (and rewrite its words from them)
+      description: Needs `testmgmt.write`. Same rules as `createAutoCase`; the case's steps, preconditions and test data follow, in the same transaction.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target, steps]
+              properties:
+                target: { type: string, maxLength: 2048 }
+                account: { type: string, maxLength: 40 }
+                inputs: { type: object, additionalProperties: { type: string, maxLength: 2000 }, maxProperties: 30 }
+                steps: { type: array, minItems: 1, maxItems: 40, items: { $ref: "#/components/schemas/AutoStep" } }
+      responses:
+        "200":
+          description: Saved.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoSpec" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteAutoSpec
+      tags: [testmgmt]
+      summary: Make a case manual again (its steps stay as words)
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/auto-drafts:
+    post:
+      operationId: createAutoDraft
+      tags: [testmgmt]
+      summary: Ask the model to draft runnable cases for a start page (QĐ-16)
+      description: |
+        Needs `testmgmt.write`, `URLCHECK=on` and an AI key. Queued: the
+        worker opens `target` on the environment in the checker — signed in
+        first when `account` is set (finding the account's sign-in steps on
+        first use) — reads the page's accessibility tree and asks the
+        organization's model for cases made of steps; steps that cannot run
+        are dropped. Drafts are not cases: keep them with `createAutoCase`.
+        At most 2 waiting and 30 per day per project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environmentId, target]
+              properties:
+                environmentId: { type: string, format: uuid }
+                target: { type: string, maxLength: 2048 }
+                account: { type: string, maxLength: 40 }
+                inputs: { type: object, additionalProperties: { type: string, maxLength: 2000 }, maxProperties: 30 }
+                context: { type: string, maxLength: 4000, description: "What to cover, in the tester's words (the drafts follow its language)." }
+                count: { type: integer, minimum: 1, maximum: 15, default: 5 }
+                testType: { $ref: "#/components/schemas/TestType" }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoDraft" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF` or `AI_NOT_CONFIGURED`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_AUTO_DRAFTS` — 2 waiting, or 30 in the last 24 hours."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/auto-drafts/{draftId}:
+    get:
+      operationId: getAutoDraft
+      tags: [testmgmt]
+      summary: One draft request, with its drafts once done
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/DraftId" }
+      responses:
+        "200":
+          description: The request.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoDraft" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/auto-runs:
+    post:
+      operationId: createAutoRun
+      tags: [testmgmt]
+      summary: Run runnable cases on an environment
+      description: |
+        Needs `testmgmt.write` and `URLCHECK=on`. Makes a testmgmt plan
+        ("Auto test · <environment> · <time>") with the cases and queues one
+        job per case: a browser session signs in, opens the start page and
+        runs the steps. With `heal` (default), a step whose element is gone
+        may be repaired by the model from the page as it is — never an
+        expectation; the repair is reported, not saved. Each case is recorded
+        in the plan with screenshots; the finished run becomes a test run
+        (JUnit import, framework `atp-auto`). `caseIds` absent: every
+        runnable case. At most 2 runs queued or running and 100 a day.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environmentId]
+              properties:
+                environmentId: { type: string, format: uuid }
+                caseIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+                heal: { type: boolean, default: true }
+                variants: { type: array, maxItems: 9, items: { type: string, pattern: "^(chromium|firefox|webkit)/(desktop|phone|tablet)$" }, description: "The compatibility matrix (QĐ-19): each case runs once per browser/device. None: chromium/desktop. Cases × variants ≤ 300." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF` — the server runs without URLCHECK=on."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_AUTO_RUNS` — 2 runs active, or 100 in the last 24 hours."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listAutoRuns
+      tags: [testmgmt]
+      summary: The project's 50 newest auto runs, without their cases
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    required: [enabled]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/AutoRun" } }
+                      enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/auto-runs/{autoRunId}:
+    get:
+      operationId: getAutoRun
+      tags: [testmgmt]
+      summary: One auto run with each case's steps and results
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/AutoRunId" }
+      responses:
+        "200":
+          description: The run.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/auto-runs/{autoRunId}/cases/{testCaseId}/screenshots/{shot}:
+    get:
+      operationId: getAutoRunScreenshot
+      tags: [testmgmt]
+      summary: A case's screenshot at the end, or where it failed, as a JPEG
+      description: "Only JPEG bytes are ever stored; served with `Content-Security-Policy: default-src 'none'; sandbox`."
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/AutoRunId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+        - { name: shot, in: path, required: true, schema: { type: string, enum: [final, failure] } }
+        - { name: variant, in: query, required: false, schema: { type: string }, description: "The run case's browser/device (QĐ-19); omitted: chromium/desktop." }
+      responses:
+        "200":
+          description: The image.
+          content: { image/jpeg: { schema: { type: string, format: binary } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/auto-runs/{autoRunId}/cases/{testCaseId}/apply-heal:
+    post:
+      operationId: applyAutoRunHeal
+      tags: [testmgmt]
+      summary: Put a run's AI repair of one step into the case
+      description: "Needs `testmgmt.write`. Only a step the run repaired, and only while the case still has the step the run had."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/AutoRunId" }
+        - { $ref: "#/components/parameters/TestCaseId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step]
+              properties:
+                step: { type: integer, minimum: 0, description: "Index of the repaired step." }
+                variant: { type: string, description: "The run case's browser/device (QĐ-19); omitted: chromium/desktop." }
+      responses:
+        "200":
+          description: The case's spec after the repair.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutoSpec" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/ownership:
+    get:
+      operationId: getSiteOwnership
+      tags: [dashboard]
+      summary: The proof that the organization owns the environment's host (QĐ-19), for load tests
+      description: |
+        Needs `testmgmt.write`. The token is made the first time. Prove it
+        either way: serve `fileText` at `fileUrl` (status 200, no redirect)
+        or publish a TXT record `dnsText` at `dnsName`; then check it.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      responses:
+        "200":
+          description: The proof and its state.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteOwnership" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/environments/{environmentId}/ownership/check:
+    post:
+      operationId: checkSiteOwnership
+      tags: [dashboard]
+      summary: Check the ownership proof now (queued; poll getSiteOwnership)
+      description: "Needs `testmgmt.write` and `URLCHECK=on` (the file is read by the checker, behind its guard)."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/EnvironmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { type: string, enum: [file, dns] }
+      responses:
+        "202":
+          description: Checking.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteOwnership" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/load-runs:
+    post:
+      operationId: createLoadRun
+      tags: [dashboard]
+      summary: Run a load test against an environment's host (QĐ-19)
+      description: |
+        Needs `testmgmt.write`, `URLCHECK=on` and an ownership proof for the
+        host, which the worker checks again right before the traffic.
+        `vus` virtual users send GETs to `paths` (each starting with `/`,
+        none = `/`) for `seconds`, started evenly over `rampSeconds`;
+        redirects are not followed. Caps: `LOAD_MAX_VUS`, `LOAD_MAX_SECONDS`.
+        One load test at a time per organization, 20 a day per project.
+        An error is a request with no answer or a 5xx; the verdict fails
+        when p95 is over `maxP95Ms` or the error rate over `maxErrorRate` (%).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environmentId, vus, seconds]
+              properties:
+                environmentId: { type: string, format: uuid }
+                paths: { type: array, maxItems: 20, items: { type: string, pattern: "^/", maxLength: 2000 } }
+                vus: { type: integer, minimum: 1, maximum: 200 }
+                seconds: { type: integer, minimum: 5, maximum: 600 }
+                rampSeconds: { type: integer, minimum: 0 }
+                maxP95Ms: { type: integer, minimum: 0, maximum: 600000, description: "0 or omitted: no threshold." }
+                maxErrorRate: { type: number, minimum: 0, maximum: 100, description: "Percent; omitted: no threshold." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`OWNERSHIP_NOT_PROVED` or `AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_LOAD_RUNS`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listLoadRuns
+      tags: [dashboard]
+      summary: The project's load tests, newest first (50)
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The load tests; `enabled` is false when the checker is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor, enabled]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LoadRun" } }
+                  nextCursor: { type: "null" }
+                  enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/load-runs/{loadRunId}:
+    get:
+      operationId: getLoadRun
+      tags: [dashboard]
+      summary: One load test with its result
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: loadRunId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The load test.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LoadRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/script-runs:
+    post:
+      operationId: createScriptRun
+      tags: [dashboard]
+      summary: Run the team's own Playwright project or k6 script in a sandbox (QĐ-19)
+      description: |
+        Needs `testmgmt.write` and `SANDBOX=on`. `archive` is the project
+        or script as a `.tar.gz` (at most 10 MB, 100 MB and 5000 files
+        unpacked, only files and folders at relative paths). sandboxd runs
+        it in a fresh container — no capabilities, read-only root, memory,
+        CPU and time limits — on a network whose only way out is a
+        forwarder to the environment's host; the archive is dropped when the
+        run ends. The environment must be addressed by name.
+
+        `playwright`: the config is `entry`, or `playwright.config.*` at the
+        top; the image's `@playwright/test` replaces any the archive brings,
+        and the JUnit reporter is forced on. `BASE_URL` is the environment's
+        address; `project` and `grep` are passed as `--project` / `--grep`.
+
+        `k6`: `entry` is the script; `vus` and `seconds` replace its own
+        scenarios (caps `LOAD_MAX_VUS`, `LOAD_MAX_SECONDS`), and like a load
+        test it needs the organization's ownership proof for the host,
+        checked again right before it runs. Thresholds and checks become
+        tests; k6's exit code decides whether a threshold failed.
+
+        The report becomes a test run through the JUnit import
+        (`testRunId`). One script at a time per organization, 30 a day per
+        project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archive, kind, environmentId]
+              properties:
+                archive: { type: string, format: binary }
+                kind: { type: string, enum: [playwright, k6] }
+                environmentId: { type: string, format: uuid }
+                entry: { type: string, maxLength: 200, description: "k6: the script (required). Playwright: the config; omitted = playwright.config.* at the top." }
+                project: { type: string, maxLength: 100, description: "Playwright --project." }
+                grep: { type: string, maxLength: 100, description: "Playwright --grep." }
+                vus: { type: integer, minimum: 1, maximum: 200, description: "k6 only, required." }
+                seconds: { type: integer, minimum: 5, maximum: 600, description: "k6 only, required." }
+                timeoutSeconds: { type: integer, minimum: 30, maximum: 3600, description: "Omitted: the server's SCRIPT_MAX_SECONDS." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ScriptRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`SCRIPTS_OFF`, or `OWNERSHIP_NOT_PROVED` for k6."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "413":
+          description: "`PAYLOAD_TOO_LARGE` with `details.maxBytes`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_SCRIPT_RUNS`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listScriptRuns
+      tags: [dashboard]
+      summary: The project's script runs, newest first (50), without logs
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: The script runs; `enabled` is false when sandboxd is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor, enabled]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ScriptRun" } }
+                  nextCursor: { type: "null" }
+                  enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/script-runs/{scriptRunId}:
+    get:
+      operationId: getScriptRun
+      tags: [dashboard]
+      summary: One script run with the tail of its log
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: scriptRunId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The script run.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ScriptRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/site-scans:
+    post:
+      operationId: createSiteScan
+      tags: [dashboard]
+      summary: Scan a site — a URL check of the start page and the pages it links to (QĐ-16)
+      description: |
+        Needs `testmgmt.write` and `URLCHECK=on`. Breadth first over links
+        on the start page's host, up to `maxPages` and three links deep;
+        sign-out, delete-like and file links are never followed. With
+        `account` (an environment test account whose sign-in works) every
+        page is checked signed in. Each page is a URL check; the scan ends
+        when none is left queued. One scan at a time per project.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: { type: string, maxLength: 2048 }
+                environmentId: { type: string, format: uuid }
+                account: { type: string, maxLength: 40 }
+                maxPages: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        "202":
+          description: Started.
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteScan" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`URL_CHECKS_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`SCAN_RUNNING` — this project already has a scan running."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    get:
+      operationId: listSiteScans
+      tags: [dashboard]
+      summary: The project's newest site scans, without pages
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }]
+      responses:
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    required: [enabled]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/SiteScan" } }
+                      enabled: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/site-scans/{scanId}:
+    get:
+      operationId: getSiteScan
+      tags: [dashboard]
+      summary: One site scan with its pages, nearest first
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ScanId" }
+      responses:
+        "200":
+          description: The scan; each page is a URL check (open it with getUrlCheck).
+          content: { application/json: { schema: { $ref: "#/components/schemas/SiteScan" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/workspaces/{workspaceId}/projects/deleted:
     get:
       operationId: listDeletedProjects
@@ -1052,6 +2363,85 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}:
+    delete:
+      operationId: deleteOrganization
+      tags: [members]
+      summary: Delete an organization — soft, restorable by its owners for 30 days, then purged (§11.3.2)
+      description: |
+        Needs `org.manage` (organization owners only; owners are MFA-enrolled).
+        The body must carry the organization's exact name. From this answer on
+        the organization, its workspaces and its projects are gone for every
+        route, CI tokens included (404); its owners see it under
+        `GET /v1/organizations/deleted` and can restore it until `purgeAfter`,
+        when the worker purges every project, the memberships, invitations and
+        tokens held at the org and its workspaces, the workspaces and the org.
+        A project deleted on its own before stays deleted after a restore.
+        The slug stays reserved during the window. Audited
+        (`organization.delete|restore|purge`).
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmName]
+              properties:
+                confirmName: { type: string }
+      responses:
+        "200":
+          description: Deleted; restorable until purgeAfter.
+          content: { application/json: { schema: { $ref: "#/components/schemas/DeletedOrganization" } } }
+        "400":
+          description: "`CONFIRM_NAME` — the name typed is not the organization's."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/deleted:
+    get:
+      operationId: listDeletedOrganizations
+      tags: [members]
+      summary: Deleted organizations the caller owns, still in their restore window
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: Newest deletion first; empty for anyone who owns none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DeletedOrganization" } }
+                  nextCursor: { type: "null" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /v1/organizations/{organizationId}/restore:
+    post:
+      operationId: restoreOrganization
+      tags: [members]
+      summary: Restore a deleted organization before its purge
+      description: Owners of the organization only; anyone else, and an organization that is live or already purged, gets 404.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { name: organizationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Restored with everything under it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, slug]
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  slug: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/organizations/{organizationId}/members:
     get:
       operationId: listOrganizationMembers
@@ -1133,6 +2523,186 @@ paths:
         "409":
           description: "`LAST_OWNER`."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/projects/{projectId}/access-requests:
+    get:
+      operationId: listProjectAccessRequests
+      tags: [members]
+      summary: Pending sign-up requests to join this project, newest first
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on, once the person opened the mailed link (`POST /v1/session/signup/complete`), so the email shown is proven.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      responses:
+        "200":
+          description: Pending requests (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, userId, email, requestedRole, level, note, createdAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            userId: { type: string, format: uuid }
+                            email: { type: string }
+                            requestedRole: { type: string }
+                            level: { type: string, enum: [organization, workspace, project] }
+                            note: { type: string }
+                            createdAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/access-requests/{requestId}/decide:
+    post:
+      operationId: decideProjectAccessRequest
+      tags: [members]
+      summary: Approve (granting a role) or deny a pending sign-up request
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`) — whether it is the override or the role the visitor asked for.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, denied] }
+                role: { type: string, description: Optional override when approving. }
+      responses:
+        "204": { description: Decided. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/access-requests:
+    get:
+      operationId: listWorkspaceAccessRequests
+      tags: [members]
+      summary: Pending sign-up requests to join this workspace, newest first
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on, once the person opened the mailed link (`POST /v1/session/signup/complete`), so the email shown is proven.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+      responses:
+        "200":
+          description: Pending requests (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, userId, email, requestedRole, level, note, createdAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            userId: { type: string, format: uuid }
+                            email: { type: string }
+                            requestedRole: { type: string }
+                            level: { type: string, enum: [organization, workspace, project] }
+                            note: { type: string }
+                            createdAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/workspaces/{workspaceId}/access-requests/{requestId}/decide:
+    post:
+      operationId: decideWorkspaceAccessRequest
+      tags: [members]
+      summary: Approve (granting a role) or deny a pending sign-up request
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`) — whether it is the override or the role the visitor asked for.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/WorkspaceId" }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, denied] }
+                role: { type: string, description: Optional override when approving. }
+      responses:
+        "204": { description: Decided. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/access-requests:
+    get:
+      operationId: listOrganizationAccessRequests
+      tags: [members]
+      summary: Pending sign-up requests to join this organization, newest first
+      description: Self-serve sign-up with role approval (ADR-001, join_org). Needs `member.manage` on the node. Only filled when SIGNUP=on, once the person opened the mailed link (`POST /v1/session/signup/complete`), so the email shown is proven.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+      responses:
+        "200":
+          description: Pending requests (at most 200).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, userId, email, requestedRole, level, note, createdAt]
+                          properties:
+                            id: { type: string, format: uuid }
+                            userId: { type: string, format: uuid }
+                            email: { type: string }
+                            requestedRole: { type: string }
+                            level: { type: string, enum: [organization, workspace, project] }
+                            note: { type: string }
+                            createdAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/organizations/{organizationId}/access-requests/{requestId}/decide:
+    post:
+      operationId: decideOrganizationAccessRequest
+      tags: [members]
+      summary: Approve (granting a role) or deny a pending sign-up request
+      description: Audited as `access_request.approve` or `access_request.deny`. Approving may override the requested role with one valid at this node; granting the owner role needs an owner (`403 OWNER_ONLY`) — whether it is the override or the role the visitor asked for.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/OrganizationId" }
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, denied] }
+                role: { type: string, description: Optional override when approving. }
+      responses:
+        "204": { description: Decided. }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/invitations:
     get:
       operationId: listProjectInvitations
@@ -1254,6 +2824,7 @@ paths:
         - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: "Matches branch, commit and localRunId." }
         - { name: status, in: query, schema: { type: string, enum: [queued, running, passed, failed, error, cancelled] } }
         - { name: environment, in: query, schema: { type: string }, description: Environment key. }
+        - { name: source, in: query, schema: { type: string, enum: [playwright, junit, auto] }, description: Run source filter. }
         - { name: sort, in: query, schema: { type: string, enum: ["-startedAt"] } }
       responses:
         "200":
@@ -1393,6 +2964,9 @@ paths:
         Actor and time are the session's and the server's; anything the body
         claims about them is ignored (§11.6 API3). `FAILURE_SEEN` is deduped per
         user/result/24 h (`200` instead of `201`). Viewers get `403`.
+        `HYPOTHESIS_ACCEPTED` is a person's own verdict on the cause and needs
+        `category` (§8.7); it is what TTRC and triage coverage count, so they work
+        without an AI key. `category` on any other type is a `400`.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -1405,7 +2979,8 @@ paths:
               type: object
               required: [type]
               properties:
-                type: { type: string, enum: [FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED] }
+                type: { type: string, enum: [FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED, HYPOTHESIS_ACCEPTED] }
+                category: { type: string, enum: [app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown], description: "Required for HYPOTHESIS_ACCEPTED, refused otherwise." }
                 payload: { type: object }
       responses:
         "201":
@@ -1418,6 +2993,77 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/results/{resultId}/investigations:
+    post:
+      operationId: requestFailureInvestigation
+      tags: [dashboard]
+      summary: Queue or reuse a same-day failure investigation (AI, or rules without an AI key)
+      description: With an AI key the worker asks the configured model; without one it investigates by fixed rules (`rules-v1` — error patterns, the test's pass/fail history, causes accepted before) and proposes a hypothesis the same way, recorded as SYSTEM so AI metrics never count it. Either way a member accepts or rejects it.
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/ResultId" }]
+      responses:
+        "202": { description: Queued, content: { application/json: { schema: { $ref: "#/components/schemas/AIInvestigation" } } } }
+        "200": { description: Same-day investigation reused, content: { application/json: { schema: { $ref: "#/components/schemas/AIInvestigation" } } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: The investigation service is not available on this server. }
+        "429": { description: Daily investigation limit reached. }
+    get:
+      operationId: listFailureInvestigations
+      tags: [dashboard]
+      summary: List a result's AI investigations
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }, { $ref: "#/components/parameters/ResultId" }, { $ref: "#/components/parameters/Limit" }]
+      responses:
+        "200":
+          description: Newest first.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/AIInvestigation" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/results/{resultId}/investigations/{investigationId}:
+    get:
+      operationId: getFailureInvestigation
+      tags: [dashboard]
+      summary: Read one AI failure investigation
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ResultId" }
+        - { name: investigationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Investigation, content: { application/json: { schema: { $ref: "#/components/schemas/AIInvestigation" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/results/{resultId}/hypotheses/{hypothesisId}/decision:
+    post:
+      operationId: decideAIHypothesis
+      tags: [dashboard]
+      summary: Accept or reject an AI hypothesis
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { $ref: "#/components/parameters/ResultId" }
+        - { name: hypothesisId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [accept, reject] }
+                category: { type: string, enum: [app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown, ""] }
+                note: { type: string, maxLength: 1000 }
+      responses:
+        "201": { description: Decision event, content: { application/json: { schema: { $ref: "#/components/schemas/TriageEvent" } } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Hypothesis already decided. }
   /v1/projects/{projectId}/artifacts/{artifactId}/content:
     get:
       operationId: getArtifactContent
@@ -1852,6 +3498,11 @@ paths:
         - { name: critical, in: query, schema: { type: string, enum: ["true", "false"] } }
         - { name: q, in: query, schema: { type: string }, description: "Substring of title or external key." }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: level, in: query, schema: { type: string, enum: [unit, integration, system, acceptance] } }
+        - { name: purpose, in: query, schema: { type: string, enum: [functional, performance, security, usability, accessibility, compatibility, recovery] } }
+        - { name: tag, in: query, schema: { type: string, enum: [smoke, regression, e2e] } }
+        - { name: executionMode, in: query, schema: { type: string, enum: [manual, automated] } }
+        - { name: performanceType, in: query, schema: { type: string, enum: [load, stress, spike, soak, volume, scalability] } }
       responses:
         "200":
           description: Cases, priority then age. Lists carry no links or requirements; fetch one for those.
@@ -1885,6 +3536,98 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/projects/{projectId}/test-cases/export:
+    get:
+      operationId: exportTestCases
+      tags: [testmgmt]
+      summary: Export selected cases or all cases matching a server filter as CSV
+      description: "Needs view. Maximum 5000 cases / 8 MiB; exceeding a cap fails, never truncates. CSV uses steps_json and a version marker for reversible spreadsheet-safe text. Definition export, not a backup of execution history or automation links."
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+        - { name: ids, in: query, schema: { type: string }, description: "Optional comma-separated IDs, at most 200; all must belong to this project and match the filter." }
+        - { name: level, in: query, schema: { type: string, enum: [unit, integration, system, acceptance] } }
+        - { name: purpose, in: query, schema: { type: string, enum: [functional, performance, security, usability, accessibility, compatibility, recovery] } }
+        - { name: tag, in: query, schema: { type: string, enum: [smoke, regression, e2e] } }
+        - { name: executionMode, in: query, schema: { type: string, enum: [manual, automated] } }
+        - { name: performanceType, in: query, schema: { type: string, enum: [load, stress, spike, soak, volume, scalability] } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: suite, in: query, schema: { type: string } }
+        - { name: automation, in: query, schema: { type: string } }
+        - { name: critical, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Complete CSV and count, never just the displayed page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [csv, count, exportedAt]
+                properties:
+                  csv: { type: string }
+                  count: { type: integer, minimum: 0, maximum: 5000 }
+                  exportedAt: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/projects/{projectId}/test-cases/bulk:
+    post:
+      operationId: bulkUpdateTestCases
+      tags: [testmgmt]
+      summary: Update selected case metadata with per-case versions and outcomes
+      description: "Needs testmgmt.write and CSRF. Each case is its own audited transaction; partial success is explicit. Versions required; duplicates rejected before any write. Linking automation remains a separate action."
+      security: [{ sessionCookie: [], csrf: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ProjectId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, patch]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [id, expectedUpdatedAt]
+                    properties:
+                      id: { type: string, format: uuid }
+                      expectedUpdatedAt: { type: string, format: date-time }
+                patch:
+                  type: object
+                  minProperties: 1
+                  properties:
+                    taxonomy: { $ref: "#/components/schemas/CaseTaxonomy" }
+                    priority: { $ref: "#/components/schemas/Priority" }
+                    isCritical: { type: boolean }
+                    suiteId: { type: string, description: "Empty clears; non-empty must be a suite of the project." }
+                    automationStatus: { type: string, enum: [manual_only, automation_candidate, obsolete] }
+      responses:
+        "200":
+          description: Per-case outcomes in input order; refresh before retrying unconfirmed network failures.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, updated, code]
+                      properties:
+                        id: { type: string }
+                        updated: { type: boolean }
+                        code: { type: string, enum: ["", CONFLICT, NOT_FOUND, INVALID_PAYLOAD, INTERNAL] }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/projects/{projectId}/test-cases/import:
     post:
       operationId: importTestCases
@@ -1937,11 +3680,14 @@ paths:
         Surefire `<flakyFailure>` → earlier failed attempts of a flaky pass,
         `<rerunFailure>` → more failed attempts. Times come from the
         testsuite timestamp (UTC when zoneless) plus case durations.
+        Node's test runner (`--test-reporter=junit`) writes top-level tests
+        straight under `<testsuites>` and no file: they are read too, and
+        the suites around a case are its describes.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
         - { name: environment, in: query, schema: { type: string, default: ci }, description: "Environment key (a slug); created if new." }
-        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest… Keep one per suite so its history stays one set of tests." }
+        - { name: framework, in: query, schema: { type: string, default: junit }, description: "Identity namespace: junit, pytest, jest, node… Keep one per suite so its history stays one set of tests." }
         - { name: branch, in: query, schema: { type: string } }
         - { name: commit, in: query, schema: { type: string, maxLength: 64 } }
         - { name: startedAt, in: query, schema: { type: string, format: date-time }, description: "Required only when no testsuite has a timestamp — history must not be dated today." }
@@ -2077,7 +3823,8 @@ paths:
       summary: Issue a project token for CI; the secret is in this answer and nowhere else
       description: |
         Needs `token.manage`. Default permission `project:ingest` (a reporter);
-        add `project:read` for a pipeline that reads a release gate. Default
+        add `project:read` for a pipeline that reads a release gate and
+        `project:autorun` for one that runs the auto tests (QĐ-16). Default
         lifetime 365 days (§11.4). The answer, like every /v1 answer, is
         `Cache-Control: no-store`.
       security: [{ sessionCookie: [], csrf: [] }]
@@ -2091,7 +3838,7 @@ paths:
               required: [name]
               properties:
                 name: { type: string, minLength: 1, maxLength: 100 }
-                permissions: { type: array, items: { type: string, enum: ["project:ingest", "project:read"] } }
+                permissions: { type: array, items: { type: string, enum: ["project:ingest", "project:read", "project:autorun"] } }
                 expiresInDays: { type: integer, minimum: 1, maximum: 365 }
       responses:
         "201":
@@ -2159,6 +3906,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/projects/{projectId}/test-cases/{testCaseId}/links:
     post:
       operationId: linkTestCaseAutomation
@@ -2273,7 +4021,9 @@ paths:
               required: [name]
               properties:
                 name: { type: string, minLength: 1, maxLength: 200 }
-                environmentId: { type: string, format: uuid }
+                environmentId: { type: string, format: uuid, description: "One of the project's environments (listEnvironments) — the site testers open. Another project's id is a 400." }
+                testType: { $ref: "#/components/schemas/TestType" }
+                caseIds: { type: array, maxItems: 5000, uniqueItems: true, items: { type: string, format: uuid }, description: "Fixed scope. Omitted selects current non-obsolete cases; empty creates an empty plan. New project cases are not added automatically." }
       responses:
         "201":
           description: Created as `draft`.
@@ -2282,6 +4032,9 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "413":
+          description: "`PAYLOAD_TOO_LARGE` — the body is over 256 KiB (5000 case ids fit in about 200 KB)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/projects/{projectId}/test-plans/{planId}:
     get:
       operationId: getTestPlan
@@ -2300,8 +4053,8 @@ paths:
     patch:
       operationId: updateTestPlan
       tags: [testmgmt]
-      summary: Change the plan status
-      description: A `closed` plan refuses new executions. Needs `testmgmt.write`.
+      summary: Change plan status, environment, case scope, assignments or workflow
+      description: A `closed` plan refuses environment, scope, assignment and workflow changes (409). Cases with executions cannot be removed. Assignees must be verified users authorized for testmgmt.write in this project. Assignment does not grant permissions. An environment change is audited as `plan.environment`. Needs `testmgmt.write`.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2312,9 +4065,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [status]
+              minProperties: 1
               properties:
                 status: { type: string, enum: [draft, active, closed] }
+                environmentId: { type: string, description: "One of the project's environments, or \"\" for none." }
+                caseIds: { type: array, maxItems: 5000, uniqueItems: true, items: { type: string, format: uuid } }
+                expectedUpdatedAt: { type: string, format: date-time, description: "Optional optimistic check; UI sends the last read version." }
+                caseUpdate:
+                  type: object
+                  required: [testCaseId]
+                  properties:
+                    testCaseId: { type: string, format: uuid }
+                    assigneeEmail: { type: string, maxLength: 254, description: "Verified authorized tester email; empty clears assignment." }
+                    workStatus: { type: string, enum: [not_run, in_progress], description: "Completed is set only by recording an execution. Cases with history cannot be reset to not_run." }
       responses:
         "200":
           description: Updated.
@@ -2323,12 +4086,16 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413":
+          description: "`PAYLOAD_TOO_LARGE` — the body is over 256 KiB (5000 case ids fit in about 200 KB)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/projects/{projectId}/test-plans/{planId}/executions:
     post:
       operationId: recordManualExecution
       tags: [testmgmt]
       summary: Record one manual run of one case (append-only; the latest row per case is the verdict)
-      description: The executor is the session user. A `draft` plan becomes `active`. Needs `testmgmt.write`.
+      description: The executor is the session user. A `draft` plan becomes `active`. Needs `testmgmt.write`. Passed executions cannot contain failed or blocked step results. Case snapshot is captured in the recording transaction.
       security: [{ sessionCookie: [], csrf: [] }]
       parameters:
         - { $ref: "#/components/parameters/ProjectId" }
@@ -2344,7 +4111,11 @@ paths:
                 testCaseId: { type: string, format: uuid }
                 status: { type: string, enum: [passed, failed, blocked, skipped] }
                 note: { type: string, maxLength: 4000 }
-                executedAt: { type: string, format: date-time, description: Defaults to now. }
+                executedAt: { type: string, format: date-time, description: "Defaults to now. May be back-dated (a paper record); more than 5 minutes in the future is 400, since the newest executedAt is the case's verdict." }
+                stepResults: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/ManualStepResult" } }
+                bugUrl: { type: string, maxLength: 2000, description: "Empty or an HTTP(S) bug URL without credentials." }
+                retestOf: { type: string, format: uuid, description: "Previous execution of the same case in the same plan and project; omit when not a retest." }
+                caseUpdatedAt: { type: string, format: date-time, description: "Optional optimistic check; a changed case returns 409 before recording." }
       responses:
         "201":
           description: Recorded.
@@ -2354,6 +4125,9 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413":
+          description: "`PAYLOAD_TOO_LARGE` — the body is over 2 MiB (200 step results of 4000 bytes fit, escaped)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /v1/projects/{projectId}/test-plans/{planId}/executions/{executionId}/evidence:
     post:
       operationId: attachManualEvidence
@@ -2517,24 +4291,91 @@ paths:
         The URL names no project, so the release is looked up first and the
         token authorized against that project; a token of another tenant, an
         ingest-only token, or an unknown id all answer `404`. A deploy job
-        polls this and stops on `gate.verdict == "blocked"` unless
-        `status` shows a named override.
+        acts on `ci.pass` (`jq -e .ci.pass`), which the server decides: a
+        person's decision wins over the gate — `approved`/`shipped` goes,
+        `blocked` stops — and an `open` release goes only when the gate was
+        evaluated and is `approved` or `warn`; not evaluated (`gate: null`)
+        and `no_evidence` stop. `ci.reason` says which.
       security: [{ ingestToken: [] }]
       parameters:
         - { $ref: "#/components/parameters/ReleaseId" }
       responses:
         "200":
-          description: The release with its last gate result and decision.
-          content: { application/json: { schema: { $ref: "#/components/schemas/Release" } } }
+          description: The release with its last gate result and decision, and the answer for CI.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Release" }
+                  - type: object
+                    required: [ci]
+                    properties:
+                      ci:
+                        type: object
+                        required: [pass, reason]
+                        properties:
+                          pass: { type: boolean, description: "Go on with the deploy." }
+                          reason: { type: string, description: "Which rule decided, e.g. \"release approved by carol@example.com\", \"gate blocked\"." }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/auto-runs:
+    post:
+      operationId: startAutoRunForCI
+      tags: [testmgmt]
+      summary: "A deploy pipeline runs the project's runnable cases (QĐ-16): a bearer token with `project:autorun`"
+      description: |
+        The token names the project. `environment` is an environment key.
+        Same run as `createAutoRun` (plan, test run, AI repairs unless
+        `heal` is false); poll `getAutoRunForCI` until `status` is `done` and
+        fail the pipeline on `failed + errored > 0`.
+      security: [{ ingestToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environment]
+              properties:
+                environment: { type: string }
+                caseIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+                heal: { type: boolean, default: true }
+                variants: { type: array, maxItems: 9, items: { type: string, pattern: "^(chromium|firefox|webkit)/(desktop|phone|tablet)$" }, description: "As on createAutoRun (QĐ-19)." }
+      responses:
+        "202":
+          description: Queued.
+          content: { application/json: { schema: { $ref: "#/components/schemas/CIAutoRun" } } }
+        "400": { $ref: "#/components/responses/InvalidPayload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`AUTO_TEST_OFF`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`TOO_MANY_AUTO_RUNS`."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v1/auto-runs/{autoRunId}:
+    get:
+      operationId: getAutoRunForCI
+      tags: [testmgmt]
+      summary: How a run started by CI is going, for a `project:autorun` token of its project
+      security: [{ ingestToken: [] }]
+      parameters: [{ $ref: "#/components/parameters/AutoRunId" }]
+      responses:
+        "200":
+          description: The run.
+          content: { application/json: { schema: { $ref: "#/components/schemas/CIAutoRun" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     ingestToken:
       type: http
       scheme: bearer
-      description: "`atp_ing_` + 256-bit secret, scoped to one project with `project:ingest` only (§8.8, §11.4). Shown once at issue."
+      description: "`atp_ing_` + 256-bit secret, scoped to one project; `project:ingest` by default, `project:read` (release gate) and `project:autorun` (auto runs, QĐ-16) when issued with them (§8.8, §11.4). Shown once at issue."
     sessionCookie:
       type: apiKey
       in: cookie
@@ -2566,11 +4407,17 @@ components:
     RequirementId: { name: requirementId, in: path, required: true, schema: { type: string, format: uuid } }
     TestCaseId: { name: testCaseId, in: path, required: true, schema: { type: string, format: uuid } }
     PlanId: { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+    EnvironmentId: { name: environmentId, in: path, required: true, schema: { type: string, format: uuid } }
+    CheckId: { name: checkId, in: path, required: true, schema: { type: string, format: uuid } }
     ExecutionId: { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
     ReleaseId: { name: releaseId, in: path, required: true, schema: { type: string, format: uuid } }
     UserId: { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
     WorkspaceId: { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
     OrganizationId: { name: organizationId, in: path, required: true, schema: { type: string, format: uuid } }
+    AutoRunId: { name: autoRunId, in: path, required: true, schema: { type: string, format: uuid } }
+    AccountKey: { name: accountKey, in: path, required: true, schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 40 } }
+    DraftId: { name: draftId, in: path, required: true, schema: { type: string, format: uuid } }
+    ScanId: { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 }, description: Page size; the server caps at 100 (§7.10). }
     Cursor: { name: cursor, in: query, schema: { type: string }, description: "Opaque; bound to project, filter and sort. `400 INVALID_CURSOR` when reused elsewhere." }
 
@@ -2623,6 +4470,36 @@ components:
         deletedAt: { type: string, format: date-time }
         deletedBy: { type: string }
         purgeAfter: { type: string, format: date-time }
+    ProjectSettings:
+      type: object
+      required: [id, name, defaultBranch, plan, retention]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        defaultBranch: { type: string }
+        plan: { type: string, description: "The organization's plan id; unknown plans retain as free." }
+        retention:
+          type: array
+          items:
+            type: object
+            required: [kind, planDays, days, override]
+            properties:
+              kind: { type: string, enum: [screenshot, video, trace, har, log, attachment, manual_evidence] }
+              planDays: { type: integer }
+              days: { type: integer, description: "What artifacts recorded now get: min(override, planDays)." }
+              override: { type: boolean }
+              updatedBy: { type: string, description: "Only with an override." }
+              updatedAt: { type: string, format: date-time, description: "Only with an override." }
+    DeletedOrganization:
+      type: object
+      required: [id, name, slug, deletedAt, deletedBy, purgeAfter]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        deletedAt: { type: string, format: date-time }
+        deletedBy: { type: string }
+        purgeAfter: { type: string, format: date-time, description: "Restorable by an owner until then; purged by the worker after." }
     DeletedProject:
       type: object
       required: [id, name, deletedAt, deletedBy, purgeAfter]
@@ -2639,7 +4516,7 @@ components:
         id: { type: string, format: uuid }
         prefix: { type: string, description: "The first characters of the secret, to recognise it in a CI settings page." }
         name: { type: string }
-        permissions: { type: array, items: { type: string, enum: ["project:ingest", "project:read"] } }
+        permissions: { type: array, items: { type: string, enum: ["project:ingest", "project:read", "project:autorun"] } }
         createdAt: { type: string, format: date-time }
         lastUsedAt: { type: [string, "null"], format: date-time }
         expiresAt: { type: string, format: date-time }
@@ -2872,6 +4749,7 @@ components:
         csrfToken: { type: string }
         invitations: { type: boolean, description: "Mail is on (MAIL=smtp): adding an email with no account to a team invites it." }
         passwordReset: { type: boolean, description: "Forgot-password by email is available (MAIL=smtp)." }
+        signup: { type: boolean, description: "Self-serve sign-up with role approval is open (SIGNUP=on with MAIL=smtp, QĐ-17)." }
         providers:
           type: array
           description: "OAuth sign-ins switched on in the api's configuration (§11.2); the sign-in page shows a button for each."
@@ -2991,6 +4869,41 @@ components:
         runId: { type: string, format: uuid }
         attempts: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/Attempt" } }
         events: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TriageEvent" } }
+    EvidenceFact:
+      type: object
+      required: [source, fact]
+      properties:
+        source: { type: string }
+        fact: { type: string, maxLength: 2000 }
+    AIHypothesis:
+      type: object
+      required: [id, category, confidence, evidence, suggestedAction]
+      properties:
+        id: { type: string, format: uuid }
+        category: { type: string, enum: [app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown] }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        evidence: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/EvidenceFact" } }
+        suggestedAction: { type: string, maxLength: 1000 }
+        decision: { type: string, enum: [accepted, rejected, ""] }
+    AIInvestigation:
+      type: object
+      required: [id, status, requestedBy, turnCount, toolCount, inputTokens, outputTokens, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, collecting, investigating, done, error] }
+        requestedBy: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        keySource: { type: string }
+        turnCount: { type: integer, minimum: 0, maximum: 4 }
+        toolCount: { type: integer, minimum: 0, maximum: 6 }
+        inputTokens: { type: integer, minimum: 0 }
+        outputTokens: { type: integer, minimum: 0 }
+        error: { type: string }
+        hypothesis: { oneOf: [{ $ref: "#/components/schemas/AIHypothesis" }, { type: "null" }] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
     IdentityRef:
       type: object
       required: [id, canonicalTitle, canonicalFilePath, status]
@@ -3072,10 +4985,178 @@ components:
       properties:
         action: { type: string, maxLength: 2000 }
         expected: { type: string, maxLength: 2000 }
+    SpecializedKind:
+      type: string
+      enum: [performance, security, accessibility, compatibility, recovery, usability]
+    SpecializedOutcome:
+      type: string
+      enum: [passed, failed, inconclusive, not_run, not_applicable, import_error]
+    ReportNumber:
+      type: [number, "null"]
+      minimum: 0
+    PerformanceDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        subtype: { type: string, enum: ["", load, stress, spike, soak, volume, scalability] }
+        scenario: { type: string }
+        loadConfiguration: { type: string }
+        dataConfiguration: { type: string }
+        resources: { type: string, description: Required for a conclusive scalability result. }
+        durationSeconds: { $ref: "#/components/schemas/ReportNumber" }
+        windowSeconds: { $ref: "#/components/schemas/ReportNumber" }
+        p95Ms: { $ref: "#/components/schemas/ReportNumber" }
+        p99Ms: { $ref: "#/components/schemas/ReportNumber" }
+        throughputPerSecond: { $ref: "#/components/schemas/ReportNumber" }
+        errorRatePercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+        thresholdsRecordedAt: { type: [string, "null"], format: date-time, description: "Source-declared threshold timestamp; must not follow execution start for passed. Not independent proof of pre-registration." }
+        thresholds:
+          type: object
+          additionalProperties: false
+          properties:
+            p95MaxMs: { $ref: "#/components/schemas/ReportNumber" }
+            p99MaxMs: { $ref: "#/components/schemas/ReportNumber" }
+            throughputMinPerSecond: { $ref: "#/components/schemas/ReportNumber" }
+            errorRateMaxPercent: { type: [number, "null"], minimum: 0, maximum: 100 }
+    ReportFinding:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        severity: { type: string, description: "Severity as reported by the source, not silently remapped." }
+        location: { type: string }
+        summary: { type: string }
+        evidence: { type: string }
+        status: { type: string, enum: [open, resolved, accepted_risk, not_retested] }
+        retested: { type: boolean }
+    FindingsDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        standard: { type: string }
+        standardVersion: { type: string }
+        method: { type: string, enum: ["", manual, automated, combined] }
+        coverage: { type: [array, "null"], maxItems: 200, items: { type: string } }
+        assessmentComplete: { type: boolean }
+        findings: { type: [array, "null"], maxItems: 200, items: { $ref: "#/components/schemas/ReportFinding" } }
+    CompatibilityDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        matrix:
+          type: [array, "null"]
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              browser: { type: string }
+              browserVersion: { type: string }
+              os: { type: string }
+              osVersion: { type: string }
+              device: { type: string }
+              status: { type: string, enum: ["", not_run, passed, failed, blocked, skipped] }
+              evidence: { type: string }
+    RecoveryDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        fault: { type: string }
+        initialConditions: { type: string }
+        recoveryObjective: { type: string }
+        targetRecoverySeconds: { $ref: "#/components/schemas/ReportNumber" }
+        actualRecoverySeconds: { $ref: "#/components/schemas/ReportNumber" }
+        allowedDataLossBytes: { type: [integer, "null"], minimum: 0 }
+        actualDataLossBytes: { type: [integer, "null"], minimum: 0 }
+        evidence: { type: string }
+    UsabilityDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        method: { type: string }
+        participants: { type: [integer, "null"], minimum: 0 }
+        conclusion: { type: string }
+        tasks:
+          type: [array, "null"]
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              task: { type: string }
+              successCriterion: { type: string }
+              observation: { type: string }
+              conclusion: { type: string }
+              status: { type: string, enum: ["", passed, failed, inconclusive] }
+    SpecializedInput:
+      allOf:
+        - { $ref: "#/components/schemas/SpecializedEnvelope" }
+        - type: object
+          properties:
+            details: { type: object }
+    SpecializedEnvelope:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, idempotencyKey, kind, title, environment, applicationVersion, source, toolVersion, adapterVersion]
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+        testCaseId: { type: string, description: "Optional case of this project, empty when absent." }
+        retestOf: { type: string, description: Optional earlier report of same project/kind/case. }
+        kind: { $ref: "#/components/schemas/SpecializedKind" }
+        title: { type: string, minLength: 1, maxLength: 500 }
+        state: { type: string, enum: [completed, not_run, not_applicable, import_error], default: completed }
+        notes: { type: string, maxLength: 4000, description: Required when not completed. }
+        environment: { type: string, minLength: 1, maxLength: 128 }
+        applicationVersion: { type: string, minLength: 1, maxLength: 128 }
+        source: { type: string, minLength: 1, maxLength: 128 }
+        toolVersion: { type: string, minLength: 1, maxLength: 128 }
+        adapterVersion: { type: string, minLength: 1, maxLength: 128 }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        originalReport: { type: string, maxLength: 524288, description: "Required nonempty UTF-8 original text for completed/import-error results; response leaves empty, download separately. Limits are bytes." }
+        details: { type: [object, "null"], description: "Typed by kind on writes; 64 KiB max, strings 16000 bytes max, arrays 200 items max. Null only in list summaries." }
+      allOf:
+        - if: { properties: { kind: { const: performance } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/PerformanceDetails" }] } } }
+        - if: { properties: { kind: { enum: [security, accessibility] } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/FindingsDetails" }] } } }
+        - if: { properties: { kind: { const: compatibility } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/CompatibilityDetails" }] } } }
+        - if: { properties: { kind: { const: recovery } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/RecoveryDetails" }] } } }
+        - if: { properties: { kind: { const: usability } } }
+          then: { properties: { details: { anyOf: [{ type: "null" }, { $ref: "#/components/schemas/UsabilityDetails" }] } } }
+    SpecializedResult:
+      type: object
+      required: [id, kind, title, outcome, reasons, input, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/SpecializedKind" }
+        title: { type: string }
+        outcome: { $ref: "#/components/schemas/SpecializedOutcome" }
+        reasons: { type: array, items: { type: string } }
+        input: { $ref: "#/components/schemas/SpecializedEnvelope" }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    CaseTaxonomy:
+      type: object
+      additionalProperties: false
+      description: "Atomic case classification. Missing dimensions default to unclassified/empty on writes. performanceTypes requires performance purpose. Does not change automationStatus or gate rules."
+      properties:
+        level: { type: string, enum: ["", unit, integration, system, acceptance] }
+        purposes: { type: array, uniqueItems: true, maxItems: 7, items: { type: string, enum: [functional, performance, security, usability, accessibility, compatibility, recovery] } }
+        tags: { type: array, uniqueItems: true, maxItems: 3, items: { type: string, enum: [smoke, regression, e2e] } }
+        executionModes: { type: array, uniqueItems: true, maxItems: 2, items: { type: string, enum: [manual, automated] } }
+        performanceTypes: { type: array, uniqueItems: true, maxItems: 6, items: { type: string, enum: [load, stress, spike, soak, volume, scalability] } }
     TestCaseInput:
       type: object
       description: Create requires `title`; on PATCH every field is optional and absent means unchanged.
       properties:
+        taxonomy: { $ref: "#/components/schemas/CaseTaxonomy" }
+        preconditions: { type: string, maxLength: 16000, description: "Trimmed text, at most 16000 UTF-8 bytes. Empty clears; omitted PATCH keeps." }
+        testData: { type: string, maxLength: 16000, description: "Trimmed text, at most 16000 UTF-8 bytes. Empty clears; omitted PATCH keeps." }
+        expectedUpdatedAt: { type: string, format: date-time, description: "Optional PATCH version check; stale edits return 409." }
         suiteId: { type: string, description: A suite of the same project; empty clears. }
         externalKey: { type: string, maxLength: 100, description: Create only; the import upsert key. }
         title: { type: string, minLength: 1, maxLength: 500 }
@@ -3099,6 +5180,11 @@ components:
       type: object
       required: [id, suiteId, suiteName, externalKey, title, steps, expected, priority, isCritical, automationStatus, ownerId, createdAt, updatedAt]
       properties:
+        taxonomy: { $ref: "#/components/schemas/CaseTaxonomy" }
+        preconditions: { type: string }
+        testData: { type: string }
+        audit: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/CaseChange" }, description: "Latest 50 real changes, newest first; present on individual reads. No legacy backfill." }
+        auditTruncated: { type: boolean }
         id: { type: string, format: uuid }
         suiteId: { type: string }
         suiteName: { type: string }
@@ -3114,6 +5200,15 @@ components:
         requirements: { type: array, items: { type: string, format: uuid }, description: "Requirement ids this case covers; present on a single case." }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    CaseChange:
+      type: object
+      required: [id, actor, action, changedFields, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        actor: { type: string }
+        action: { type: string, enum: [case.create, case.update, case.import] }
+        changedFields: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
     ImportReport:
       type: object
       required: [created, updated, skipped, suites, requirements, errors]
@@ -3132,22 +5227,494 @@ components:
         planId: { type: string, format: uuid }
         testCaseId: { type: string, format: uuid }
         caseTitle: { type: string }
+        caseSnapshot:
+          type: [object, "null"]
+          description: "Immutable case at recording time; null for legacy rows (history cannot be reconstructed)."
+          required: [title, steps, expected, updatedAt]
+          properties:
+            taxonomy:
+              oneOf:
+                - { $ref: "#/components/schemas/CaseTaxonomy" }
+                - { type: "null" }
+              description: "Immutable classification; null or absent for snapshots recorded before taxonomy support."
+            preconditions: { type: [string, "null"], description: "Recorded context; null for legacy snapshots." }
+            testData: { type: [string, "null"], description: "Recorded context; null for legacy snapshots." }
+            title: { type: string }
+            steps:
+              type: array
+              items:
+                type: object
+                required: [action, expected]
+                properties:
+                  action: { type: string }
+                  expected: { type: string }
+            expected: { type: string }
+            updatedAt: { type: string, format: date-time }
+        stepResults: { type: array, items: { $ref: "#/components/schemas/ManualStepResult" } }
+        bugUrl: { type: string }
+        retestOf: { type: string, description: "Previous execution ID, or empty string." }
         executedBy: { type: string }
         status: { type: string, enum: [passed, failed, blocked, skipped] }
         note: { type: string }
         executedAt: { type: string, format: date-time }
         evidence: { type: array, items: { $ref: "#/components/schemas/ArtifactRef" }, description: "Verified `manual_evidence` artifacts, oldest first; read each through `getArtifactContent`." }
+    ManualStepResult:
+      type: object
+      required: [stepIndex, status, actual]
+      properties:
+        stepIndex: { type: integer, minimum: 0, maximum: 199 }
+        status: { type: string, enum: [passed, failed, blocked, skipped] }
+        actual: { type: string, maxLength: 4000 }
+    TestType:
+      type: string
+      enum: [smoke, regression, e2e, functional, performance, security, usability, accessibility, compatibility, recovery]
+      description: "The case taxonomy's usage tags and purposes (QĐ-15)."
+    AiModel:
+      type: object
+      required: [id, label, note]
+      properties: { id: { type: string }, label: { type: string }, note: { type: string } }
+    AiProvider:
+      type: object
+      description: A provider whose keys this server takes (QĐ-18).
+      required: [id, label, console, keyHint, keyPrefixes, models, defaultModel, anyModel]
+      properties:
+        id: { type: string, description: "anthropic, openai, gemini, xai, mistral, deepseek, groq, openrouter, or openai-compatible (the operator's endpoint)." }
+        label: { type: string }
+        console: { type: string, description: "Where its API keys are made; \"\" for the operator's endpoint." }
+        keyHint: { type: string, description: "How its keys begin, for a placeholder; \"\" when they have no telling beginning." }
+        keyPrefixes: { type: array, items: { type: string }, description: "Beginnings only this provider's keys have — a pasted key can name its provider." }
+        models: { type: array, items: { $ref: "#/components/schemas/AiModel" }, description: "Suggested models; for Anthropic the only ones taken." }
+        defaultModel: { type: string, description: "\"\" when none is suggested and the model id is typed (OpenRouter)." }
+        anyModel: { type: boolean, description: "Model ids beyond `models` are taken (all but Anthropic)." }
+    AiSettings:
+      type: object
+      required: [providers, models, server, defaultModel, organization, effective]
+      properties:
+        providers: { type: array, items: { $ref: "#/components/schemas/AiProvider" } }
+        models: { type: array, items: { $ref: "#/components/schemas/AiModel" }, description: "Anthropic's list, as before providers." }
+        server:
+          type: object
+          required: [available, provider, model]
+          properties:
+            available: { type: boolean, description: "The server has LLM_API_KEY." }
+            provider: { type: string, description: "LLM_PROVIDER — the only provider the server's key serves." }
+            model: { type: string, description: "What the server's key uses when nothing is chosen (LLM_MODEL, else the provider's default)." }
+        defaultModel: { type: string, description: "The model before the organization chooses one: `server.model`." }
+        organization:
+          oneOf:
+            - type: object
+              required: [provider, model, keySource, keyHint, updatedBy, updatedAt]
+              properties:
+                provider: { type: string }
+                model: { type: string }
+                keySource: { type: string, enum: [organization, server] }
+                keyHint: { type: string, description: "An own key's last four characters; \"\" with the server's." }
+                updatedBy: { type: string }
+                updatedAt: { type: string, format: date-time }
+            - { type: "null" }
+        effective:
+          type: object
+          required: [available, source, provider, model]
+          properties:
+            available: { type: boolean, description: "false also when the server's key was chosen for a provider the server no longer has." }
+            source: { type: string, enum: ["", organization, server] }
+            provider: { type: string }
+            model: { type: string }
+    CaseSuggestion:
+      type: object
+      required: [id, environmentId, testType, url, context, count, status, drafts, pageRead, provider, model, keySource, error, requestedBy, createdAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string }
+        testType: { $ref: "#/components/schemas/TestType" }
+        url: { type: string }
+        context: { type: string }
+        count: { type: integer }
+        status: { type: string, enum: [queued, done, error] }
+        drafts:
+          type: array
+          description: "Model output from an untrusted page — render as text; nothing is a test case until the tester creates it."
+          items:
+            type: object
+            required: [title, priority, preconditions, steps, why]
+            properties:
+              title: { type: string, maxLength: 300 }
+              priority: { type: string, enum: [p0, p1, p2, p3] }
+              preconditions: { type: string }
+              why: { type: string }
+              steps:
+                type: array
+                maxItems: 15
+                items:
+                  type: object
+                  required: [action, expected]
+                  properties: { action: { type: string }, expected: { type: string } }
+        pageRead: { type: boolean, description: "The site's outline reached the model." }
+        provider: { type: string, description: "The provider that wrote the drafts (QĐ-18); \"\" while queued." }
+        model: { type: string, description: "The model that wrote the drafts, as its provider names it (a dated snapshot, say). After an Anthropic refusal fallback it is the fallback model, which can be outside the offered list." }
+        keySource: { type: string, enum: ["", organization, server] }
+        error: { type: string }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    UrlCheck:
+      type: object
+      required: [id, environmentId, url, status, verdict, title, finalUrl, requestedBy, checkStatuses, error, screenshots, createdAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, description: "\"\" when none was named." }
+        url: { type: string, description: "As checked: trimmed, scheme and host lower-cased, no fragment." }
+        status: { type: string, enum: [queued, done, error] }
+        verdict: { type: string, enum: ["", passed, warning, failed], description: "The worst check; \"\" until done." }
+        title: { type: string, description: "The page's <title> — untrusted text." }
+        finalUrl: { type: string, description: "Where the page ended up after redirects." }
+        requestedBy: { type: string }
+        checkStatuses: { type: array, items: { type: string, enum: [passed, warning, failed, not_run] }, description: "Each check's status in report order (list view)." }
+        error: { type: string, description: "Why an `error` check has no report." }
+        screenshots: { type: array, items: { type: string, enum: [desktop, mobile] } }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        report:
+          type: object
+          description: "Single check only, once done. The checker's report — page text in it is untrusted; render as text."
+          properties:
+            url: { type: string }
+            finalUrl: { type: string }
+            status: { type: integer, description: "HTTP status of the page; 0 when it did not load." }
+            title: { type: string }
+            verdict: { type: string, enum: [passed, warning, failed] }
+            durationMs: { type: integer }
+            blocked: { type: array, items: { type: string }, description: "Requests the guard refused (private or reserved addresses)." }
+            metrics:
+              type: object
+              properties:
+                ttfbMs: { type: [integer, "null"] }
+                domContentLoadedMs: { type: [integer, "null"] }
+                loadMs: { type: [integer, "null"] }
+                lcpMs: { type: [integer, "null"] }
+                cls: { type: number }
+                requests: { type: integer }
+                transferBytes: { type: integer }
+            checks:
+              type: array
+              items:
+                type: object
+                required: [key, title, status, summary, details]
+                properties:
+                  key: { type: string, enum: [load, https, console, requests, links, accessibility, speed, basics, mobile] }
+                  title: { type: string }
+                  status: { type: string, enum: [passed, warning, failed, not_run] }
+                  summary: { type: string, maxLength: 300 }
+                  details: { type: array, maxItems: 20, items: { type: string, maxLength: 300 } }
+    AutoStep:
+      type: object
+      description: |
+        One step of a runnable case (QĐ-16) — data the checker interprets
+        with Playwright's locators, never code. `by` names the element
+        (`role` + `role` + `name`, or `label`/`placeholder`/`text`/`testid`/`css` + `name`);
+        `value` is what to type, pick or press, the address, the text expected,
+        or milliseconds to wait. `{{name}}` in `name` or `value` is a variable.
+        `say` and `expected` are for people.
+
+        Check steps (QĐ-19) take no element and check the page as it is:
+        `check_accessibility` (value "" or minor/moderate/serious/critical —
+        axe-core WCAG A/AA, fails at that impact or worse, "" = serious),
+        `check_performance` (value "" or a budget such as
+        `lcp=2500 cls=0.1 ttfb=800`; metrics lcp, fcp, ttfb, load in ms and
+        cls) and `check_security` (value "" or `strict` — HTTPS, HSTS, CSP,
+        clickjacking, nosniff, version headers, CORS, cookie flags, mixed
+        content; fails on a high finding, strict also on medium). Their
+        details are the result's `note`.
+      required: [do]
+      properties:
+        do: { type: string, enum: [goto, click, fill, select, check, uncheck, press, hover, wait, expect_visible, expect_hidden, expect_text, expect_url, expect_value, expect_title, check_accessibility, check_performance, check_security] }
+        by: { type: string, enum: ["", role, label, placeholder, text, testid, css] }
+        role: { type: string, description: "An ARIA role when `by` is role (button, link, textbox, …)." }
+        name: { type: string, maxLength: 2000 }
+        value: { type: string, maxLength: 2000 }
+        say: { type: string, maxLength: 500 }
+        expected: { type: string, maxLength: 1000 }
+    TestAccount:
+      type: object
+      required: [key, username, loginUrl, loginSteps, loginStatus, loginError, loginCheckedAt, updatedBy, updatedAt]
+      properties:
+        key: { type: string }
+        username: { type: string }
+        loginUrl: { type: string }
+        loginSteps: { type: [array, "null"], items: { $ref: "#/components/schemas/AutoStep" }, description: "null until found or written." }
+        loginStatus: { type: string, enum: [unknown, finding, ok, failed] }
+        loginError: { type: string }
+        loginCheckedAt: { type: [string, "null"], format: date-time }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    AutoSpec:
+      type: object
+      required: [caseId, title, priority, target, account, inputs, steps, source, updatedBy, updatedAt, last]
+      properties:
+        caseId: { type: string, format: uuid }
+        title: { type: string }
+        priority: { type: string }
+        target: { type: string }
+        account: { type: string }
+        inputs: { type: object, additionalProperties: { type: string } }
+        steps: { type: array, items: { $ref: "#/components/schemas/AutoStep" } }
+        source: { type: string, enum: [manual, ai] }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+        last:
+          type: [object, "null"]
+          description: The case's newest finished result in a run.
+          properties:
+            runId: { type: string, format: uuid }
+            status: { type: string, enum: [passed, failed, error] }
+            finishedAt: { type: string, format: date-time }
+    AutoDraft:
+      type: object
+      required: [id, environmentId, target, account, inputs, context, count, testType, status, drafts, pageRead, provider, model, keySource, error, requestedBy, createdAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        target: { type: string }
+        account: { type: string }
+        inputs: { type: object, additionalProperties: { type: string } }
+        context: { type: string }
+        count: { type: integer }
+        testType: { type: string }
+        status: { type: string, enum: [queued, done, error] }
+        drafts:
+          type: array
+          description: Model output about an untrusted page — show as text; the tester decides.
+          items:
+            type: object
+            required: [title, priority, why, steps]
+            properties:
+              title: { type: string }
+              priority: { type: string, enum: [p0, p1, p2, p3] }
+              why: { type: string }
+              steps: { type: array, items: { $ref: "#/components/schemas/AutoStep" } }
+        pageRead: { type: boolean, description: "The start page reached the model; false: drafted from the description alone." }
+        provider: { type: string, description: "The provider that wrote the drafts (QĐ-18); \"\" while queued." }
+        model: { type: string, description: "The model that wrote the drafts, as its provider names it (a dated snapshot, say). After an Anthropic refusal fallback it is the fallback model, which can be outside the offered list." }
+        keySource: { type: string, enum: ["", organization, server] }
+        error: { type: string }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    AutoStepResult:
+      type: object
+      required: [status, ms]
+      properties:
+        status: { type: string, enum: [passed, failed, skipped] }
+        kind: { type: string, enum: [input, locator, assert, navigation, page], description: "Why a step failed: locator — its element was not found or usable; assert — the expectation did not hold; navigation — a page did not open or the browser tried to leave the site." }
+        error: { type: string }
+        note: { type: string, maxLength: 1000, description: "A check step's details (QĐ-19), passed or failed: the problems axe found, the timings against the budget, the security findings by level." }
+        ms: { type: integer }
+        healed:
+          type: object
+          description: The model's repair that ran in the step's place (the step passed through it).
+          properties:
+            steps: { type: array, items: { $ref: "#/components/schemas/AutoStep" } }
+            reason: { type: string }
+    AutoRun:
+      type: object
+      required: [id, environmentId, planId, status, trigger, requestedBy, heal, variants, total, passed, failed, errored, healed, testRunId, error, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        planId: { type: string, description: "The testmgmt plan the cases are recorded in." }
+        status: { type: string, enum: [queued, running, done, error] }
+        trigger: { type: string, enum: [dashboard, ci] }
+        requestedBy: { type: string }
+        heal: { type: boolean }
+        variants: { type: array, items: { type: string }, description: "browser/device each case ran on (QĐ-19), e.g. firefox/phone; [chromium/desktop] for a run that asked for none." }
+        total: { type: integer, description: "Case runs: cases × variants." }
+        passed: { type: integer }
+        failed: { type: integer }
+        errored: { type: integer, description: "Cases that could not run (no sign-in, the page did not open)." }
+        healed: { type: integer, description: "Steps the model repaired." }
+        testRunId: { type: string, description: "The test run it was recorded as, once done." }
+        error: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        cases:
+          type: array
+          description: On getAutoRun only, by position.
+          items:
+            type: object
+            required: [caseId, variant, position, title, target, account, inputs, steps, status, results, console, healed, durationMs, error, screenshots, executionId, finishedAt]
+            properties:
+              caseId: { type: string, format: uuid }
+              variant: { type: string, description: "browser/device this case run used; a case appears once per variant of the run." }
+              position: { type: integer }
+              title: { type: string }
+              target: { type: string }
+              account: { type: string }
+              inputs: { type: object, additionalProperties: { type: string } }
+              steps: { type: array, items: { $ref: "#/components/schemas/AutoStep" }, description: "As they were when the run started." }
+              status: { type: string, enum: [pending, passed, failed, error] }
+              results: { type: array, items: { $ref: "#/components/schemas/AutoStepResult" } }
+              console: { type: array, items: { type: string }, description: "Console errors of the page — untrusted text." }
+              healed: { type: integer }
+              durationMs: { type: integer }
+              error: { type: string }
+              screenshots: { type: array, items: { type: string, enum: [final, failure] } }
+              executionId: { type: string }
+              finishedAt: { type: [string, "null"], format: date-time }
+    CIAutoRun:
+      type: object
+      required: [id, status, total, passed, failed, errored, healed, finishedAt, url, cases]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, done, error] }
+        total: { type: integer }
+        passed: { type: integer }
+        failed: { type: integer }
+        errored: { type: integer }
+        healed: { type: integer }
+        finishedAt: { type: [string, "null"], format: date-time }
+        url: { type: string, description: "The run's page in the dashboard." }
+        cases:
+          type: array
+          items:
+            type: object
+            required: [title, variant, status, error]
+            properties:
+              title: { type: string }
+              variant: { type: string }
+              status: { type: string, enum: [pending, passed, failed, error] }
+              error: { type: string }
+    SiteOwnership:
+      type: object
+      required: [host, token, method, status, error, verifiedAt, checkedAt, fileUrl, fileText, dnsName, dnsText]
+      properties:
+        host: { type: string, description: "The environment's host (with its port), what a load test hits." }
+        token: { type: string }
+        method: { type: string, enum: ["", file, dns] }
+        status: { type: string, enum: [unverified, checking, verified, failed] }
+        error: { type: string }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        checkedAt: { type: [string, "null"], format: date-time }
+        fileUrl: { type: string }
+        fileText: { type: string }
+        dnsName: { type: string }
+        dnsText: { type: string }
+    LoadRun:
+      type: object
+      required: [id, environmentId, host, paths, vus, seconds, rampSeconds, maxP95Ms, maxErrorRate, status, verdict, reasons, result, error, requestedBy, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        host: { type: string }
+        paths: { type: array, items: { type: string } }
+        vus: { type: integer }
+        seconds: { type: integer }
+        rampSeconds: { type: integer }
+        maxP95Ms: { type: [integer, "null"] }
+        maxErrorRate: { type: [number, "null"] }
+        status: { type: string, enum: [queued, running, done, error] }
+        verdict: { type: string, enum: ["", passed, failed] }
+        reasons: { type: array, items: { type: string } }
+        result:
+          description: "Once done: requests, errors (no answer or 5xx), clientErrors (4xx), errorRate (%), rps, latencyMs {min, p50, p90, p95, p99, max}, statuses {code: count}, errorSamples, timeline [{t, requests, errors, avgMs}], seconds."
+          type: [object, "null"]
+        error: { type: string }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    ScriptRun:
+      type: object
+      required: [id, environmentId, kind, base, entry, project, grep, vus, seconds, timeoutSeconds, archiveBytes, status, verdict, exitCode, timedOut, tests, failures, error, testRunId, requestedBy, createdAt, startedAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string, format: uuid }
+        kind: { type: string, enum: [playwright, k6] }
+        base: { type: string, description: "The environment's address when the run was asked for." }
+        entry: { type: string }
+        project: { type: string }
+        grep: { type: string }
+        vus: { type: [integer, "null"], description: "k6 only." }
+        seconds: { type: [integer, "null"], description: "k6 only." }
+        timeoutSeconds: { type: integer }
+        archiveBytes: { type: integer }
+        status: { type: string, enum: [queued, running, done, error] }
+        verdict: { type: string, enum: ["", passed, failed], description: "Failed when the script exited non-zero, timed out, or a test failed." }
+        exitCode: { type: [integer, "null"] }
+        timedOut: { type: boolean }
+        tests: { type: integer }
+        failures: { type: integer }
+        log: { type: string, description: "The last 64 KB of the script's output; on create and getScriptRun only." }
+        error: { type: string, description: "Why it could not run (status error)." }
+        testRunId: { type: [string, "null"], format: uuid, description: "The test run its report became." }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+    SiteScan:
+      type: object
+      required: [id, environmentId, startUrl, maxPages, account, status, requestedBy, error, pages, checked, passed, warnings, failed, createdAt, finishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        environmentId: { type: string }
+        startUrl: { type: string }
+        maxPages: { type: integer }
+        account: { type: string }
+        status: { type: string, enum: [running, done, error] }
+        requestedBy: { type: string }
+        error: { type: string }
+        pages: { type: integer, description: "Pages found so far." }
+        checked: { type: integer }
+        passed: { type: integer }
+        warnings: { type: integer }
+        failed: { type: integer, description: "Pages whose check failed, or that could not be checked." }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        checks:
+          type: array
+          description: On getSiteScan only — each page's URL check, with how many links from the start page it is.
+          items:
+            allOf:
+              - { $ref: "#/components/schemas/UrlCheck" }
+              - type: object
+                required: [depth]
+                properties:
+                  depth: { type: integer, minimum: 0, maximum: 3 }
+    Environment:
+      type: object
+      required: [id, key, baseUrl, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string, description: "The reporter's environment key; never changes." }
+        baseUrl: { type: string, description: "Address of the system under test there (QĐ-14); \"\" when none is recorded." }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     TestPlan:
       type: object
-      required: [id, name, environmentId, status, createdAt, updatedAt]
+      required: [id, name, environmentId, environment, status, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         environmentId: { type: string }
+        environment: { oneOf: [{ $ref: "#/components/schemas/Environment" }, { type: "null" }], description: "The plan's environment with its address; null when the plan has none." }
+        testType: { type: string, description: "One of TestType, or \"\" when the plan was made without choosing (QĐ-15)." }
         status: { type: string, enum: [draft, active, closed] }
+        cases: { type: [array, "null"], items: { $ref: "#/components/schemas/PlanCase" }, description: "Fixed case membership with current case content, assignment and work status. Null on collection reads." }
         executions: { type: array, items: { $ref: "#/components/schemas/ManualExecution" }, description: "Latest row per case; present on a single plan." }
+        executionHistory: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/ManualExecution" }, description: "Newest 200 executions, ordered by executedAt DESC then id DESC, with original evidence." }
+        historyTruncated: { type: boolean, description: "More than 200 executions exist; older rows are retained." }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    PlanCase:
+      type: object
+      required: [testCase, assigneeUserId, assigneeEmail, assignedBy, assignedAt, workStatus]
+      properties:
+        testCase: { $ref: "#/components/schemas/TestCase" }
+        assigneeUserId: { type: string, description: "Empty when unassigned." }
+        assigneeEmail: { type: string }
+        assignedBy: { type: string }
+        assignedAt: { type: [string, "null"], format: date-time }
+        workStatus: { type: string, enum: [not_run, in_progress, completed] }
     GateRule:
       type: object
       required: [id, level, passed, summary, applies]

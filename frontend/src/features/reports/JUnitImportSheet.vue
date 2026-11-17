@@ -100,7 +100,9 @@ async function submit() {
 <template>
   <Sheet v-model:open="open">
     <SheetTrigger as-child>
-      <Button variant="outline" size="sm"><FileUp />Import JUnit</Button>
+      <Button variant="outline" size="sm" class="min-h-11 lg:min-h-8"
+        ><FileUp />Import JUnit</Button
+      >
     </SheetTrigger>
     <SheetContent class="junit-import w-full gap-0 sm:max-w-md">
       <SheetHeader>

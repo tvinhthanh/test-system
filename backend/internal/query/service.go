@@ -2,6 +2,9 @@ package query
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -74,8 +77,11 @@ func (s *service) Runs(ctx context.Context, projectID string, f RunFilter) (Page
 	if f.Status != "" && !validRunStatus[f.Status] {
 		return Page[Run]{}, fmt.Errorf("%w: status %q", ErrInvalid, f.Status)
 	}
+	if f.Source != "" && f.Source != "playwright" && f.Source != "junit" && f.Source != "auto" {
+		return Page[Run]{}, fmt.Errorf("%w: source %q", ErrInvalid, f.Source)
+	}
 	limit := clamp(f.Limit, 20)
-	fh := filterHash("runs", f.Q, f.Status, f.Environment, "-startedAt")
+	fh := filterHash("runs", f.Q, f.Status, f.Environment, f.Source, "-startedAt")
 	var afterTime *time.Time
 	var afterID *string
 	if f.Cursor != "" {
@@ -99,9 +105,14 @@ func (s *service) Runs(ctx context.Context, projectID string, f RunFilter) (Page
 		   AND ($2::text IS NULL OR r.status = $2)
 		   AND ($3::text IS NULL OR e.key = $3)
 		   AND ($4::text IS NULL OR r.branch ILIKE $4 OR r.commit_sha ILIKE $4 OR r.local_run_id::text ILIKE $4)
-		   AND ($5::timestamptz IS NULL OR (r.started_at, r.id) < ($5, $6::uuid))
+		   AND ($5::text IS NULL OR CASE
+		     WHEN r.trigger->>'source' = 'junit-import' AND r.trigger->>'importedBy' LIKE 'autotest:%' THEN 'auto'
+		     WHEN r.trigger->>'source' = 'junit-import' THEN 'junit'
+		     WHEN r.framework->>'name' = 'playwright' THEN 'playwright'
+		     ELSE 'other' END = $5)
+		   AND ($6::timestamptz IS NULL OR (r.started_at, r.id) < ($6, $7::uuid))
 		 ORDER BY r.started_at DESC, r.id DESC
-		 LIMIT $7`, projectID, nullable(f.Status), nullable(f.Environment), q, afterTime, afterID, limit+1)
+		 LIMIT $8`, projectID, nullable(f.Status), nullable(f.Environment), q, nullable(f.Source), afterTime, afterID, limit+1)
 	if err != nil {
 		return Page[Run]{}, err
 	}
@@ -306,6 +317,195 @@ func (s *service) ResultDetail(ctx context.Context, projectID, resultID string) 
 		d.Events = append(d.Events, ev)
 	}
 	return d, rows.Err()
+}
+
+func (s *service) InvestigationEvidence(ctx context.Context, projectID, resultID string) (json.RawMessage, string, string, error) {
+	d, err := s.ResultDetail(ctx, projectID, resultID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	var run struct {
+		Branch, CommitSHA, Environment string
+	}
+	if err := s.db.Q(ctx).QueryRow(ctx, `SELECT coalesce(r.branch, ''), coalesce(r.commit_sha, ''), coalesce(e.key, '') FROM runs r LEFT JOIN environments e ON e.id = r.environment_id
+		WHERE r.project_id = $1 AND r.id = $2 AND r.deleted_at IS NULL`, projectID, d.RunID).Scan(&run.Branch, &run.CommitSHA, &run.Environment); err != nil {
+		return nil, "", "", mapErr(err)
+	}
+	type historyItem struct {
+		Status      string    `json:"status"`
+		DurationMs  int       `json:"durationMs"`
+		Branch      string    `json:"branch"`
+		CommitSHA   string    `json:"commitSha"`
+		Environment string    `json:"environment"`
+		StartedAt   time.Time `json:"startedAt"`
+	}
+	history := []historyItem{}
+	decisions := []map[string]any{}
+	if d.Result.StableTestID != nil {
+		rows, err := s.db.Q(ctx).Query(ctx, `SELECT t.final_status, t.duration_ms, coalesce(r.branch, ''), coalesce(r.commit_sha, ''), coalesce(e.key, ''), r.started_at
+			FROM test_results t JOIN runs r ON r.id = t.run_id LEFT JOIN environments e ON e.id = r.environment_id
+			WHERE r.project_id = $1 AND t.stable_test_id = $2 AND t.id <> $3 AND r.deleted_at IS NULL
+			ORDER BY r.started_at DESC, t.id LIMIT 20`, projectID, *d.Result.StableTestID, resultID)
+		if err != nil {
+			return nil, "", "", err
+		}
+		for rows.Next() {
+			var h historyItem
+			if err := rows.Scan(&h.Status, &h.DurationMs, &h.Branch, &h.CommitSHA, &h.Environment, &h.StartedAt); err != nil {
+				rows.Close()
+				return nil, "", "", err
+			}
+			h.StartedAt = h.StartedAt.UTC()
+			history = append(history, h)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, "", "", err
+		}
+		rows, err = s.db.Q(ctx).Query(ctx, `SELECT e.type, e.payload->>'category', e.occurred_at
+			FROM triage_events e JOIN test_results t ON t.id = e.test_result_id JOIN runs r ON r.id = t.run_id
+			WHERE e.project_id = $1 AND t.stable_test_id = $2 AND e.type IN ('HYPOTHESIS_ACCEPTED','HYPOTHESIS_REJECTED')
+			ORDER BY e.occurred_at DESC LIMIT 20`, projectID, *d.Result.StableTestID)
+		if err != nil {
+			return nil, "", "", err
+		}
+		for rows.Next() {
+			var typ string
+			var category *string
+			var at time.Time
+			if err := rows.Scan(&typ, &category, &at); err != nil {
+				rows.Close()
+				return nil, "", "", err
+			}
+			decisions = append(decisions, map[string]any{"type": typ, "category": category, "occurredAt": at.UTC()})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, "", "", err
+		}
+	}
+	attempts := make([]map[string]any, 0, len(d.Attempts))
+	lastError := ""
+	for _, a := range d.Attempts {
+		item := map[string]any{"attempt": a.Attempt, "status": a.Status, "durationMs": a.DurationMs, "artifacts": a.Artifacts}
+		if a.Error != nil {
+			if a.Error.Message != nil {
+				item["message"] = cutQuery(*a.Error.Message, 4000)
+				lastError = *a.Error.Message
+			}
+			if a.Error.Stack != nil {
+				item["stack"] = cutQuery(*a.Error.Stack, 8000)
+			}
+		}
+		attempts = append(attempts, item)
+	}
+	// The identity when resolved, else this result: a pointer printed with
+	// %v is an address, which would make every request a new fingerprint.
+	subject := "result:" + resultID
+	if d.Result.StableTestID != nil {
+		subject = "identity:" + *d.Result.StableTestID
+	}
+	fingerprintBytes := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", subject, d.Result.FinalStatus, cutQuery(lastError, 1000))))
+	fingerprint := hex.EncodeToString(fingerprintBytes[:])
+	similar, err := s.similarFailures(ctx, projectID, resultID, d.Result.StableTestID, lastError)
+	if err != nil {
+		return nil, "", "", err
+	}
+	track, err := s.rulesTrackRecord(ctx, projectID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	evidence := map[string]any{
+		"failureContext":   map[string]any{"result": d.Result, "runId": d.RunID, "branch": run.Branch, "commitSha": run.CommitSHA, "environment": run.Environment, "attempts": attempts},
+		"stableHistory":    history,
+		"triageHistory":    decisions,
+		"similarFailures":  similar,
+		"rulesTrackRecord": track,
+	}
+	b, err := json.Marshal(evidence)
+	return b, fingerprint, d.Result.FinalStatus, err
+}
+
+// errorKey is how two failures are judged to share an error: the first line
+// of the message, lower-cased, digits and long hex ids (ports, timeouts, row
+// ids, request ids) folded to "#", spaces collapsed, at most 200 characters.
+// The same expression runs on both sides, in SQL.
+const errorKey = `left(regexp_replace(regexp_replace(lower(split_part(%s, E'\n', 1)), '[0-9a-f]{8,}|[0-9]+', '#', 'g'), '\s+', ' ', 'g'), 200)`
+
+// similarFailures are causes the team accepted for OTHER tests of the project
+// that failed with the same error: "we have seen and explained this before".
+// It starts from the project's accepted verdicts, a small set, so the cost
+// does not grow with the number of runs.
+func (s *service) similarFailures(ctx context.Context, projectID, resultID string, stableTestID *string, lastError string) ([]map[string]any, error) {
+	out := []map[string]any{}
+	if strings.TrimSpace(lastError) == "" {
+		return out, nil
+	}
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT e.payload->>'category', count(DISTINCT coalesce(t.stable_test_id::text, t.id::text)), min(t.display_name), max(e.occurred_at)
+		  FROM triage_events e
+		  JOIN test_results t ON t.id = e.test_result_id
+		  JOIN runs r ON r.id = t.run_id AND r.deleted_at IS NULL
+		  JOIN LATERAL (
+		       SELECT a.error->>'message' AS m FROM test_result_attempts a
+		        WHERE a.test_result_id = t.id AND a.error IS NOT NULL
+		        ORDER BY a.attempt DESC LIMIT 1) la ON true
+		 WHERE e.project_id = $1 AND e.type = 'HYPOTHESIS_ACCEPTED' AND e.payload->>'category' IS NOT NULL
+		   AND t.id <> $2
+		   -- Other tests only, when this one's identity is known; a result not
+		   -- yet resolved (the worker resolves after ingest) excludes only itself.
+		   AND ($3::uuid IS NULL OR t.stable_test_id IS DISTINCT FROM $3::uuid)
+		   AND `+fmt.Sprintf(errorKey, "la.m")+` = `+fmt.Sprintf(errorKey, "$4::text")+`
+		 GROUP BY 1 ORDER BY 2 DESC, 4 DESC LIMIT 5`, projectID, resultID, stableTestID, cutQuery(lastError, 4000))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var category, example string
+		var tests int
+		var last time.Time
+		if err := rows.Scan(&category, &tests, &example, &last); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"category": category, "tests": tests, "example": example, "lastAcceptedAt": last.UTC()})
+	}
+	return out, rows.Err()
+}
+
+// rulesTrackRecord is how the team answered the rule-based hypotheses of this
+// project, per category: accepted as proposed, or rejected / accepted with a
+// different cause. The rules use it to calibrate their confidence.
+func (s *service) rulesTrackRecord(ctx context.Context, projectID string) ([]map[string]any, error) {
+	rows, err := s.db.Q(ctx).Query(ctx, `
+		SELECT h.category,
+		       count(*) FILTER (WHERE e.type = 'HYPOTHESIS_ACCEPTED' AND coalesce(e.payload->>'category', h.category) = h.category),
+		       count(*) FILTER (WHERE e.type = 'HYPOTHESIS_REJECTED' OR coalesce(e.payload->>'category', h.category) <> h.category)
+		  FROM ai_hypotheses h
+		  JOIN triage_events e ON e.hypothesis_id = h.id AND e.type IN ('HYPOTHESIS_ACCEPTED', 'HYPOTHESIS_REJECTED')
+		 WHERE h.project_id = $1 AND h.model = 'rules-v1'
+		 GROUP BY h.category`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var category string
+		var accepted, rejected int
+		if err := rows.Scan(&category, &accepted, &rejected); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"category": category, "accepted": accepted, "rejected": rejected})
+	}
+	return out, rows.Err()
+}
+
+func cutQuery(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // ---- Identities -----------------------------------------------------------
@@ -698,6 +898,7 @@ func (s *service) MeterFacts(ctx context.Context, day time.Time) ([]MeterFacts, 
 		       coalesce(c.merges, 0), coalesce(c.undo_merges, 0), coalesce(c.splits, 0), coalesce(rv.decisions, 0),
 		       coalesce(v.runs, 0), coalesce(v.results, 0), coalesce(st.bytes, 0)
 		  FROM projects p JOIN workspaces w ON w.id = p.workspace_id
+		  JOIN organizations o ON o.id = w.org_id AND o.deleted_at IS NULL -- nor is a deleted organization's
 		  LEFT JOIN active a ON a.project_id = p.id
 		  LEFT JOIN corrections c ON c.project_id = p.id
 		  LEFT JOIN reviews rv ON rv.project_id = p.id

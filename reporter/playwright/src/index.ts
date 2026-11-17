@@ -42,6 +42,12 @@ export interface ReporterOptions {
   uploadArtifacts?: boolean;
   /** Strip Authorization/Cookie from HAR files before upload (§11.1). Default true. */
   stripHar?: boolean;
+  /**
+   * How long onEnd waits for the platform after the last test before it
+   * spools what is left and lets the run end. Default 30 000 (one request
+   * timeout, §7.5). The tests' result never depends on it.
+   */
+  flushTimeoutMs?: number;
   /** Print debug lines. Env: ATP_DEBUG=1. */
   debug?: boolean;
   /** Test hooks. */
@@ -50,6 +56,9 @@ export interface ReporterOptions {
 }
 
 type Level = "warn" | "info" | "debug";
+
+/** package.json's version, sent with every run (§7.3 reporter.version). 0.1.1: uploads no longer hold finish back. */
+const VERSION = "0.1.1";
 
 const ATTEMPT_STATUS: Record<string, string> = {
   passed: "passed",
@@ -68,6 +77,7 @@ export default class AtpReporter implements Reporter {
   private repoRoot = "";
   private environment = "local";
   private readonly occurrences = new Map<string, number>();
+  private readonly testOccurrences = new WeakMap<TestCase, number>();
   private readonly uploads: Promise<UploadOutcome>[] = [];
   private uploadsInFlight = 0;
   private readonly uploadWaiters: (() => void)[] = [];
@@ -100,11 +110,40 @@ export default class AtpReporter implements Reporter {
         this.log("warn", "ATP_URL / ATP_TOKEN not set: results will not be reported (tests run normally)");
         return;
       }
+      if (!isHttpUrl(url)) {
+        // "localhost:8080" parses as a URL of scheme "localhost:"; every request
+        // would fail and be retried as a network error.
+        this.disabled = true;
+        this.log("warn", `ATP_URL ${JSON.stringify(url)} is not an http(s) URL: results will not be reported (tests run normally)`);
+        return;
+      }
       this.environment = this.opts.environment ?? process.env.ATP_ENVIRONMENT ?? "local";
       this.repoRoot = this.opts.repoRoot ?? config.rootDir;
       this.localRunId = randomUUID();
-      this.client = this.opts._client ?? new Client({ url, token, userAgent: `atp-playwright-reporter/0.1.0 playwright/${config.version}` });
+      this.client = this.opts._client ?? new Client({ url, token, userAgent: `atp-playwright-reporter/${VERSION} playwright/${config.version}` });
+      // Create the run now, off the hot path; events queue behind it.
+      const body = {
+        localRunId: this.localRunId,
+        environmentKey: this.environment,
+        trigger: detectTrigger(),
+        framework: { name: "playwright", version: config.version },
+        reporter: { name: "@atp/playwright-reporter", version: VERSION, protocolVersion: "1.1" },
+        startedAt: this.now().toISOString(),
+      };
+      this.runCreated = this.client
+        .createRun(body)
+        .then((r) => {
+          this.run = r;
+          this.log("debug", `run ${this.localRunId} → ${r.runId}`);
+          return true;
+        })
+        .catch((e) => {
+          // No run on the server: events will spool. The tests keep going.
+          this.log("warn", `could not create run (${describe(e)}); events will be spooled`);
+          return false;
+        });
       this.queue = new EventQueue({
+        ready: this.runCreated,
         localRunId: this.localRunId,
         client: this.client,
         spoolDir: this.opts.spoolDir ?? `${tmpdir()}/atp-reporter`,
@@ -113,40 +152,24 @@ export default class AtpReporter implements Reporter {
           for (const [k, v] of Object.entries(m)) this.identity.set(k, v);
         },
       });
-      // Create the run now, off the hot path; events queue behind it.
-      const body = {
-        localRunId: this.localRunId,
-        environmentKey: this.environment,
-        trigger: detectTrigger(),
-        framework: { name: "playwright", version: config.version },
-        reporter: { name: "@atp/playwright-reporter", version: "0.1.0", protocolVersion: "1.1" },
-        startedAt: this.now().toISOString(),
-      };
-      const client = this.client;
-      this.runCreated = client
-        .createRun(body)
-        .then((r) => {
-          this.run = r;
-          this.log("debug", `run ${this.localRunId} → ${r.runId}`);
-        })
-        .catch((e) => {
-          // No run on the server: events will spool. The tests keep going.
-          this.log("warn", `could not create run (${describe(e)}); events will be spooled`);
-        });
     } catch (e) {
       this.disabled = true;
       this.log("warn", `reporter disabled: ${describe(e)}`);
     }
   }
 
-  private runCreated: Promise<void> = Promise.resolve();
+  private runCreated: Promise<boolean> = Promise.resolve(false);
+  /** onEnd's budget ran out: nothing more goes to the platform. */
+  private gaveUp = false;
+  /** onEnd stopped waiting for uploads: those not yet started are skipped. */
+  private uploadsClosed = false;
 
   onTestEnd(test: TestCase, result: TestResult): void {
     if (this.disabled || !this.queue) return;
     try {
       const signals = this.signalsOf(test);
       const ct = clientTestId(signals);
-      const occurrence = this.occurrenceOf(ct, result.retry);
+      const occurrence = this.occurrenceOf(test, ct);
       const started = result.startTime;
       const finished = new Date(started.getTime() + result.duration);
       const event: Record<string, unknown> = {
@@ -169,8 +192,8 @@ export default class AtpReporter implements Reporter {
           snippet: stripAnsi(result.error.snippet ?? ""),
         };
       }
-      // Enqueue after the run exists; the queue preserves order.
-      void this.runCreated.then(() => this.queue?.push(event));
+      // Sequenced now; the queue holds batches until the run exists.
+      this.queue.push(event);
 
       if (this.opts.uploadArtifacts !== false && result.attachments.length > 0) {
         const ref = { localRunId: this.localRunId, clientTestId: ct, occurrenceIndex: occurrence, attempt: result.retry };
@@ -190,7 +213,8 @@ export default class AtpReporter implements Reporter {
     while (this.uploadsInFlight >= 4) await new Promise<void>((r) => this.uploadWaiters.push(r));
     this.uploadsInFlight++;
     try {
-      if (!this.client || !this.run) return { name: a.name, status: "skipped", reason: "no run" };
+      if (!this.client || !this.run || this.gaveUp) return { name: a.name, status: "skipped", reason: "no run" };
+      if (this.uploadsClosed) return { name: a.name, status: "skipped", reason: "out of time" };
       return await uploadAttachment(this.client, ref, a, { stripHar: this.opts.stripHar !== false, limits: this.run.limits.artifactBytes, log: (l, m) => this.log(l, m) });
     } finally {
       this.uploadsInFlight--;
@@ -200,17 +224,46 @@ export default class AtpReporter implements Reporter {
 
   async onEnd(_result: FullResult): Promise<void> {
     if (this.disabled || !this.queue || !this.client) return;
+    // The platform gets flushTimeoutMs after the last test; then whatever is
+    // undelivered goes to the spool and the run ends (§7.5). Uploads get that
+    // budget less a reserve for finish: an object store that hangs or refuses
+    // must not keep the run from closing with its real status (§10.4, an
+    // artifact never fails the run; the server expires what never arrived).
+    const budget = this.opts.flushTimeoutMs ?? 30_000;
+    const uploadsBy = Date.now() + budget - Math.min(5_000, Math.floor(budget / 3));
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<"expired">((r) => {
+      timer = setTimeout(() => r("expired"), budget);
+    });
+    const outcome = await Promise.race([this.deliver(uploadsBy).then(() => "done" as const), expired]);
+    clearTimeout(timer);
+    if (outcome === "expired") {
+      this.gaveUp = true;
+      this.queue.abandon(`no answer from the platform within ${budget} ms of the last test`);
+      this.log("warn", `gave up on the platform after ${budget} ms: ${this.queue.stats.spooled} events spooled, uploads and finish skipped (tests unaffected)`);
+    }
+  }
+
+  private async deliver(uploadsBy: number): Promise<void> {
+    const queue = this.queue!;
+    const client = this.client!;
     try {
       await this.runCreated;
-      await this.queue.close();
-      const outcomes = await Promise.all(this.uploads);
-      const s = this.queue.stats;
-      const counts = { verified: 0, skipped: 0, too_large: 0, failed: 0 };
-      for (const o of outcomes) counts[o.status]++;
+      await queue.close();
+      const outcomes = await settleBy(
+        this.uploads.map((p) => p.catch((e): UploadOutcome => ({ name: "", status: "failed", reason: describe(e) }))),
+        uploadsBy,
+      );
+      this.uploadsClosed = true;
+      const s = queue.stats;
+      const counts = { verified: 0, skipped: 0, too_large: 0, failed: 0, unfinished: 0 };
+      for (const o of outcomes) counts[o === UNFINISHED ? "unfinished" : o.status]++;
+      if (this.gaveUp) return;
       if (this.run) {
         try {
-          const fin = await this.client.finishRun(this.localRunId, this.now().toISOString());
-          this.log("info", `run ${fin.runId}: ${fin.status}, ${s.accepted} events (${s.duplicates} dup, ${s.spooled} spooled), artifacts ${counts.verified} ok / ${counts.too_large} over cap / ${counts.failed} failed`);
+          const fin = await client.finishRun(this.localRunId, this.now().toISOString());
+          const late = counts.unfinished > 0 ? ` / ${counts.unfinished} not uploaded in time` : "";
+          this.log("info", `run ${fin.runId}: ${fin.status}, ${s.accepted} events (${s.duplicates} dup, ${s.spooled} spooled), artifacts ${counts.verified} ok / ${counts.too_large} over cap / ${counts.failed} failed${late}`);
         } catch (e) {
           this.log("warn", `could not finish run (${describe(e)}); the server will auto-close it (§7.4)`);
         }
@@ -237,16 +290,40 @@ export default class AtpReporter implements Reporter {
   }
 
   /** occurrenceIndex (N03): the n-th test with this fingerprint in the run. Retries of the same test keep their index. */
-  private occurrenceOf(ct: string, retry: number): number {
-    const key = ct;
-    if (retry > 0) return this.occurrences.get(key + "#last") ?? 0;
-    const n = this.occurrences.get(key) ?? 0;
-    this.occurrences.set(key, n + 1);
-    this.occurrences.set(key + "#last", n);
+  private occurrenceOf(test: TestCase, ct: string): number {
+    const existing = this.testOccurrences.get(test);
+    if (existing !== undefined) return existing;
+    const n = this.occurrences.get(ct) ?? 0;
+    this.occurrences.set(ct, n + 1);
+    this.testOccurrences.set(test, n);
     return n;
   }
 
   onStepEnd(_test: TestCase, _result: TestResult, _step: TestStep): void {}
+}
+
+const UNFINISHED = Symbol("unfinished");
+
+/** Each promise's value if it settles by `deadline`, else UNFINISHED. */
+async function settleBy<T>(all: Promise<T>[], deadline: number): Promise<(T | typeof UNFINISHED)[]> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<typeof UNFINISHED>((r) => {
+    timer = setTimeout(() => r(UNFINISHED), Math.max(0, deadline - Date.now()));
+  });
+  try {
+    return await Promise.all(all.map((p) => Promise.race([p, late])));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isHttpUrl(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /** CI trigger detection (§7.3 trigger). Only well-known variables; nothing is fetched (§7.10). */

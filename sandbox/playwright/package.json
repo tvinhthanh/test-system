@@ -1,0 +1,10 @@
+{
+  "name": "@atp/sandbox-playwright",
+  "version": "0.1.0",
+  "description": "The @playwright/test a sandboxed script run uses (QĐ-19 tier 4): pinned to the browsers in this image.",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

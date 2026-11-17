@@ -25,6 +25,10 @@ import NativeSelect from "../../shared/NativeSelect.vue";
 import PageHeader from "../../shared/PageHeader.vue";
 import StatusBadge from "../../shared/StatusBadge.vue";
 import ErrorNote from "./ErrorNote.vue";
+import CaseContextEditor from "./CaseContextEditor.vue";
+import CaseTaxonomyEditor from "./CaseTaxonomyEditor.vue";
+import { copyTaxonomy, type Taxonomy } from "./taxonomy";
+import CaseChangeHistory from "./CaseChangeHistory.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,12 +57,15 @@ watch(() => [project.value, caseId.value], refresh, { immediate: true });
 
 // Editable copy of the case; Save sends only what changed.
 const form = ref<{
+  taxonomy: Taxonomy;
   title: string;
   suiteId: string;
   priority: TestCase["priority"];
   isCritical: boolean;
   automationStatus: TestCase["automationStatus"];
   expected: string;
+  preconditions: string;
+  testData: string;
   steps: Step[];
 } | null>(null);
 watch(
@@ -66,12 +73,15 @@ watch(
   (c) => {
     form.value = c
       ? {
+          taxonomy: copyTaxonomy(c.taxonomy),
           title: c.title,
           suiteId: c.suiteId,
           priority: c.priority,
           isCritical: c.isCritical,
           automationStatus: c.automationStatus,
           expected: c.expected,
+          preconditions: c.preconditions,
+          testData: c.testData,
           steps: c.steps.map((s) => ({ ...s })),
         }
       : null;
@@ -89,18 +99,29 @@ const dirty = computed(() => {
     f.isCritical !== c.isCritical ||
     f.automationStatus !== c.automationStatus ||
     f.expected !== c.expected ||
-    JSON.stringify(f.steps) !== JSON.stringify(c.steps)
+    f.preconditions !== c.preconditions ||
+    f.testData !== c.testData ||
+    JSON.stringify(f.steps) !== JSON.stringify(c.steps) ||
+    JSON.stringify(f.taxonomy) !== JSON.stringify(copyTaxonomy(c.taxonomy))
   );
 });
 const mutation = useMutation();
+const contextValid = computed(
+  () =>
+    !form.value ||
+    [form.value.preconditions, form.value.testData].every(
+      (value) => new TextEncoder().encode(value.trim()).length <= 16000,
+    ),
+);
 async function save() {
-  if (!form.value) return;
+  if (!form.value || !contextValid.value) return;
   const saved = await mutation.run("save", (signal) =>
     testmgmt.updateTestCase(
       project.value,
       caseId.value,
       {
         ...form.value!,
+        expectedUpdatedAt: tc.data.value!.updatedAt,
         steps: form.value!.steps.filter((s) => s.action || s.expected),
       },
       signal,
@@ -224,7 +245,7 @@ const label = (s: string) => s.replaceAll("_", " ");
     <Button
       v-if="canWrite"
       size="sm"
-      :disabled="!dirty || mutation.busy.value !== null"
+      :disabled="!dirty || !contextValid || mutation.busy.value !== null"
       @click="save"
       ><Save />Save changes</Button
     >
@@ -250,8 +271,11 @@ const label = (s: string) => s.replaceAll("_", " ");
         class="mb-4"
         :error="mutation.error.value.error"
       />
-      <section class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <section
+        class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
+      >
         <div class="space-y-6">
+          <CaseTaxonomyEditor v-model="form.taxonomy" :disabled="!canWrite" />
           <div class="bg-card space-y-4 rounded-lg border p-4">
             <div class="space-y-2">
               <Label for="case-title">Title</Label>
@@ -319,6 +343,11 @@ const label = (s: string) => s.replaceAll("_", " ");
             </div>
           </div>
 
+          <CaseContextEditor
+            v-model:preconditions="form.preconditions"
+            v-model:test-data="form.testData"
+            :readonly="!canWrite"
+          />
           <div class="bg-card overflow-hidden rounded-lg border">
             <div class="flex items-center justify-between border-b px-4 py-2">
               <h2 class="text-sm font-semibold">Steps</h2>
@@ -561,5 +590,10 @@ const label = (s: string) => s.replaceAll("_", " ");
         </div>
       </section>
     </template>
+    <CaseChangeHistory
+      v-if="tc.data.value"
+      :changes="tc.data.value.audit"
+      :truncated="tc.data.value.auditTruncated"
+    />
   </AsyncState>
 </template>

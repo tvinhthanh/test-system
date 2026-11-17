@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "atp-test",
+      "credentials": [{ "accessKey": "atptestkey", "secretKey": "atptestsecret123" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

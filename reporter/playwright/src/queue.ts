@@ -16,6 +16,12 @@ export interface QueueOptions {
   maxBatch?: number;
   log: (level: "warn" | "info" | "debug", msg: string) => void;
   onIdentity?: (map: Record<string, string>) => void;
+  /**
+   * Resolves once the run exists on the server (true) or could not be
+   * created (false). Batches wait for it; with false they go straight to
+   * the spool — the server has no run to put them in.
+   */
+  ready?: Promise<boolean>;
 }
 
 export interface QueueStats {
@@ -32,6 +38,9 @@ export class EventQueue {
   private timer: NodeJS.Timeout | undefined;
   private inflight: Promise<void> = Promise.resolve();
   private closed = false;
+  private abandoned = false;
+  /** Batches taken from the buffer and not yet acknowledged or spooled. */
+  private readonly unsent = new Set<unknown[]>();
   readonly stats: QueueStats = { sent: 0, accepted: 0, duplicates: 0, spooled: 0, batches: 0 };
   private readonly flushEveryMs: number;
   private readonly flushAt: number;
@@ -63,6 +72,7 @@ export class EventQueue {
     }
     if (this.buffer.length === 0) return this.inflight;
     const batch = this.buffer.splice(0, this.opts.maxBatch ?? 500);
+    this.unsent.add(batch);
     this.inflight = this.inflight.then(() => this.send(batch)).catch(() => undefined);
     // Anything left over 500 goes in the next flush.
     if (this.buffer.length > 0) void this.flush();
@@ -76,21 +86,48 @@ export class EventQueue {
     await this.inflight;
   }
 
+  /**
+   * Gives up on delivery: everything not yet acknowledged — buffered or in
+   * flight — goes to the spool now, and nothing more is sent. The reporter
+   * calls it when the platform has had its time after the last test (§7.5).
+   * A batch that was in flight may still land; replaying the spool then
+   * only yields duplicates, which (localRunId, sequence) absorbs (§7.1).
+   */
+  abandon(reason: string): void {
+    this.closed = true;
+    this.abandoned = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    if (this.buffer.length > 0) this.unsent.add(this.buffer.splice(0));
+    const cause = new Error(reason);
+    for (const batch of [...this.unsent]) this.spool(batch, cause);
+  }
+
   private async send(batch: unknown[]): Promise<void> {
+    const ready = await (this.opts.ready ?? Promise.resolve(true));
+    if (this.abandoned || !this.unsent.has(batch)) return;
+    if (!ready) {
+      this.spool(batch, new Error("the run was not created on the server"));
+      return;
+    }
     try {
       const res = await this.opts.client.sendEvents(this.opts.localRunId, batch);
+      this.unsent.delete(batch);
       this.stats.batches++;
       this.stats.sent += batch.length;
       this.stats.accepted += res.accepted;
       this.stats.duplicates += res.duplicates;
       if (res.identityMap && Object.keys(res.identityMap).length > 0) this.opts.onIdentity?.(res.identityMap);
     } catch (e: any) {
-      this.spool(batch, e);
+      if (!this.abandoned) this.spool(batch, e);
     }
   }
 
   /** The server is gone for good (or refused us): keep the batch on disk. */
   private spool(batch: unknown[], cause: unknown): void {
+    this.unsent.delete(batch);
     try {
       mkdirSync(this.opts.spoolDir, { recursive: true });
       const file = join(this.opts.spoolDir, `atp-spool-${this.opts.localRunId}.jsonl`);

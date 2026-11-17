@@ -15,7 +15,10 @@ package tenancy
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -64,13 +67,26 @@ type DeletedProject struct {
 	PurgeAfter time.Time
 }
 
+// DeletedOrganization is an organization in its restore window, with the
+// workspaces under it (what the purge removes with it).
+type DeletedOrganization struct {
+	Organization
+	DeletedAt    time.Time
+	DeletedBy    string
+	PurgeAfter   time.Time
+	WorkspaceIDs []WorkspaceID
+}
+
 // Environment separates histories of the same test (§8.2). Key is what the
-// reporter sends as environmentKey (§7.3).
+// reporter sends as environmentKey (§7.3). BaseURL is the address of the
+// system under test there (QĐ-14), "" when nobody recorded one.
 type Environment struct {
 	ID        EnvironmentID
 	ProjectID ProjectID
 	Key       string
+	BaseURL   string
 	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Scope is a project's ancestry — the chain authorize() walks up (§8.8).
@@ -110,6 +126,26 @@ type Service interface {
 	ProjectsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedProject, error)
 	PurgeProject(ctx context.Context, id ProjectID) error
 
+	// UpdateProject renames a live project or changes its default branch;
+	// "" keeps a field. A name taken in the workspace is ErrConflict.
+	UpdateProject(ctx context.Context, id ProjectID, name, defaultBranch string) (Project, error)
+
+	// Deleting an organization (§11.3.2 "xóa org") is soft the same way:
+	// from DeleteOrganization on, the org, its workspaces and its projects
+	// are gone from every read above, until RestoreOrganization or the
+	// purge after keep. A project deleted on its own before stays deleted
+	// after a restore. DeletedOrganizations returns those of ids that are
+	// deleted. OrganizationProjects is every project of a deleted org,
+	// deleted or not, for the purge; PurgeProject accepts those too.
+	// PurgeOrganization removes the workspaces and the org once no
+	// project is left; it refuses an org that is not deleted.
+	DeleteOrganization(ctx context.Context, id OrganizationID, actor string, keep time.Duration) (DeletedOrganization, error)
+	RestoreOrganization(ctx context.Context, id OrganizationID) (Organization, error)
+	DeletedOrganizations(ctx context.Context, ids []OrganizationID) ([]DeletedOrganization, error)
+	OrganizationsToPurge(ctx context.Context, now time.Time, limit int) ([]DeletedOrganization, error)
+	OrganizationProjects(ctx context.Context, id OrganizationID) ([]DeletedProject, error)
+	PurgeOrganization(ctx context.Context, id OrganizationID) error
+
 	GetProject(ctx context.Context, id ProjectID) (Project, error)
 	GetOrganization(ctx context.Context, id OrganizationID) (Organization, error)
 	GetWorkspace(ctx context.Context, id WorkspaceID) (Workspace, error)
@@ -128,6 +164,36 @@ type Service interface {
 	// it on first sight. Ingest calls this for every POST /v1/runs (§7.3), so
 	// it must be idempotent under concurrent first sightings.
 	EnsureEnvironment(ctx context.Context, project ProjectID, key string) (Environment, error)
+	// CreateEnvironment adds a named environment from the dashboard, with
+	// the address testers open there (QĐ-14). A key already in the project
+	// is ErrConflict; a bad key or URL is ErrInvalid.
+	CreateEnvironment(ctx context.Context, project ProjectID, key, baseURL string) (Environment, error)
+	// SetEnvironmentURL replaces an environment's address; "" clears it.
+	SetEnvironmentURL(ctx context.Context, project ProjectID, id EnvironmentID, baseURL string) (Environment, error)
+}
+
+// NormalizeBaseURL checks an address of a system under test and returns it
+// trimmed, without a trailing slash: http or https, a host, no credentials
+// (they would be shown to every reader of the project), at most 2048 bytes.
+// "" stays "" — no address.
+func NormalizeBaseURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", nil
+	}
+	u, err := url.Parse(s)
+	switch {
+	case err != nil, len(s) > 2048, u.Host == "", u.Hostname() == "",
+		u.Scheme != "http" && u.Scheme != "https":
+		return "", fmt.Errorf("%w: baseUrl must be an http(s) address with a host", ErrInvalid)
+	case u.User != nil:
+		return "", fmt.Errorf("%w: baseUrl must not carry a user or password", ErrInvalid)
+	case strings.ContainsAny(s, " \t\r\n"):
+		return "", fmt.Errorf("%w: baseUrl must not contain spaces", ErrInvalid)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	return strings.TrimSuffix(u.String(), "/"), nil
 }
 
 // slugRe is the shape shared by Organization.Slug and Environment.Key: lower

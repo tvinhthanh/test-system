@@ -28,7 +28,7 @@ dashboard or treat service structs as HTTP DTOs.
 `GET /v1/session` returns 200 even for anonymous bootstrap:
 
 ```json
-{"user":null,"csrfToken":"server-issued-token"}
+{ "user": null, "csrfToken": "server-issued-token" }
 ```
 
 `POST /v1/session` takes `{email,password}`. It returns the same session shape,
@@ -51,7 +51,7 @@ the server session. UI clears state only after server confirmation or a 401.
     opens the code step and posts `POST /v1/session/mfa {code}` with an empty
     challenge (the api holds it in an HttpOnly cookie);
   - `/sign-in?oauth=<reason>`, reason in `denied|state|provider|no_account|
-    conflict|disabled|unavailable`, each shown in plain words.
+conflict|disabled|unavailable`, each shown in plain words.
 - No account is created: the provider's verified email must match an existing
   verified account here (the first sign-in links them).
 - Security page, "Connected accounts": `GET /v1/session/identities` →
@@ -74,7 +74,7 @@ the server session. UI clears state only after server confirmation or a 401.
 - The mail links to `/invite#<token>`. The page reads the fragment, removes
   it from the address bar and history, and posts it in a body:
   `POST /v1/invitations/lookup {token}` → `{email,role,level,scopeName,
-  invitedBy,expiresAt}`; `POST /v1/invitations/accept {token,password}` →
+invitedBy,expiresAt}`; `POST /v1/invitations/accept {token,password}` →
   session (signed in). `404 INVITATION_NOT_FOUND` (used, withdrawn,
   expired), `409 ACCOUNT_EXISTS` (the role was added; sign in),
   `400 INVALID_PASSWORD` (12+ characters), `429` after repeated bad tokens.
@@ -101,6 +101,32 @@ account: use forgot password), `429` after five wrong tries. Security page →
   `404 RESET_NOT_FOUND`, `400 INVALID_PASSWORD` (token not spent). Every
   session is signed out and nobody is signed in: the page sends the person to
   sign in (MFA still asked if on).
+
+### Self-serve sign-up (QĐ-17, implemented 2026-10-29)
+
+- The bootstrap carries `signup: true` when the api runs with `SIGNUP=on`
+  (which needs `MAIL=smtp`); the sign-in page then shows "New here? Ask to
+  join" → `/signup`.
+- `POST /v1/session/signup {email, scopeLevel, scopeId, requestedRole, note?}`
+  → **202** with the same body for any email; `400 INVALID_SIGNUP` (email,
+  note over 1000, or a role that does not live at the level); `429` after 5
+  requests per email or IP in 15 minutes; `404 SIGNUP_OFF` when off. Admins
+  share `/signup?project=<id>` (or `workspace=` / `organization=`) from the
+  members screen and the page fills the node in. The page offers
+  member/viewer/maintainer, workspace_admin or org_admin — never the owner role.
+- The mail links to `/signup#<token>` (24 hours, single use, replaced by a
+  newer request). The page strips the fragment and posts
+  `POST /v1/session/signup/complete {token,password}` → the session shape:
+  signed in, with no role until approved. `404 SIGNUP_NOT_FOUND`,
+  `409 ACCOUNT_EXISTS` (sign in instead), `400 INVALID_PASSWORD` (token not
+  spent), `400 ALREADY_LOGGED_IN` while signed in.
+- Members screen, for `member.manage` on the node:
+  `GET /v1/{projects|workspaces|organizations}/{id}/access-requests` →
+  `{items:[{id,userId,email,requestedRole,level,note,createdAt}]}` (pending,
+  newest first, at most 200); `POST …/{requestId}/decide
+{decision: approved|denied, role?}` → 204. `role` overrides the requested
+  one; the owner role needs an owner (`403 OWNER_ONLY`), also when it is the
+  one requested; `404 NOT_FOUND` when another admin decided first.
 
 ### Two-factor authentication (§11.2, implemented 2026-09-27)
 
@@ -131,16 +157,24 @@ is a paginated project page, avoiding an unbounded app-wide dropdown cache.
 
 `GET /v1/projects/{projectId}/runs` accepts `limit=20`, optional `cursor`,
 `q` (max 200 characters; branch/commit/run search), `status`, `environment`
-(name filter), and `sort=-startedAt`. Returns a page of explicit Run DTOs.
+(environment key), `source=playwright|junit|auto` (optional, server-side source
+filter), and `sort=-startedAt`. Returns a page of explicit Run DTOs.
 `GET /v1/projects/{projectId}/runs/{runId}` returns one Run DTO. `runId` is the
 internal Run ID, not reporter `localRunId`.
 
 ```json
 {
-  "id":"uuid", "branch":"main", "commitSha":"abc123",
-  "status":"passed", "environmentName":"Staging",
-  "startedAt":"2026-09-14T09:00:00Z", "durationMs":92400,
-  "totalCount":128, "passedCount":126, "failedCount":0, "flakyCount":2
+  "id": "uuid",
+  "branch": "main",
+  "commitSha": "abc123",
+  "status": "passed",
+  "environmentName": "Staging",
+  "startedAt": "2026-09-14T09:00:00Z",
+  "durationMs": 92400,
+  "totalCount": 128,
+  "passedCount": 126,
+  "failedCount": 0,
+  "flakyCount": 2
 }
 ```
 
@@ -159,9 +193,18 @@ CSRF like any mutation. Needs `project.configure` in the project's
 run, `200` the same report again (`created: false`, nothing added):
 
 ```json
-{ "runId":"uuid", "localRunId":"uuid", "created":true, "tests":3, "attempts":5,
-  "duplicates":0, "status":"failed", "flakyCount":1,
-  "startedAt":"2026-03-02T09:15:00Z", "finishedAt":"2026-03-02T09:15:04Z" }
+{
+  "runId": "uuid",
+  "localRunId": "uuid",
+  "created": true,
+  "tests": 3,
+  "attempts": 5,
+  "duplicates": 0,
+  "status": "failed",
+  "flakyCount": 1,
+  "startedAt": "2026-03-02T09:15:00Z",
+  "finishedAt": "2026-03-02T09:15:04Z"
+}
 ```
 
 Errors the form explains in its own words: `INVALID_JUNIT` (the server's
@@ -197,7 +240,19 @@ flakyInvestigationMinutes?, periodFrom, periodTo, note?}` → 201 baseline with
 `GET /v1/projects/{projectId}/runs/{runId}/results?limit=50&cursor=...` returns:
 
 ```json
-{"items":[{"id":"uuid","displayName":"Checkout succeeds","filePath":"tests/checkout.spec.ts","finalStatus":"passed","attemptCount":1,"durationMs":1234}],"nextCursor":null}
+{
+  "items": [
+    {
+      "id": "uuid",
+      "displayName": "Checkout succeeds",
+      "filePath": "tests/checkout.spec.ts",
+      "finalStatus": "passed",
+      "attemptCount": 1,
+      "durationMs": 1234
+    }
+  ],
+  "nextCursor": null
+}
 ```
 
 `GET /v1/projects/{projectId}/results/{resultId}` returns a bounded result
@@ -261,17 +316,17 @@ role.
 
 - `GET /v1/projects/{projectId}/review?limit=100` → `{items:[ReviewItem]}` —
   pending pairs, oldest first: `{id, createdAt, identity:{id, canonicalTitle,
-  canonicalFilePath, status}, candidate:{…}, fingerprint, score, runnerUpId,
-  runnerUpScore, gap, breakdown, runId}`.
+canonicalFilePath, status}, candidate:{…}, fingerprint, score, runnerUpId,
+runnerUpScore, gap, breakdown, runId}`.
 - `POST /v1/projects/{projectId}/review/{itemId}` `{decision: "merged"|"kept"}`
   → `{id, status, decidedBy, decidedAt}`; `409 CONFLICT` once decided.
 - `GET /v1/projects/{projectId}/identities/{identityId}/aliases` →
   `{items:[{id, fingerprint, source, matchScore, createdBy, validFrom,
-  validTo}]}` (`validTo: null` = in force).
+validTo}]}` (`validTo: null` = in force).
 - `POST …/identities/{identityId}/merge` `{into}` → `{mergedInto}`;
   `POST …/identities/{identityId}/undo-merge` `{}` → `{restored}`;
   `POST …/identities/{identityId}/split` `{fingerprint, at}` → `201
-  {newIdentityId}` (the fingerprint must be an alias of that identity).
+{newIdentityId}` (the fingerprint must be an alias of that identity).
 - `Identity` DTO gained `status` (`active|merged|retired`) and `mergedIntoId`
   (nullable): merged and retired identities stay readable by id but leave the
   active list; the history page shows a notice and offers Undo for merged ones.
@@ -286,18 +341,18 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - Suites: `GET|POST /suites` → `{id, parentId, name, cases, createdAt}`.
 - Requirements: `GET|POST /requirements`, `PATCH /requirements/{id}`
   `{title?, priority?, status?}` → `{id, externalKey, title, priority
-  (p0..p3), status (draft|active|done|dropped), coveredBy, createdAt,
-  updatedAt}`.
+(p0..p3), status (draft|active|done|dropped), coveredBy, createdAt,
+updatedAt}`.
 - Test cases: `GET /test-cases?suite=&automation=&critical=true|false&q=`,
   `POST /test-cases`, `GET|PATCH /test-cases/{id}` → `{id, suiteId,
-  suiteName, externalKey, title, steps:[{action, expected}], expected,
-  priority, isCritical, automationStatus
-  (manual_only|automation_candidate|automated|obsolete), ownerId, links?,
-  requirements?, createdAt, updatedAt}` — `links`/`requirements` only on a
+suiteName, externalKey, title, steps:[{action, expected}], expected,
+priority, isCritical, automationStatus
+(manual_only|automation_candidate|automated|obsolete), ownerId, links?,
+requirements?, createdAt, updatedAt}` — `links`/`requirements` only on a
   single case. Steps are text; render with interpolation only.
 - Automation link (§6.8.1): `POST /test-cases/{id}/links` `{stableTestId,
-  linkType?}` → `201 {id, testCaseId, stableTestId, linkType, createdBy,
-  createdAt}`; `409` for a merged/retired identity, `404` for an identity
+linkType?}` → `201 {id, testCaseId, stableTestId, linkType, createdBy,
+createdAt}`; `409` for a merged/retired identity, `404` for an identity
   of another project. `DELETE /test-cases/{id}/links/{linkId}` → 204.
 - Coverage: `POST|DELETE /test-cases/{id}/requirements/{requirementId}` → 204.
 - Import: `POST /test-cases/import` with `text/csv` or JSON `{csv}` →
@@ -305,9 +360,9 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
 - Plans: `GET|POST /test-plans`, `GET /test-plans/{id}` (with
   `executions`: latest per case), `PATCH /test-plans/{id}` `{status}`,
   `POST /test-plans/{id}/executions` `{testCaseId, status
-  (passed|failed|blocked|skipped), note?, executedAt?}` → 201; `409` on a
+(passed|failed|blocked|skipped), note?, executedAt?}` → 201; `409` on a
   closed plan. Every execution carries `evidence: [{id, name, kind
-  ("manual_evidence"), contentType, sizeBytes, expiresAt}]`.
+("manual_evidence"), contentType, sizeBytes, expiresAt}]`.
 - Evidence (§6.8.2): `POST /test-plans/{id}/executions/{executionId}/evidence`
   as `multipart/form-data` with one `file` part (the only non-JSON body in
   the contract; the client sends `FormData` and no `Content-Type` of its
@@ -319,15 +374,17 @@ Source of truth: `backend/deploy/openapi.yaml` (tag `testmgmt`).
   artifact (`inline` for images/video/text).
 - Releases: `GET|POST /releases`, `GET /releases/{id}`,
   `POST /releases/{id}/evaluate` → release with `gate: {verdict
-  (approved|warn|blocked|no_evidence), evaluatedAt, runId, branch,
-  rules:[{id, level (blocked|warn), passed, applies, summary, details}],
-  p0Coverage}`; `POST /releases/{id}/decision` `{status
-  (blocked|approved|shipped), note?}` → release with `decidedBy` (the
+(approved|warn|blocked|no_evidence), evaluatedAt, runId, branch,
+rules:[{id, level (blocked|warn), passed, applies, summary, details}],
+p0Coverage}`; `POST /releases/{id}/decision` `{status
+(blocked|approved|shipped), note?}` → release with `decidedBy` (the
   session user). `status` is the human decision and is independent of
   `gate.verdict`; an `approved` next to a `blocked` gate is an override to
   show as such. `shipped` is terminal (`409` afterwards).
 - CI (not a browser route): `GET /v1/releases/{id}/gate` with a bearer
-  token holding `project:read`.
+  token holding `project:read`. Since 2026-10-29 the answer also carries
+  `ci {pass, reason}`, decided by the server; the release page's snippet is
+  `jq -e '.ci.pass'`.
 
 ### Delete and restore a run (§11.3.2 data.delete, implemented 2026-09-29)
 
@@ -419,11 +476,227 @@ Team → an owner's organization row has a "Usage" link to
 
 ## Handoff And Verification
 
+### Multi-Dimensional Case Taxonomy (2026-10-15)
+
+Migration 0033 adds `taxonomy` to case list/detail/create/patch and plan member
+case DTOs. Object fields: `level` (empty/unit/integration/system/acceptance),
+`purposes` (functional/performance/security/usability/accessibility/compatibility/
+recovery), `tags` (smoke/regression/e2e), `executionModes` (manual/automated),
+`performanceTypes` (load/stress/spike/soak/volume/scalability). Array values must
+be unique; invalid values return 400. Subtypes require performance purpose.
+Writes normalize arrays to sorted, non-null arrays. The API's JSON decoder
+rejects unknown fields. Database constraints validate the persisted shape.
+
+PATCH replaces the complete object atomically; omitted/null keeps it, `{}`
+clears all dimensions. No classification is inferred from framework, identity
+or automationStatus. Modes are planning metadata; choosing automated does not
+create an identity link or change automationStatus. Existing cases default to
+explicitly unclassified and no old audit/snapshot is reconstructed.
+
+Case list/export share singular AND filters `level`, `purpose`, `tag`,
+`executionMode`, `performanceType`; unknown filter values return 400. Plan
+search uses the same repository call and retains already selected membership.
+Bulk PATCH body accepts a `taxonomy` object, preserving version checks and
+per-item results/audit. UI requires explicit replacement confirmation.
+
+CSV `taxonomy_json` is standard JSON with the object above; omission preserves
+existing classification, blank clears, malformed/unknown/invalid values produce
+row errors before writing that row. Export includes this column and uses the
+same tenant/filter boundaries. Recorded executions capture the classification
+at recording time. Legacy snapshot classification remains null/unavailable.
+
+This does not add performance execution/metrics, specialized report adapters
+or release-gate rules. Those remain separate GĐ4 contracts.
+
+### Bulk Case Updates And CSV Export (2026-10-13)
+
+`POST /v1/projects/{projectId}/test-cases/bulk` requires `testmgmt.write`.
+Body: `{ items: [{ id, expectedUpdatedAt }], patch }`, 1-100 distinct cases,
+16 KiB request cap. Patch supports priority, isCritical, suiteId and
+automationStatus (not automated; linking an identity remains separate).
+Versions are mandatory. Each case is independently updated and audited in
+one transaction. Ordered response `items` contain `{ id, updated, code }`:
+empty code means success; otherwise CONFLICT, NOT_FOUND, INVALID_PAYLOAD or
+INTERNAL. A batch is not atomic. Frontend validates response identity/count,
+keeps failed selections and never auto-retries uncertain network outcomes.
+
+`GET /v1/projects/{projectId}/test-cases/export` requires project read access.
+It accepts the list filters q/suite/automation/critical and optional comma-
+separated ids (at most 200). Without ids it exports all server-filter matches,
+not the displayed 200 cases. Response `{ csv, count, exportedAt }` has
+Cache-Control no-store. Exceeding 5000 rows or 8 MiB returns 400, with no
+partial CSV; missing/foreign selected cases return 404. Frontend creates a
+UTF-8 BOM download, not a persisted public URL.
+
+CSV uses standard quoting, steps_json and `_atp_csv_version=1`. Formula-like
+text and literal leading apostrophes are prefixed with one apostrophe, which
+the marked-format importer removes once. Multiline/separator-containing
+steps round-trip; exports are case definitions, not execution evidence.
+
+Verified: real Postgres service/API/tenant tests; 90 frontend tests; real
+Chrome conflict plus success, retained failure report after refresh, actor
+audit, selected/full-filter downloads and 1440/768/360px layouts.
+
+### Case Context And Change Audit (2026-10-13)
+
+Case POST/PATCH accept `preconditions` and `testData`, trimmed text limited to
+16000 UTF-8 bytes each. Omitted PATCH fields keep their values; empty clears.
+Optional PATCH `expectedUpdatedAt` detects concurrent edits (409); the editor
+sends the version it loaded. Case GET/POST/PATCH return these fields plus
+`audit` (latest 50 actor/action/changedFields/createdAt summaries) and
+`auditTruncated`. Lists omit audit entries. Audit is captured transactionally
+for real content changes, including CSV and automation-status edits; no audit
+is fabricated for legacy data. Before/after values are retained server-side;
+the API sends summaries, not repeated copies of potentially large test data.
+
+CSV accepts `preconditions` and `test_data` columns. Absent columns preserve
+existing context on upsert; explicit blank columns clear it. Imports record the
+session actor. Oversized rows report a line error. Execution `caseSnapshot`
+adds nullable `preconditions`/`testData`; null means unavailable in an older
+snapshot, and is never reconstructed from the current case.
+
+### Fixed Plan Scope And Assignment (2026-10-13)
+
+Plan POST accepts `caseIds` (unique project case IDs, at most 5000). Missing
+selects the current non-obsolete cases; `[]` creates an empty plan. Scope is
+fixed at creation; newly created project cases never appear automatically.
+Migration 0031 freezes legacy scope and includes obsolete cases with executions.
+Plan GET adds `cases: [{testCase, assigneeUserId, assigneeEmail, assignedBy,
+assignedAt, workStatus}]`; collection reads return `cases: null`. Case content
+is current; execution snapshots remain immutable. UI renders these members,
+not a bounded project list, so plan progress is independent of search results.
+
+Existing plan PATCH accepts any combination of `status`, `caseIds`, and
+`caseUpdate: {testCaseId, assigneeEmail?, workStatus?}`, with optional
+`expectedUpdatedAt` (UI sends it; stale versions return 409). A closed plan
+rejects scope/assignment/workflow changes. Cases with executions cannot be
+removed. Assign by verified tester email, including inherited project access;
+unknown, foreign or read-only users all return generic 404. Empty email clears
+assignment; assignment grants no access and does not restrict other authorized
+testers from executing. `workStatus` writes accept `not_run` or `in_progress`;
+recording sets `completed`. Cases with history cannot be reset to `not_run`.
+Starting work activates a draft plan. Execution forms send the case version
+actually displayed, even when other plan changes bring back newer case content;
+the tester explicitly reloads and clears step results before using that revision.
+Out-of-scope or obsolete case executions are rejected. Plan changes and
+executions write actor/action/details to `test_plan_audit` in the same transaction.
+PATCH responses preserve original evidence, just like plan GET.
+
+### Manual Execution History (2026-10-13, SPEC 4.11 / 6.8.7)
+
+Existing execution POST accepts optional `stepResults: [{stepIndex, status,
+actual}]` (unique zero-based case step indices, existing execution verdicts,
+actual at most 4000 characters), `bugUrl` (empty or HTTP(S), no credentials,
+at most 2000 characters), and `retestOf` (prior execution of the same case,
+plan and project; omit or empty for a normal execution).
+The response adds `caseSnapshot: {title, steps, expected, updatedAt} | null`,
+`stepResults`, `bugUrl` and `retestOf`. Snapshot is captured atomically with
+recording; legacy executions have no reconstructed snapshot.
+Plan GET keeps `executions` as latest per case and adds `executionHistory`
+(newest 200 by executedAt DESC/id DESC, including evidence) and
+`historyTruncated`. Old rows remain stored when this bounded view truncates.
+No new endpoint; view/write authorization and closed-plan rules remain.
+`caseUpdatedAt` optionally checks the version displayed by the client (409
+if edited meanwhile); the UI sends it. Passed verdicts cannot contain failed
+or blocked step results. Actual results without a selected step status are
+blocked in the form rather than silently discarded.
+
 Backend owner must confirm session bootstrap semantics, list limits, query
 field names, result ordering, and DTO count definitions before live acceptance.
 Fixture preview implements only these contracts and is not backend evidence.
 Current client contract tests validate fields, cursor encoding, error handling,
 and request lifecycle; cross-tenant server tests remain a backend gate.
+
+### Specialized Results (2026-10-15, SPEC 6.8.7)
+
+Project path `/v1/projects/{projectId}/specialized-results` provides GET list
+(`kind`, `outcome`, `testCaseId`, opaque `cursor`) and POST ATP report v1.
+`/{id}` GET reads details; `/{id}/original` GET downloads text/plain UTF-8 as
+attachment with no-store/nosniff. View permission reads; testmgmt.write creates,
+with session CSRF and Origin. Foreign resources never bypass project scope.
+
+Input fields: `schemaVersion:1`, `idempotencyKey`, `kind`, `title`, optional
+`testCaseId`/`retestOf`, `state`, `notes`, `environment`, `applicationVersion`,
+`source`, `toolVersion`, `adapterVersion`, `startedAt`, `finishedAt`, `details`,
+`originalReport`. Kinds: performance/security/accessibility/compatibility/
+recovery/usability. States: completed/not_run/not_applicable/import_error.
+Completed requires ordered execution times and original text; other states
+require notes, import_error also original text. Original <=512 KiB, details
+<=64 KiB, notes <=4000 bytes; UTF-8 byte limits, not JS string lengths.
+Metadata required and <=128 bytes, title <=500. Details have typed kind-specific
+fields in backend/deploy/openapi.yaml; unknown fields or invalid units/values
+return 400, not a successful empty report. No arbitrary vendor report parsing.
+
+Server returns `{id,kind,title,outcome,reasons,input,createdBy,createdAt}`;
+outcome is passed/failed/inconclusive/not_run/not_applicable/import_error.
+Original text is blank in JSON; list sets input.details=null and contains at
+most 50 items plus `nextCursor` (empty string at end). UI replaces the page,
+renders at most 50 rows, and keeps cursor in the URL without parsing it.
+Identical normalized payload replay returns the existing ID/actor (201);
+changed payload under the same project/key returns 409. Retest creates a new
+immutable result of the same project/kind/case. No update/delete UI or route.
+
+Performance numbers retain ms/requests-per-second/percent/seconds. Missing
+metrics or pre-start source-declared thresholds yield inconclusive; known
+breaches fail. Source timestamps are not independently proven preregistration.
+Findings/coverage, platform matrix, recovery objectives and usability tasks
+have separate typed forms; server owns assessment. These records neither
+create automation Runs/Attempts nor change flaky/TTRC or release-gate rules.
+Native vendor adapters and human operational acceptance remain separate scope.
+
+### QĐ-19 Auto checks, browser matrix, and load tests (2026-11-05)
+
+The source of truth for these shapes is `backend/deploy/openapi.yaml`. The
+existing Auto test case create/update routes accept three more `AutoStep.do`
+values: `check_accessibility`, `check_performance`, and `check_security`.
+They take no element. Their optional `value` is respectively an impact
+(`minor|moderate|serious|critical`, default serious), a metric budget such as
+`lcp=2500 cls=0.1 ttfb=800` (empty uses Core Web Vitals good thresholds), or
+`strict` (empty fails on high security findings). `GET …/auto-runs/{id}` can
+return `AutoStepResult.note` on passed and failed check steps.
+
+- `POST /v1/projects/{projectId}/auto-runs` takes `{environmentId,caseIds?,
+heal,variants?}`. Each variant is `chromium|firefox|webkit` joined with
+  `desktop|phone|tablet` by `/`. Empty selection means `chromium/desktop`;
+  at most 9 variants and 300 case runs. `GET …/auto-runs` and
+  `GET …/auto-runs/{id}` return `variants`; each detailed run case has a
+  `variant` (empty means the default). Cases repeat once per variant.
+- `GET …/auto-runs/{id}/cases/{caseId}/screenshots/{final|failure}` takes
+  optional `?variant=`. `POST …/cases/{caseId}/apply-heal` takes
+  `{step,variant?}`. The variant identifies the case run to read or repair.
+- `GET /v1/projects/{projectId}/environments/{environmentId}/ownership`
+  returns `SiteOwnership` including `host`, `token`, `fileUrl`, `fileText`,
+  `dnsName`, `dnsText`, `method`, `status`, `error`, and timestamps. It needs
+  `testmgmt.write`. `POST …/ownership/check {method:"file"|"dns"}` returns
+  202; poll the GET while status is `checking`, until `verified` or `failed`.
+  A failed proof carries `error`. The POST can return `AUTO_TEST_OFF` (409).
+- `POST /v1/projects/{projectId}/load-runs` takes `{environmentId,paths?,
+vus,seconds,rampSeconds?,maxP95Ms?,maxErrorRate?}`. Paths start with `/`;
+  `maxErrorRate` is percent. The API requires ownership proof and checks it
+  again before load begins. `OWNERSHIP_NOT_PROVED` (409) points to the
+  environment proof; `TOO_MANY_LOAD_RUNS` (429) means one active run per
+  organization or 20 daily per project. `INVALID_PAYLOAD` (400) includes the
+  server's effective caps in its message. `AUTO_TEST_OFF` (409) means the
+  checker is off.
+- `GET /v1/projects/{projectId}/load-runs` returns the 50 newest runs as
+  `{items,nextCursor:null,enabled}`; `enabled:false` hides creation. `GET
+…/load-runs/{id}` returns one `LoadRun`. Poll queued/running details. A
+  finished result carries requests, errors (no response or 5xx), clientErrors
+  (4xx separately), errorRate (%), rps, latencyMs (min, p50, p90, p95,
+  p99, max), statuses, errorSamples, a per-second timeline, and verdict with
+  reasons.
+- `POST /v1/projects/{projectId}/script-runs` is multipart with `archive`
+  (`.tar.gz`, at most 10 MB), `kind`, `environmentId`, and optional `entry`,
+  `project`, `grep`, `vus`, `seconds`, and `timeoutSeconds`. K6 requires
+  `entry`, `vus` (1–200), `seconds` (5–600), and verified host ownership.
+  `OWNERSHIP_NOT_PROVED` (409), `SCRIPTS_OFF` (409), `PAYLOAD_TOO_LARGE`
+  (413), and `TOO_MANY_SCRIPT_RUNS` (429) are stable UI branches. Other 400
+  responses show the server message so archive validation remains actionable.
+- `GET /v1/projects/{projectId}/script-runs` returns the newest 50 runs as
+  `{items,nextCursor:null,enabled}` without logs. `enabled:false` hides the
+  upload action. `GET …/script-runs/{id}` includes the log tail, verdict,
+  test/failure counts, exit code, timeout flag, error, and optional
+  `testRunId`. Poll details while queued or running.
 
 ## Backend status (16-09-2026)
 

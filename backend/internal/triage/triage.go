@@ -16,6 +16,9 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/llm"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
 )
 
 // EventType is §8.3's enum.
@@ -92,9 +95,81 @@ type Record struct {
 }
 
 var (
-	ErrNotFound = errors.New("triage: not found")
-	ErrInvalid  = errors.New("triage: invalid input")
+	ErrNotFound      = errors.New("triage: not found")
+	ErrInvalid       = errors.New("triage: invalid input")
+	ErrNotConfigured = errors.New("triage: AI not configured")
+	ErrDailyLimit    = errors.New("triage: daily AI limit reached")
+	ErrDecided       = errors.New("triage: hypothesis already decided")
 )
+
+const JobInvestigation = "ai.investigation"
+
+type InvestigationStatus string
+
+const (
+	InvestigationQueued        InvestigationStatus = "queued"
+	InvestigationCollecting    InvestigationStatus = "collecting"
+	InvestigationInvestigating InvestigationStatus = "investigating"
+	InvestigationDone          InvestigationStatus = "done"
+	InvestigationError         InvestigationStatus = "error"
+)
+
+type EvidenceFact struct {
+	Source string `json:"source"`
+	Fact   string `json:"fact"`
+}
+type Hypothesis struct {
+	ID              string         `json:"id"`
+	Category        Category       `json:"category"`
+	Confidence      float64        `json:"confidence"`
+	Evidence        []EvidenceFact `json:"evidence"`
+	SuggestedAction string         `json:"suggestedAction"`
+	Decision        string         `json:"decision,omitempty"`
+}
+type Investigation struct {
+	ID           string              `json:"id"`
+	ProjectID    string              `json:"-"`
+	ResultID     string              `json:"-"`
+	Status       InvestigationStatus `json:"status"`
+	RequestedBy  string              `json:"requestedBy"`
+	Provider     string              `json:"provider,omitempty"`
+	Model        string              `json:"model,omitempty"`
+	KeySource    string              `json:"keySource,omitempty"`
+	TurnCount    int                 `json:"turnCount"`
+	ToolCount    int                 `json:"toolCount"`
+	InputTokens  int                 `json:"inputTokens"`
+	OutputTokens int                 `json:"outputTokens"`
+	Error        string              `json:"error,omitempty"`
+	Hypothesis   *Hypothesis         `json:"hypothesis,omitempty"`
+	CreatedAt    time.Time           `json:"createdAt"`
+	StartedAt    *time.Time          `json:"startedAt,omitempty"`
+	FinishedAt   *time.Time          `json:"finishedAt,omitempty"`
+}
+type NewInvestigation struct{ ProjectID, OrgID, ResultID, Actor string }
+type Decision struct {
+	ProjectID, ResultID, HypothesisID, Actor, Decision, Note string
+	Category                                                 Category
+}
+
+type EvidenceReader interface {
+	InvestigationEvidence(ctx context.Context, projectID, resultID string) (json.RawMessage, string, string, error)
+}
+type CredentialSource interface {
+	Credentials(ctx context.Context, orgID string) (llm.Account, string, bool, error)
+}
+type InvestigatorLLM interface {
+	JSON(context.Context, llm.Request) (llm.Result, error)
+}
+type InvestigationDeps struct {
+	Evidence EvidenceReader
+	Keys     CredentialSource
+	LLM      InvestigatorLLM
+}
+type Option func(*service)
+
+func WithInvestigation(d InvestigationDeps) Option {
+	return func(s *service) { s.evidence, s.keys, s.llm = d.Evidence, d.Keys, d.LLM }
+}
 
 // Service is the contract. Writes join the caller's transaction.
 type Service interface {
@@ -114,4 +189,9 @@ type Service interface {
 	Record(ctx context.Context, in Record) (ev Event, created bool, err error)
 	// ListForResult returns a result's events, oldest first.
 	ListForResult(ctx context.Context, projectID, testResultID string) ([]Event, error)
+	RequestInvestigation(ctx context.Context, in NewInvestigation) (Investigation, bool, error)
+	GetInvestigation(ctx context.Context, projectID, resultID, id string) (Investigation, error)
+	ListInvestigations(ctx context.Context, projectID, resultID string, limit int) ([]Investigation, error)
+	DecideHypothesis(ctx context.Context, in Decision) (Event, error)
+	InvestigationWorker(concurrency int) *queue.Worker
 }

@@ -15,7 +15,13 @@ it("encodes scope, forwards opaque cursor, and requests bounded server filtering
   const repository = new ReportsRepository(new ApiClient(transport));
   await repository.runs(
     "project/a",
-    { ...emptyQuery, cursor: "opaque+/=", status: "failed", q: "checkout" },
+    {
+      ...emptyQuery,
+      cursor: "opaque+/=",
+      status: "failed",
+      q: "checkout",
+      source: "playwright",
+    },
     new AbortController().signal,
   );
   const url = new URL(String(transport.mock.calls[0]?.[0]), "http://localhost");
@@ -23,6 +29,7 @@ it("encodes scope, forwards opaque cursor, and requests bounded server filtering
   expect(url.searchParams.get("cursor")).toBe("opaque+/=");
   expect(url.searchParams.get("limit")).toBe("20");
   expect(url.searchParams.get("status")).toBe("failed");
+  expect(url.searchParams.get("source")).toBe("playwright");
 });
 
 it("decodes server-owned project actions and caches them for deep links", async () => {
@@ -198,5 +205,99 @@ it("opens traces in the same-origin trace viewer with an absolute artifact URL",
       encodeURIComponent(
         "https://atp.example/v1/projects/p/artifacts/a1/content",
       ),
+  );
+});
+
+it("records a person's root cause with its category and note, and plain triage without one", async () => {
+  const bodies: unknown[] = [];
+  const transport = vi.fn<Transport>(async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({}), { status: 201 });
+  });
+  const client = new ApiClient(transport);
+  client.csrfToken = "csrf";
+  const repo = new ReportsRepository(client);
+  await repo.triage(
+    "p/x",
+    "r/1",
+    "HYPOTHESIS_ACCEPTED",
+    new AbortController().signal,
+    { category: "app_bug", note: "  total not recomputed  " },
+  );
+  await repo.triage("p/x", "r/1", "MARKED_FLAKY", new AbortController().signal);
+  await repo.triage(
+    "p/x",
+    "r/1",
+    "HYPOTHESIS_ACCEPTED",
+    new AbortController().signal,
+    { category: "unknown", note: "   " },
+  );
+  expect(String(transport.mock.calls[0]?.[0])).toContain(
+    "/projects/p%2Fx/results/r%2F1/triage-events",
+  );
+  expect(bodies).toEqual([
+    {
+      type: "HYPOTHESIS_ACCEPTED",
+      category: "app_bug",
+      payload: { note: "total not recomputed" },
+    },
+    { type: "MARKED_FLAKY", payload: {} },
+    { type: "HYPOTHESIS_ACCEPTED", category: "unknown", payload: {} },
+  ]);
+});
+
+it("decodes investigations and sends start and human decisions to scoped routes", async () => {
+  const item = {
+    id: "i1",
+    status: "done",
+    requestedBy: "u1",
+    provider: "anthropic",
+    model: "m1",
+    turnCount: 2,
+    toolCount: 2,
+    inputTokens: 100,
+    outputTokens: 20,
+    error: "",
+    createdAt: "2026-11-11T00:00:00Z",
+    startedAt: null,
+    finishedAt: "2026-11-11T00:00:02Z",
+    hypothesis: {
+      id: "h1",
+      category: "test_bug",
+      confidence: 0.82,
+      evidence: [
+        { source: "failure_context", fact: "same locator failed twice" },
+      ],
+      suggestedAction: "update locator",
+      decision: "",
+    },
+  };
+  const transport = vi.fn<Transport>(async (input, init) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path.endsWith("/investigations") && init?.body)
+      return new Response(JSON.stringify(item));
+    if (path.endsWith("/investigations"))
+      return new Response(JSON.stringify({ items: [item] }));
+    return new Response(JSON.stringify({}));
+  });
+  const client = new ApiClient(transport);
+  client.csrfToken = "csrf";
+  const repo = new ReportsRepository(client);
+  const list = await repo.investigations(
+    "p/x",
+    "r/1",
+    new AbortController().signal,
+  );
+  expect(list[0]?.hypothesis?.category).toBe("test_bug");
+  await repo.startInvestigation("p/x", "r/1", new AbortController().signal);
+  await repo.decideHypothesis(
+    "p/x",
+    "r/1",
+    "h/1",
+    "accept",
+    new AbortController().signal,
+  );
+  expect(String(transport.mock.calls[2]?.[0])).toContain(
+    "/projects/p%2Fx/results/r%2F1/hypotheses/h%2F1/decision",
   );
 });

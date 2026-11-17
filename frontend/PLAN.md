@@ -23,6 +23,428 @@ draft was removed on 2026-09-18.
 
 ## Current Status
 
+### Check steps, browser matrix, load tests and script runs (QĐ-19, 2026-11-07) — frontend tiers 1–4 complete
+
+- Tier 1: the step editor offers `check_accessibility`, `check_performance` and
+  `check_security` with readable labels, no locator, backend-matching defaults
+  and immediate value validation. Auto run details show multi-line `note` text
+  for passed and failed steps; long notes collapse and can be copied.
+- Tier 2: Auto test has a Chromium/Firefox/WebKit × desktop/phone/tablet picker.
+  Empty means Chromium desktop. The UI shows cases × variants and blocks more
+  than 9 variants or 300 case runs. Run details label every repeated case by
+  variant and send it on screenshots and apply-heal.
+- Tier 3: Auto test links to Load tests. The environment ownership page shows
+  file and DNS TXT proofs with copy actions, checks either method and polls to
+  verified/failed. Load tests have a guarded form, feature-off state,
+  ownership/rate/cap error branches, staging warning, bounded list and polling
+  detail. Results show verdict/reasons, requests/rps, 4xx separately, p50–p99,
+  status counts, error samples and a per-second timeline.
+- Fixture mode covers check notes, matrix runs, ownership states, successful /
+  failed / error load results and empty/feature-off project states. New routes
+  are lazy-loaded; lists are server-bounded to 50 rows.
+- Verified 05-11-2026: `npm run typecheck`; Vitest 141/141; production build
+  and bundle gate (61.8 KiB initial JS gzip, 40 lazy modules, no fixture data);
+  `npm audit` 0; 31 fixture routes at 1440px and 360px with no resource,
+  console or overflow failures; fixture Auto matrix workflow passed. These are
+  fixture/mock checks, not a new live-backend acceptance run.
+- Tier 4: Script Runs is implemented after backend PR #14 reached `main`.
+  The bounded list and detail routes are lazy loaded; upload validates the
+  `.tar.gz` 10 MB limit and runner-specific fields before constructing
+  multipart data. K6 ownership failures link to the existing proof panel.
+  Feature-off hides upload while keeping prior results readable. Detail polls
+  queued/running runs and shows verdict, counts, exit/timeout, selectable log
+  output, error, and the resulting test-run link. Fixture mode includes
+  passed Playwright, failed k6, timeout, sandbox error, upload, polling, empty
+  and feature-off states. A project without a site address gets a setup action
+  instead of an unusable upload form.
+  Unit coverage includes multipart construction, bounds, and every stable
+  error-code branch. Reverified 07-11-2026: typecheck; Vitest 144/144;
+  production build and bundle gate (62.2 KiB initial JS gzip, 42 lazy
+  modules, no fixture data); `npm audit` 0; 36 fixture routes at 1440px and
+  360px with no page, console or overflow failures; multipart upload, detail
+  navigation and polling browser workflow passed. These are fixture/mock
+  checks, not a new live-backend acceptance run.
+
+### Test-only dependency advisories (2026-11-01)
+
+- `npm audit` failed on 4 moderate advisories: glob ≤ 14.0.1 and minimatch < 11.0.1. Both come only through `@vue/test-utils` → js-beautify, and even the newest js-beautify still asks for the affected ranges.
+- `package.json` now has `overrides` for js-beautify's subtree: glob 14.0.3 and minimatch 11.0.3. js-beautify loads them only in its CLI, not in the HTML formatting the tests use. Remove the override once js-beautify takes the fixed versions.
+- Checked in a clean worktree with npm 10.9.2, as CI uses:
+  - `npm ci`;
+  - `npm audit`: 0;
+  - vitest 132/132;
+  - build and the bundle gate (60.3 KiB).
+
+  Details: `backend/GATES.md`, 01-11-2026.
+
+- The shared working copy's `node_modules` were installed before this lockfile. They still work, and `npm ci` brings them up to date.
+
+### Any provider's AI key (QĐ-18, 2026-10-31)
+
+- AI settings has a provider select. The choices are Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Groq and OpenRouter, plus the operator's OpenAI-compatible endpoint when the server has one.
+- The model list follows the provider. Providers other than Anthropic also take a typed model id; OpenRouter takes only that.
+- A pasted key whose beginning belongs to one provider alone switches to that provider. The prefixes come from the api as `keyPrefixes`.
+- "The server's key" is enabled only for the server's own provider (`server.provider`).
+- The copy no longer says Anthropic:
+  - the `explain.ts` texts are provider-neutral;
+  - `AI_KEY_NO_CREDIT` is new;
+  - `AI_MODEL_UNAVAILABLE` shows the server's sentence, which names models the key can use.
+- `AiSettings` decodes `providers`, `server.provider`/`server.model`, `organization.provider` and `effective.provider`. A response without `providers` is read as Anthropic alone, so the dev fixtures work unchanged.
+- Files changed, at the user's direct request: `AiSettingsPage.vue`, `testmgmtRepository.ts`, `explain.ts`, one sentence in `StartTestingPage.vue`, and `tests/start-testing.test.ts`.
+- Checked:
+  - vue-tsc;
+  - vitest 124/124;
+  - build and the bundle gate;
+  - a Playwright walk-through on the real api (`backend/GATES.md`, 31-10-2026).
+
+### Reporter and AI draft fixes after the e2e run (2026-10-30)
+
+- The reporter now sends `finish` even when the object store refuses or
+  hangs: uploads stop at a deadline inside `flushTimeoutMs`. So the live
+  check's runs end `passed`/`failed` instead of staying `running`.
+- A draft's `model` (case suggestions, auto drafts) is now the model that
+  wrote the drafts. After a refusal fallback that can be an id outside the
+  offered list, such as `claude-opus-4-8`. No screen shows that field today;
+  if one does, show unknown ids as they are.
+- No frontend code changed. Details: `backend/GATES.md`, 30-10-2026,
+  findings 12 and 13.
+
+### CI e2e job run without Docker (2026-10-30)
+
+- The `e2e` job had never run on this branch. On 2026-10-30 its steps were
+  run on a laptop without Docker: host binaries, a Node stand-in for Caddy,
+  and the dashboard and reporter from a clean `HEAD` worktree.
+- As CI stands, `live-check.mjs` fails on one console error. The CI tokens
+  page reads `/downloads/index.json`, and CI never packed the reporter, so
+  Caddy answers 404. `tokensRepository.reporterPackage` already returns
+  `null` for that, but Chrome still logs the 404. The fix is in CI, not the
+  page: the job now packs the reporter, as `server/atp.sh up` does.
+- CI also left `OBJSTORE_ENDPOINT` at the R2 placeholder. The reporter's
+  uploads never reached the memory bucket, so both example runs stayed
+  `running`, and the live check accepts `running`. The job now points the
+  endpoint at Caddy's `/_objstore` and fails if the reporter gives up.
+- With both fixes, all four live scripts pass. `live-check.mjs` passes 20/20
+  steps with no browser errors, and manual history, case bulk and
+  specialized results pass too. Both runs finished, with 17 verified
+  artifacts each. Frontend code is unchanged. Details: `backend/GATES.md`,
+  30-10-2026.
+
+### Self-serve sign-up screens (2026-10-30)
+
+- `/signup` is one page with two modes, like `/forgot` and `/reset`. The
+  "Ask to join" form takes the node from `?project=|workspace=|organization=<id>`
+  or as typed. `/signup#<token>` from the mail chooses the password. The page
+  has states for sign-up off, server down, link spent, account exists and
+  waiting for approval. Sign-in shows "New here? Ask to join" when the
+  bootstrap says `signup`.
+- Members screen: `AccessRequests.vue` shows the shareable sign-up link (with
+  copy) and the pending requests with their note. Each request has a role
+  select (the owner role is offered to owners only), Approve, and Deny on a
+  second click.
+- Tests in `tests/signup.test.ts`: repository paths, bodies and CSRF;
+  decoding; both page modes; the token leaving the address bar; the admin's
+  decisions. Built by Claude at the owner's request on 2026-10-30, outside the
+  backend-only split.
+
+### Frontend completion and fixture coverage (2026-10-30)
+
+- [x] Auto test now uses the EnvironmentPicker as the sole owner of its site
+      list request. Choosing “New environment” clears the parent selection; a
+      failed list offers retry. The scan URL follows a newly selected site while
+      preserving a URL typed by the tester. Switching projects clears the old
+      site's accounts and selection. Auto test tabs follow the route query, so
+      Back/Forward restores the selected tab.
+- [x] Completed the explicit development fixture for environments, AI status,
+      test accounts, runnable cases, drafts, auto runs, site scans, URL checks,
+      manual case suggestions, self-serve sign-up, access requests, and specialized
+      results. The production bundle still excludes fixture data; real assessment,
+      mail, AI, checker execution, and report downloads remain server-owned.
+- [x] Browser checks against fixture mode: `browser-check.mjs` passes the runs
+      and source-tab flow; `fixture-workflow-check.mjs` passes site creation, Auto
+      run, manual plan start, and both sign-up modes; `fixture-route-check.mjs`
+      opens 28 routes at 1440px and 360px (56 combinations) without page errors,
+      resource errors or page overflow. Auto test desktop/mobile screenshots were
+      inspected. `browser-api-check.mjs` passes its mocked HTTP request and auth
+      checks; it is not a live Go integration test.
+- [x] Full unit suite: 33 files, 131 tests passed. Production build passed
+      typecheck and bundle gate: 60.0 KiB initial JS gzip, 37 lazy modules, no
+      fixture payload. Prettier and `git diff --check` passed.
+- Next: verify the new sign-up/approval and environment/Auto test interactions
+  against a live deployment. The prior 2026-10-25 live check covered manually
+  authored Auto test and site scan; optional AI drafting/repair still needs a
+  test key or safe fake LLM endpoint.
+
+### Run source selected state (2026-10-28)
+
+- [x] Keep the source tabs compact without count badges. The selected tab now uses the primary colour for both its text and underline, while preserving `aria-pressed` and the URL-owned source filter.
+- [x] Re-ran the component/navigation tests, production build and fixture browser flow after the visual correction (see 2026-10-30 verification above).
+- Next: verify the same selected-state contrast in the live deployment when the local Docker engine is available.
+
+### Run source navigation (2026-10-27)
+
+- [x] Replace the inert Playwright label on Test runs with working source filters for Playwright, JUnit imports and Auto runs. The Go API applies each filter before cursor pagination and binds the cursor to the source. Manual plans and Specialized results link to their existing screens; Start testing exposes the ten case/plan types to project writers. The shared tab bar hides an accidental vertical scrollbar caused by the tab border overlap.
+- [x] Frontend build/bundle gate, focused Vitest (8 tests), and Go query/API tests pass. Browser click check confirms the Playwright and JUnit URL states and Manual plans navigation in fixture mode.
+- Next: switch the preview from fixture to the live deployment and verify real project data. Docker Desktop 4.52.0 aborts while removing the stale `dockerInference` AF_UNIX reparse point (Windows error 1920); a targeted rename failed. The existing data/volumes have not been reset. Do not report fixture rows as live results.
+
+### Desktop information hierarchy pass (2026-10-27)
+
+- [x] Grouped sidebar links by Workspace, Work, Results, and Manage, with permission-gated groups omitted when empty. Shortened the top context trail and removed the redundant footer. Mobile drawer and direct navigation remain intact.
+- [x] Overview and ROI now use a compact desktop metric strip; the individual mobile cards and all metric text/empty semantics remain.
+- [x] Overview's weekly chart now uses the adjacent desktop space for counts by the same server-provided categories. The chart/table toggle, keyboard tooltip, and category vocabulary remain. Removed an aggregate count because fixture trend totals and KPI denominators differ.
+- [x] Start testing's ten type choices are a two-column desktop text list; mobile retains its touch-sized choice grid and selection flow.
+- [x] Visually inspected 1440px light/dark Overview and desktop Start testing/ROI. The 72-combination route audit (12 routes × 360/768/1440px × light/dark) found no page overflow or JavaScript errors and no undersized visible mobile buttons/tabs. Chrome desktop interaction passed metric dividers, chart hover/table toggle, and type selection; 360×480 mobile drawer/navigation/theme persistence passed. Fixture browser flow, 116 unit tests, typecheck, build/bundle gate (59.6 KiB initial JS gzip, 36 lazy modules), Prettier, and `git diff --check` passed. No API contract changed.
+- The fixture Auto test resource gap was resolved on 2026-10-30; see the frontend completion slice above.
+
+### Frontend-wide usability pass (2026-10-26)
+
+- [x] Audited 12 primary project routes at 360px, 768px, and 1440px in light/dark (72 route/viewport/theme combinations): no page-wide overflow or JavaScript errors. A second 360px audit found zero undersized visible buttons or tabs in all 24 mobile combinations.
+- [x] The sidebar project selector now uses the loaded project name, and the mobile breadcrumb leaves room for the project and current screen. The short-screen drawer scrolls its nav while preserving 44px links and visible account actions. Shared button/tab touch targets are at least 44px on mobile/coarse pointers; desktop stays compact. Removed the internal `P1-min` footer marker.
+- [x] Chrome at 360x480 verified breadcrumb, project name, drawer scrolling, 44px links, Member navigation, account actions, and dark-mode persistence after reload. Fixture `browser-check.mjs` and mocked-API `browser-api-check.mjs` passed. Full unit suite passed (30 files, 116 tests); production build passed typecheck and bundle gate (59.7 KiB initial JS gzip, 36 lazy modules, no fixture data). Prettier for changed components and `git diff --check` passed.
+- API dependency: project names already come from `projectAccess`; no new backend endpoint or DTO is needed. The Auto test fixture currently returns a resource error; preserve the concurrent fixture work while checking the live product path separately.
+- The fixture Auto test resource gap was resolved on 2026-10-30. The isolated real Compose E2E on 2026-10-25 completed an Auto test browser run and site scan against the real API/checker.
+
+### Isolated live integration verification (2026-10-25)
+
+- [x] Built current API and checker images and brought up API, worker, Postgres, checker, and Caddy in a separate `atp-frontend-check` Compose project on port 8443. All long-running services were healthy; migrations through 0042 applied. The existing `atp` stack was untouched.
+- [x] A disposable maintainer tenant ingested a real Playwright reporter run: two intentional failures, one intentional flaky test, one pass, and 17 artifacts uploaded. `live-check.mjs` passed 19 UI steps and 153 real `/v1` calls; only its deliberate wrong-password 401 and 400 occurred, with no browser errors. `live-manual-history.mjs`, `live-case-bulk.mjs`, and `live-specialized-results.mjs` passed against the real API.
+- [x] Start testing in Chrome created a real environment and plan and opened its run screen. Auto test created a browser case for `https://example.com`, the checker passed it, and the resulting page linked both the test plan and Test run. Site scan checked one page successfully. These checks used the isolated stack and did not rely on mocked HTTP.
+- [x] Removed the disposable stack, test database volumes, temporary credentials, and test-only Compose config after verification.
+- Next: if AI drafting and step repair need acceptance, supply a test organization key or a safe fake LLM endpoint and verify those optional paths separately. The real checker run above covered manually authored auto cases without AI.
+
+### Frontend-wide verification (2026-10-25)
+
+- [x] Full `npm run test:unit`: 30 files, 116 tests passed. Production `npm run build` passed typecheck and bundle gate (59.6 KiB initial JS gzip, 36 lazy modules, no fixture data).
+- [x] `scripts/browser-check.mjs` passed in Chrome against fixture data: project isolation, paging/reload, search/empty/reset, run detail, sign-out/in, and 1440/768/360px layouts; no console errors.
+- [x] Updated the stale `scripts/browser-api-check.mjs` mock to include the current `/v1/member-scopes` request and project actions. It passed in Chrome with mocked HTTP: request counts, debounced filter, history restoration, 401/403 handling, CSRF, and login error.
+- Live-stack API/checker E2E was completed in the isolated integration verification above.
+
+### Start testing selection flow (2026-10-25)
+
+- [x] Replaced the ten-card mobile stack with a two-column choice grid and a selected-type summary. The explicit Change type action restores the choices and focus; choosing moves focus to the site step. Choice cards use native button/pressed semantics rather than incomplete radio behavior.
+- [x] Fixture Chrome at 360px, 768px, and 1440px in light/dark: all ten choices present, Enter selects Smoke, focus reaches the site heading, Change type restores the selected choice and its focus, Regression can be selected, and no page overflow or JavaScript errors. The selected mobile screen showed five library cases loaded. The fixture's environment endpoint remains unavailable, so environment persistence and plan creation were not exercised here.
+- [x] `tests/start-testing.test.ts`: 4 passed; typecheck and production build/bundle gate passed. Prettier and `git diff --check` passed.
+- Next: verify environment selection and plan creation against a live backend, then check the Auto test page's setup and run states in both themes when its fixture or backend data is available.
+
+### Stitch design guidance (2026-10-21)
+
+- [x] Added root `PROJECT.md`, `DESIGN.md`, and `.stitch/rules.md` so screen proposals use the current ATP product model, English UI labels, and the existing light/dark visual system. Root `README.md` links them.
+- [x] Darkened the light `warning` and `neutral` ink tokens in `src/shared/theme.css` to clear the small-text AA contrast check on their soft badge fills; mirrored both values in `DESIGN.md`.
+- [x] `designmd lint DESIGN.md`: zero format errors. Its seven warnings concern translucent dark soft fills evaluated without their parent surface and the standalone focus-ring tokens. Chrome measured all five status ink/fill pairs composited on their card: minimum 4.79:1 in light mode and 6.06:1 in dark mode. At 1440px and 360px in both themes, the fixture Runs page had no page-wide overflow or page errors and still labeled flaky passes correctly. `npm run build` (typecheck, Vite, bundle gate) passed after the token adjustment.
+- Next: when a screen is drawn in Stitch, compare both themes at desktop and mobile widths against its current Vue route, check rendered contrast on the real surface, and record any accepted implementation change as a separate frontend slice.
+
+### Active Slice (2026-10-15)
+
+- Closing issue #3 / CI run 38749084024: backend/frontend/reporter/server
+  passed, but live-check stopped before the manual/bulk/specialized scripts.
+  The case form now has 13 checkboxes; the old all-checkbox selector is
+  ambiguous. Reproduced on real local Chrome (one form, 13 checkboxes, one
+  named Critical flow). Narrow the locator by accessible name and assert the
+  created critical flag without changing taxonomy. Also reproduced the local
+  evidence wait hang: lazy thumbnail at y=4667 stays incomplete outside the
+  viewport; scrolling loads it (naturalWidth=1). Scroll before checking and
+  bound image completion to 10 seconds. Full live-check passed locally:
+  20 steps, 145 /v1 calls, no browser errors; non-2xx only the deliberate
+  wrong-password 401/400. Password changed back and logout passed. Script
+  syntax, Prettier and git diff checks passed. New CI must pass before #3 closes.
+
+- Continuing code-resolvable GĐ4: provider-neutral structured results for
+  Performance, Security, Accessibility, Compatibility, Recovery and Usability.
+  Append-only records, bounded original text report, source/tool/adapter
+  versions, server-computed outcome, idempotency and scoped retest links.
+  New project GET/POST/detail/original-report routes; tester entry/import/view
+  UI. No runner, external URL fetching, vendor parser or automatic release-gate
+  integration is implied. Human/host acceptance remains independent.
+
+- GĐ3 taxonomy is implemented. GĐ1 deployment and team/pilot acceptance remain
+  independent pending gates. Track work in PLAN/SPEC plus GitHub Issues as
+  requested by the owner, with links to avoid divergent scope/status.
+
+Implementation is pushed through `e53ad66`. The GĐ2/GĐ3/GĐ4 code slices below are
+implemented and locally verified; the current work is closing CI and deployment
+gates, not rebuilding those features. Team acceptance remains separate.
+
+| Workstream                                        | Status                                    | Evidence / Remaining Work                                                                                                                                                                                             |
+| ------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reporter retry identity and response-body timeout | verified locally; CI reporter passed      | Regression tests and reporter job on 96607e6                                                                                                                                                                          |
+| Frontend dependencies / clean install             | verified in CI                            | npm ci, unit tests, build/bundle gate and audit passed on 96607e6                                                                                                                                                     |
+| GĐ2 daily tester workflow                         | implemented; technically verified locally | Snapshot, step results, bug URL/retest/history, fixed plan scope, assignment/status, context/audit, bulk and CSV; real UI scripts passed                                                                              |
+| Backend integration                               | verified in CI                            | gofmt, go vet and full go test with real Postgres/S3 passed on 96607e6                                                                                                                                                |
+| Backend security gate                             | verified in CI                            | govulncheck failed on 96607e6 (9 stdlib advisories and 1 x/text advisory); 7347b0e moved to go1.26.9 + x/text 0.41 and scanner v1.9.0; backend job green on run #42                                                   |
+| New complete-stack E2E                            | verified in CI                            | Run #42 / 38384680965 on 76f6df0 passed live-check, complete manual workflow and bulk/export through Caddy and the real API; memory-store CI is not durable deployment acceptance                                     |
+| GĐ1 Windows deployment                            | in_progress                               | Docker stack too heavy for this laptop (Docker Desktop stopped 14-10); deployment test moves to another machine via `server/atp.sh`. Vercel projects cannot host the backend (needs Postgres, worker, object storage) |
+| GĐ2 team acceptance                               | planned                                   | Tester team must complete requirement -> case -> plan -> execution -> bug -> retest -> release and record feedback                                                                                                    |
+| GĐ3 taxonomy                                      | implemented; locally verified             | Migration 0033, case create/edit/bulk, filters, plan search, CSV and immutable snapshots; CI 38707032612 failed on expired ingest fixture, E2E skipped                                                                |
+| GĐ4 specialized results                           | implemented; locally verified, CI pending | Migration 0034, ATP report v1 for six groups, append-only records, assessment/retest/import/download UI; Postgres/API/arch, frontend tests/build, OpenAPI and Chrome checks passed locally                            |
+| GĐ5 pilot / GĐ6 VPS                               | planned                                   | Real pilot cycles, server load/24-72h soak, then staging/migration/rollback on VPS                                                                                                                                    |
+
+Latest verified CI: [run #42 / 38384680965](https://github.com/tvinhthanh/test-system/actions/runs/38384680965)
+on `76f6df0`: frontend, backend, reporter and E2E all passed. Backend includes
+govulncheck, real Postgres/S3 tests, Docker build, compose, promtool and OpenAPI.
+E2E logs confirm both manual workflow and selected/full-filter export.
+
+Current source work: close GĐ4 full-stack E2E in issue #3. Source e53ad66
+and its docs update 84d6337 are pushed. CI 38748991063 was superseded/cancelled;
+[CI 38749084024](https://github.com/tvinhthanh/test-system/actions/runs/38749084024)
+on 84d6337 passed backend/frontend/reporter/server, then failed live-check at
+the ambiguous Critical flow checkbox. Later manual/bulk/specialized scripts
+were not reached by that CI run. This turn fixes the selector and the local
+lazy-evidence wait; new CI verification is still required.
+CI 38707032612 on 86cb699: server/frontend/reporter passed; backend failed
+TestIngestEndToEnd because its September 14 finish left the 30-day window on
+October 15, so E2E was skipped. Reproduced locally before the fix; process-fixed
+relative timestamps keep replay payloads stable. Ingest tests passed after the
+fix; production flaky-window behavior is unchanged.
+Owner selected both PLAN/SPEC and GitHub Issues for work tracking.
+
+| Issue                                                    | Work                                         | Status / Dependency                                    |
+| -------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------ |
+| [#3](https://github.com/tvinhthanh/test-system/issues/3) | GĐ4 and ingest CI regression                 | in_progress; local verification passed, new CI pending |
+| [#4](https://github.com/tvinhthanh/test-system/issues/4) | Durable demo host / restart / backup-restore | needs host; after #3                                   |
+| [#5](https://github.com/tvinhthanh/test-system/issues/5) | Tester workflow acceptance                   | needs team and #4                                      |
+| [#6](https://github.com/tvinhthanh/test-system/issues/6) | Pilot load / soak / security                 | needs #4 and real pilot workload/team                  |
+| [#7](https://github.com/tvinhthanh/test-system/issues/7) | VPS staging / migration / rollback           | after #5 and #6                                        |
+
+All issues are open with needs-triage. Passing local checks does not close a
+host/team/CI gate; update issue evidence and this plan together.
+The deployment tooling already includes `server/atp.sh doctor [--pilot]`, read-only deployment
+preflight with fake-Docker regression tests and `server/README.md` acceptance
+checklist. On this laptop, --pilot correctly fails: Docker engine unavailable,
+memory artifacts and APP_ENV=dev. No deployment acceptance is claimed.
+
+#### Next Actions
+
+1. Commit/push the live-check selector/lazy-image wait fix; verify a new full
+   CI run. E2E includes live-specialized-results.mjs. Keep group
+   outcomes separate from automation Run/Attempt and release gates.
+2. Add operational code/tests that can be run independently of the chosen host;
+   record real deployment/pilot acceptance only when actually performed.
+
+Remaining external acceptance:
+
+1. Deployment doctor passed its CI job on 86cb699. Real host acceptance is
+   separate from these simulated preflight checks.
+2. Finish demo deployment on the chosen host with durable artifacts, restart verification,
+   backup outside the laptop and stack restore. Do not expose the native
+   trust-auth/memory-store demo as the pilot deployment. Use server/README.md
+   to record host-specific evidence; doctor is not deployment certification.
+3. Run team acceptance for GĐ2 and record gaps. Per the owner's latest request,
+   product source work proceeds in parallel: GĐ3 and GĐ4 are locally verified.
+   This does not waive deployment, security
+   or human acceptance requirements.
+
+No percentage or completion date is assigned to external acceptance gates.
+
+#### GĐ4 Verification In Progress (2026-10-15)
+
+| Check                         | Current Result                                                                                                                                                                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain assessment tests       | PASS locally: six kinds, missing data, threshold breach, post-run thresholds, findings/retest and recovery/data loss                                                                                                    |
+| Postgres persistence tests    | PASS locally: original text, idempotent replay/conflict, tenant/case/retest isolation, cursor binding/paging and purge                                                                                                  |
+| API/architecture tests        | PASS in the latest local run, including the expanded tenant walk                                                                                                                                                        |
+| Frontend typecheck/build      | PASS; initial JS 54.9 KiB gzip, 27 lazy modules                                                                                                                                                                         |
+| OpenAPI lint                  | PASS; 7 pre-existing warnings; summary details=null distinct from typed write details                                                                                                                                   |
+| Dedicated frontend tests      | 10 new tests passed; full suite 103 passed including 1 unrelated local fixture test (102 in scoped commit)                                                                                                              |
+| Real Chrome/API               | PASS: six forms, six typed assessments, missing data inconclusive, retest/not_run, ATP import/replay/conflict, original text, filters and 1440/768/360px; synthetic fixtures only, no page errors/overflow/request loop |
+| Restore drill                 | PASS with RESTORE_TEST=1 on real PostgreSQL after migration 0034; not host/pilot acceptance                                                                                                                             |
+| Broad backend regression      | go test ./... and go vet ./... passed locally with PostgreSQL; opt-in S3/load/long soak are not host acceptance                                                                                                         |
+| Security / existing workflows | npm audit 0; govulncheck 0 called vulnerabilities (18 uncalled module advisories); real Chrome manual-history and bulk/export scripts passed again                                                                      |
+| CI / deployment               | GĐ4 CI pending; migration 0034 applied to loopback demo and API rebuilt. Memory artifacts remain demo-only                                                                                                              |
+
+Scope is manual entry plus a provider-neutral ATP structured JSON report v1.
+It does not parse arbitrary k6/JMeter/Locust/SARIF/axe files, execute tests,
+prove source-declared pre-run timestamps, grant compliance certification or
+silently make these reports release-gate evidence. Vendor parsers need a named
+source contract and actual fixtures.
+
+#### Completed And Verified
+
+- Taxonomy slice (15-10): backend testmgmt/API/architecture tests passed on real
+  Postgres, including cross-project filters, immutable snapshots, independent
+  automationStatus, invalid/duplicate values, DB constraint and CSV round-trip/
+  omitted-column preservation. OpenAPI lint passes with the 7 existing warnings.
+  Frontend 92 committed tests passed (93 with the unrelated local fixture test),
+  typecheck/build/bundle gate passed (53.3 KiB gzip). govulncheck reports 0 called
+  vulnerabilities; 18 uncalled dependency advisories remain reported.
+- Real Chrome manual-history and bulk scripts passed on the migrated demo at
+  1440/768/360px: classification creation, plan taxonomy filter, old/new retest
+  snapshots, Performance/Stress filtered export, explicit bulk replacement and
+  removal from the now-unmatched filtered list. Screenshots inspected; no page
+  errors or horizontal overflow. Native demo still uses memory artifacts.
+
+- Migration 0030 captures a case snapshot, step results, bug URL and same-case /
+  same-plan retest link; legacy rows retain a null snapshot. Case version checked
+  before saving; passed verdicts reject failed/blocked steps.
+- Plan reads include the latest 200 executions and their original evidence with
+  an explicit truncation flag. UI has execution recorder and history components;
+  search does not change progress totals; executed obsolete cases stay visible.
+- Real Postgres service/API/architecture tests passed. All frontend unit tests:
+  77 passed; reporter: 20 passed, 1 opt-in outage test skipped; dependency audit: 0.
+- `scripts/live-manual-history.mjs`: real login/API, step results, bug link,
+  edited case preserves original snapshot, linked retest and original evidence;
+  Chrome screenshots at 1440x960 and 390x844, no horizontal overflow/page errors.
+- Full backend suite had a Windows harness port collision in restore; standalone
+  restore drill with RESTORE_TEST=1 and PostgreSQL tools passed on rerun.
+- Migration 0031 and the existing plan POST/GET/PATCH now fix plan case scope,
+  assign verified project-authorized testers by email, and track not_run /
+  in_progress / completed independently of execution verdicts. Changes write
+  test_plan_audit in the same transaction. Recorded cases cannot be removed;
+  closed plans reject changes and stale plan versions return 409.
+- Scope editor, assignment and start controls passed the real Chrome/API flow
+  in live-manual-history.mjs on desktop/mobile. New project cases do not enter
+  an existing plan automatically; PATCH retains old execution evidence.
+- Membership slice verification: 81 frontend unit tests passed; typecheck,
+  build/bundle gate (initial JS 52.2 KiB gzip), real Postgres testmgmt/API/arch
+  tests and OpenAPI lint passed (7 pre-existing warnings).
+- Migration test starts from schema 0030 with legacy data, then applies 0031:
+  existing evidence and obsolete recorded cases remain accessible. Execution
+  forms retain the case version being filled and require explicit reload after
+  a newer case arrives; unsaved step results cannot silently move to new steps.
+- Migration 0032 adds bounded UTF-8 case preconditions/test data and captures
+  transactional case audit for create/update/CSV/automation-status changes. Audit
+  records the authenticated actor and server-side before/after data; API/UI expose
+  the latest 50 summaries with an explicit truncation flag, no legacy backfill.
+- Create/edit forms and CSV support context; absent CSV columns preserve existing
+  context. Execution forms/history use immutable context snapshots and label
+  unavailable legacy fields. Case edits send expectedUpdatedAt to prevent stale
+  saves. Real Postgres tests verify preservation, limits, audit scope and actors.
+- Context/audit verification: 84 frontend tests passed; typecheck/build and
+  bundle gate passed (52.4 KiB gzip), backend testmgmt/API/architecture and
+  OpenAPI lint passed (7 existing warnings). Live case edit/audit and original
+  snapshot/evidence passed on Chrome at 1440, 768 and 360px widths, no horizontal
+  overflow/page errors; screenshots test-results/case-context-\*.png.
+- Backup/restore drill rerun with migration 0032 and RESTORE_TEST=1 passed on
+  the local PostgreSQL 17 instance; git diff --check passed.
+- Bulk/export verification: 90 frontend tests passed; typecheck/build and bundle
+  gate passed (52.7 KiB gzip). Postgres testmgmt/API/architecture tests passed:
+  foreign project and viewer write denied, audit actor, stale partial success,
+  full-filter export beyond 200 rows, 5000-row/8-MiB limits and CSV round-trip.
+  Real Chrome script live-case-bulk.mjs verifies retained conflict selection/
+  report, one confirmed success, real selected/full-filter downloads and no
+  overflow at 1440/768/360px. Page header actions now wrap on narrow screens.
+  npm audit --audit-level=low: 0 vulnerabilities. Fixes were subsequently pushed
+  and the frontend audit passed in CI on 96607e6.
+- Extended live-manual-history.mjs passed with requirement/case/plan created
+  through UI, coverage linking, assignment, failure/bug/evidence, context edits,
+  retest and persisted named release decision. A unique branch without an
+  automation run returns no_evidence even when manual retest passes.
+  Screenshots include manual-release-{desktop,tablet,mobile}.png.
+- A linked requirement exposed an implicit grid's mobile minimum width; case
+  detail now uses a minmax(0,1fr) base grid track. Real 360/768/1440px checks
+  pass. CI E2E now runs both manual-history and bulk scripts through Caddy;
+  bundled Chromium supported, internal TLS bypass limited to localhost.
+- Follow-up CI fixes: gofmt applied; missing bundled emnapi core/runtime lock
+  metadata restored from a fresh npm-generated lock without unrelated version
+  updates. Clean npm ci in an isolated directory passed, audit 0. Committed
+  frontend tests (excluding the unrelated local fixture test): 89 passed;
+  typecheck/build/bundle gate passed. New GitHub E2E was skipped by the backend
+  govulncheck failure; local script success is not full-stack CI acceptance.
+- Historical GitHub run 38369351402 (96607e6): frontend and reporter passed;
+  backend formatting, vet and real Postgres/S3 tests passed, govulncheck failed.
+  Remaining backend checks and E2E were skipped. Superseded by green run #42.
+- 15-10 verification: authenticated GitHub job/log reads confirm run #42 is
+  fully green, including both new UI scripts. Fresh local scan with Go 1.26.9
+  also reports 0 called vulnerabilities (18 uncalled module advisories remain).
+
 - Phase: **P1-min UI complete** — sign-in, projects, runs, run detail,
   failure detail with attempts / artifacts (screenshots and video inline,
   trace viewer on our origin) / triage, identity history, flaky view —
@@ -79,7 +501,7 @@ Build these screens in this order:
 Explicitly out of the current slice:
 
 - Desktop and mobile application targets; the current client is Web only.
-- Embedding the trace viewer *inside* the failure page (iframe policy). It
+- Embedding the trace viewer _inside_ the failure page (iframe policy). It
   opens in a new tab on our origin instead (2026-09-18).
 
 ## Architecture Rules
@@ -135,21 +557,21 @@ Rules:
 (`../backend/cmd/api/dashboard.go`, driven end-to-end by
 `../backend/cmd/api/api_test.go`). State as of 2026-09-17:
 
-| Feature | Method and route | Backend state |
-| --- | --- | --- |
-| Session | `GET /v1/session` | Mounted; live-verified |
-| Login | `POST /v1/session` | Mounted; live-verified (401 generic on wrong password, CSRF rotates) |
-| Logout | `POST /v1/session/logout` | Mounted; live-verified (204) |
-| Projects | `GET /v1/projects` | Mounted; live-verified |
-| Runs | `GET /v1/projects/{projectId}/runs` | Mounted; live-verified (`q`, `status`, `environment`, cursor) |
-| Run detail | `GET /v1/projects/{projectId}/runs/{runId}` | Mounted; live-verified |
-| Results | `GET /v1/projects/{projectId}/runs/{runId}/results` | Mounted; live-verified (failures first) |
-| Result detail | `GET /v1/projects/{projectId}/results/{resultId}` | Mounted; live-verified (attempts + events) |
-| Triage event | `POST /v1/projects/{projectId}/results/{resultId}/triage-events` | Mounted; live-verified (201, 200 on dedupe) |
-| Identities | `GET /v1/projects/{projectId}/identities` | Mounted; live-verified (`view=flaky`) |
-| Identity detail | `GET /v1/projects/{projectId}/identities/{identityId}` | Mounted; live-verified |
-| Identity history | `GET /v1/projects/{projectId}/identities/{identityId}/runs` | Mounted; live-verified |
-| Triage / trend metrics | `GET /v1/projects/{projectId}/metrics/{triage,trend}` | Mounted (EM dashboard is P1.5; not consumed by the UI yet) |
+| Feature                | Method and route                                                 | Backend state                                                        |
+| ---------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Session                | `GET /v1/session`                                                | Mounted; live-verified                                               |
+| Login                  | `POST /v1/session`                                               | Mounted; live-verified (401 generic on wrong password, CSRF rotates) |
+| Logout                 | `POST /v1/session/logout`                                        | Mounted; live-verified (204)                                         |
+| Projects               | `GET /v1/projects`                                               | Mounted; live-verified                                               |
+| Runs                   | `GET /v1/projects/{projectId}/runs`                              | Mounted; live-verified (`q`, `status`, `environment`, cursor)        |
+| Run detail             | `GET /v1/projects/{projectId}/runs/{runId}`                      | Mounted; live-verified                                               |
+| Results                | `GET /v1/projects/{projectId}/runs/{runId}/results`              | Mounted; live-verified (failures first)                              |
+| Result detail          | `GET /v1/projects/{projectId}/results/{resultId}`                | Mounted; live-verified (attempts + events)                           |
+| Triage event           | `POST /v1/projects/{projectId}/results/{resultId}/triage-events` | Mounted; live-verified (201, 200 on dedupe)                          |
+| Identities             | `GET /v1/projects/{projectId}/identities`                        | Mounted; live-verified (`view=flaky`)                                |
+| Identity detail        | `GET /v1/projects/{projectId}/identities/{identityId}`           | Mounted; live-verified                                               |
+| Identity history       | `GET /v1/projects/{projectId}/identities/{identityId}/runs`      | Mounted; live-verified                                               |
+| Triage / trend metrics | `GET /v1/projects/{projectId}/metrics/{triage,trend}`            | Mounted (EM dashboard is P1.5; not consumed by the UI yet)           |
 
 Required response conventions:
 
@@ -404,8 +826,8 @@ files and updating this plan.
 ### 2026-09-27 (Team: workspace and organization members)
 
 - `MembersRepository` takes a `MemberNode` (`project|workspace|organization`
-  + id) instead of a project id, adds `scopes()` (`GET /v1/member-scopes`), and
-  explains `OWNER_ONLY` / `LAST_OWNER`. `roles.ts` gains `grantable` per level.
+  - id) instead of a project id, adds `scopes()` (`GET /v1/member-scopes`), and
+    explains `OWNER_ONLY` / `LAST_OWNER`. `roles.ts` gains `grantable` per level.
 - `TeamAccess`: the scopes the user manages; cached once answered, not on a
   403, cleared when the user changes. Sidebar "Team" link when non-empty,
   re-asked on navigation and when MFA turns on (live run found the link
@@ -632,10 +1054,10 @@ files and updating this plan.
 ### 2026-09-18 (video, screenshots and traces on the failure page)
 
 - Screenshot artifacts render inline (`img`, lazy), videos as `video controls
-  preload=metadata`, both straight from the content route (the two kinds the
+preload=metadata`, both straight from the content route (the two kinds the
   server serves inline). Trace artifacts get "Open in trace viewer": the
   vendored Playwright trace viewer at `/trace/index.html?trace=<absolute
-  content URL>` on our origin; its service worker fetches the zip with the
+content URL>` on our origin; its service worker fetches the zip with the
   session cookie. Verified in Chrome against the real api: 1280×720
   screenshots decoded, 2.3 s 800×450 videos with metadata parsed, the viewer
   shows the actions and the failing `toHaveText`.
@@ -712,19 +1134,19 @@ files and updating this plan.
 
 All commands below ran from `frontend/`; dates per row.
 
-| Check | Result |
-| --- | --- |
-| `npm run build` (includes typecheck + bundle gate) | PASS 2026-09-22 with manual evidence on the plan page; initial JS 46.8 KiB gzip, 18 lazy modules, no fixture markers |
-| `npm run test:unit` | PASS; 33 tests in 10 files (2026-09-22: + evidence upload as FormData and its decoding; 2026-09-21: `tests/testmgmt.test.ts` — decoders, PATCH/DELETE with CSRF, 403/409/404 mapping, CI URL, CSV import) |
-| `npx prettier --check "src/**/*.{vue,ts,css}"` | PASS (2026-09-22) |
-| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, `npm run example` runs | PASS 2026-09-22; **14 steps** (step 14: plan → verdict → PNG evidence uploaded as multipart → thumbnail decoded from `…/artifacts/{id}/content`; 68 `/v1` calls all 2xx except the deliberate 401). Earlier: PASS 2026-09-21; 13 steps (the new one creates a case, links it to a real identity, opens a release and evaluates the gate — verdict `blocked` on the seed data, five rules rendered), 58 `/v1` calls all 2xx except the deliberate 401, console clean |
-| `npm install` dependency audit after version fixes | 0 known vulnerabilities reported |
-| `node scripts/browser-check.mjs <installed-playwright-path>` | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean |
-| `node scripts/browser-api-check.mjs <installed-playwright-path>` | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors |
-| `ATP_UI=… ATP_EMAIL=… ATP_PASSWORD=… node scripts/live-check.mjs <installed-playwright-path>` (2026-09-17, real Go api on :8080 seeded by `reporter/playwright` `npm run example` ×2, Vite dev proxy) | PASS; 10 steps, 30 `/v1` calls all 2xx except the deliberate 401, console clean |
-| same script, `ATP_API` pointed at the T5 soak's api (~75k results in the project) | PASS; step wall times: runs 331 ms, results 327 ms, identities+flaky+history 1.2 s — flat versus the 3-run project |
-| `go test ./...` from `backend/` | PASS; domain, authz, ingest, artifact, queue, architecture tests |
-| Real Go session/query integration | PASS (2026-09-16 first pass; 2026-09-17 via `scripts/live-check.mjs`) |
+| Check                                                                                                                                                                                                 | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run build` (includes typecheck + bundle gate)                                                                                                                                                    | PASS 2026-09-22 with manual evidence on the plan page; initial JS 46.8 KiB gzip, 18 lazy modules, no fixture markers                                                                                                                                                                                                                                                                                                                                                |
+| `npm run test:unit`                                                                                                                                                                                   | PASS; 33 tests in 10 files (2026-09-22: + evidence upload as FormData and its decoding; 2026-09-21: `tests/testmgmt.test.ts` — decoders, PATCH/DELETE with CSRF, 403/409/404 mapping, CI URL, CSV import)                                                                                                                                                                                                                                                           |
+| `npx prettier --check "src/**/*.{vue,ts,css}"`                                                                                                                                                        | PASS (2026-09-22)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `node scripts/live-check.mjs` against a fresh throwaway Postgres + `cmd/api` + `cmd/worker` (memory store), Vite on :3000, `npm run example` runs                                                     | PASS 2026-09-22; **14 steps** (step 14: plan → verdict → PNG evidence uploaded as multipart → thumbnail decoded from `…/artifacts/{id}/content`; 68 `/v1` calls all 2xx except the deliberate 401). Earlier: PASS 2026-09-21; 13 steps (the new one creates a case, links it to a real identity, opens a release and evaluates the gate — verdict `blocked` on the seed data, five rules rendered), 58 `/v1` calls all 2xx except the deliberate 401, console clean |
+| `npm install` dependency audit after version fixes                                                                                                                                                    | 0 known vulnerabilities reported                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `node scripts/browser-check.mjs <installed-playwright-path>`                                                                                                                                          | PASS; projects, runs, result detail, attempts/copy/triage, identity/flaky/history, 20-row paging/reload, empty states, sign-out/in, 360/768/1440, console clean                                                                                                                                                                                                                                                                                                     |
+| `node scripts/browser-api-check.mjs <installed-playwright-path>`                                                                                                                                      | PASS with mocked HTTP on live mode; request counts, 401/403, CSRF and generic login errors                                                                                                                                                                                                                                                                                                                                                                          |
+| `ATP_UI=… ATP_EMAIL=… ATP_PASSWORD=… node scripts/live-check.mjs <installed-playwright-path>` (2026-09-17, real Go api on :8080 seeded by `reporter/playwright` `npm run example` ×2, Vite dev proxy) | PASS; 10 steps, 30 `/v1` calls all 2xx except the deliberate 401, console clean                                                                                                                                                                                                                                                                                                                                                                                     |
+| same script, `ATP_API` pointed at the T5 soak's api (~75k results in the project)                                                                                                                     | PASS; step wall times: runs 331 ms, results 327 ms, identities+flaky+history 1.2 s — flat versus the 3-run project                                                                                                                                                                                                                                                                                                                                                  |
+| `go test ./...` from `backend/`                                                                                                                                                                       | PASS; domain, authz, ingest, artifact, queue, architecture tests                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Real Go session/query integration                                                                                                                                                                     | PASS (2026-09-16 first pass; 2026-09-17 via `scripts/live-check.mjs`)                                                                                                                                                                                                                                                                                                                                                                                               |
 
 Browser evidence is in ignored `test-results/`: runs-desktop.png, runs-768.png,
 runs-360.png and run-detail-desktop.png. Browser scripts accept the host's

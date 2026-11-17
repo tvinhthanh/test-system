@@ -14,8 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vinh/automation-testing-platform/backend/internal/aisuggest"
 	"github.com/vinh/automation-testing-platform/backend/internal/artifact"
 	"github.com/vinh/automation-testing-platform/backend/internal/authz"
+	"github.com/vinh/automation-testing-platform/backend/internal/autotest"
 	"github.com/vinh/automation-testing-platform/backend/internal/billing"
 	"github.com/vinh/automation-testing-platform/backend/internal/flaky"
 	"github.com/vinh/automation-testing-platform/backend/internal/identity"
@@ -23,11 +25,13 @@ import (
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/httpx"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/mail"
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/objstore"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
 	"github.com/vinh/automation-testing-platform/backend/internal/query"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 	"github.com/vinh/automation-testing-platform/backend/internal/tenancy"
 	"github.com/vinh/automation-testing-platform/backend/internal/testmgmt"
 	"github.com/vinh/automation-testing-platform/backend/internal/triage"
+	"github.com/vinh/automation-testing-platform/backend/internal/urlcheck"
 )
 
 // The dashboard's HTTP surface is frontend/API_CONTRACT.md, implemented
@@ -73,6 +77,21 @@ type dashboard struct {
 	flaky    flaky.Service
 	// meter reads the §10.6 shadow meter (meter.go).
 	meter billing.Service
+	// urlcheck queues URL checks (urlchecks.go, QĐ-14); urlChecksOn is
+	// URLCHECK — off, old checks stay readable but no new one is queued.
+	urlcheck    urlcheck.Service
+	urlChecksOn bool
+	// sandboxOn is SANDBOX: script runs (scripts.go, QĐ-19 tier 4) are queued
+	// only when on; earlier ones stay readable.
+	sandboxOn bool
+	// ai drafts test cases (ai.go, QĐ-15); the server's own key is never
+	// shown, only whether there is one.
+	ai           aisuggest.Service
+	llmServerKey bool
+	// auto runs test cases by itself (autotest.go, QĐ-16); db spans a case
+	// and its spec, or a plan and its run, in one transaction.
+	auto autotest.Service
+	db   *pg.DB
 }
 
 // routes mounts the dashboard behind a per-user rate limit (§11.6 API4):
@@ -96,6 +115,10 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	handle("GET /v1/projects/{projectId}/runs/{runId}/results", d.results)
 	handle("GET /v1/projects/{projectId}/results/{resultId}", d.resultDetail)
 	handle("POST /v1/projects/{projectId}/results/{resultId}/triage-events", d.triageEvent)
+	handle("POST /v1/projects/{projectId}/results/{resultId}/investigations", d.requestInvestigation)
+	handle("GET /v1/projects/{projectId}/results/{resultId}/investigations", d.listInvestigations)
+	handle("GET /v1/projects/{projectId}/results/{resultId}/investigations/{investigationId}", d.getInvestigation)
+	handle("POST /v1/projects/{projectId}/results/{resultId}/hypotheses/{hypothesisId}/decision", d.decideHypothesis)
 	handle("GET /v1/projects/{projectId}/artifacts/{artifactId}/content", d.artifactContent)
 	handle("GET /v1/projects/{projectId}/identities", d.identities)
 	handle("GET /v1/projects/{projectId}/identities/{identityId}", d.identity)
@@ -105,6 +128,7 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.identityOpsRoutes(handle)
 	d.testmgmtRoutes(handle)
 	d.memberRoutes(handle)
+	d.accessRequestRoutes(handle)
 	d.invitationRoutes(handle)
 	d.importRoutes(handle)
 	d.roiRoutes(handle)
@@ -112,9 +136,19 @@ func (d *dashboard) routes(mux httpx.Mux) {
 	d.tokenRoutes(handle)
 	d.projectCreateRoutes(handle)
 	d.projectDeleteRoutes(handle)
+	d.projectSettingsRoutes(handle)
+	d.environmentRoutes(handle)
+	d.urlCheckRoutes(handle)
+	d.aiRoutes(handle)
+	d.autotestRoutes(handle)
+	d.loadRoutes(handle)
+	d.scriptRoutes(handle)
+	d.orgDeleteRoutes(handle)
 	d.runDeleteRoutes(handle)
 	// CI reads a release gate with an ingest-style bearer token (project:read).
 	mux.Handle("GET /v1/releases/{releaseId}/gate", authz.Middleware(d.authz)(http.HandlerFunc(d.gateForCI)))
+	// A deploy pipeline starts the runnable cases with a project:autorun token.
+	d.autotestCIRoutes(mux)
 }
 
 type page struct {
@@ -279,7 +313,7 @@ func (d *dashboard) runs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pg, err := d.query.Runs(r.Context(), string(scope.ProjectID), query.RunFilter{
-		Q: qs.Get("q"), Status: qs.Get("status"), Environment: qs.Get("environment"), Limit: limitParam(r, 20), Cursor: qs.Get("cursor"),
+		Q: qs.Get("q"), Status: qs.Get("status"), Environment: qs.Get("environment"), Source: qs.Get("source"), Limit: limitParam(r, 20), Cursor: qs.Get("cursor"),
 	})
 	if err != nil {
 		d.queryErr(w, r, err)
@@ -370,16 +404,22 @@ func (d *dashboard) identityRuns(w http.ResponseWriter, r *http.Request) {
 type triageRequest struct {
 	Type    string         `json:"type"`
 	Payload map[string]any `json:"payload"`
+	// Category is the §8.7 cause, required for HYPOTHESIS_ACCEPTED: a person
+	// records the root cause they found, with no AI hypothesis behind it.
+	Category string `json:"category"`
 }
 
-// P1 types the UI may emit (contract): FAILURE_SEEN needs a viewer, the
-// rest member or above (§11.3.2). Category acceptance stays with the
-// operator CLI until the UI has a category picker.
+// Types the UI may emit (contract): FAILURE_SEEN needs a viewer, the rest
+// member or above (§11.3.2). HYPOTHESIS_ACCEPTED here is a person's own
+// verdict on the cause (category required) — what TTRC and triage coverage
+// count, so they work without any AI key. Accepting an AI or rule-based
+// hypothesis goes through …/hypotheses/{id}/decision instead.
 var uiTriageTypes = map[triage.EventType]authz.Action{
-	triage.FailureSeen:      authz.ActionView,
-	triage.MarkedFlaky:      authz.ActionTriage,
-	triage.MarkedKnownIssue: authz.ActionTriage,
-	triage.Resolved:         authz.ActionTriage,
+	triage.FailureSeen:        authz.ActionView,
+	triage.MarkedFlaky:        authz.ActionTriage,
+	triage.MarkedKnownIssue:   authz.ActionTriage,
+	triage.Resolved:           authz.ActionTriage,
+	triage.HypothesisAccepted: authz.ActionTriage,
 }
 
 // triageEvent is the UI's only way to move TTRC (§8.3).
@@ -396,7 +436,17 @@ func (d *dashboard) triageEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	action, allowed := uiTriageTypes[triage.EventType(req.Type)]
 	if !allowed {
-		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "type must be FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE or RESOLVED", map[string]any{"field": "type"})
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "type must be FAILURE_SEEN, MARKED_FLAKY, MARKED_KNOWN_ISSUE, RESOLVED or HYPOTHESIS_ACCEPTED", map[string]any{"field": "type"})
+		return
+	}
+	category := triage.Category(req.Category)
+	if triage.EventType(req.Type) == triage.HypothesisAccepted {
+		if !triage.ValidCategory(category) {
+			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "category must be one of app_bug, test_bug, flaky_timing, env_infra, env_data, dependency_external, unknown", map[string]any{"field": "category"})
+			return
+		}
+	} else if req.Category != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "category is only for HYPOTHESIS_ACCEPTED", map[string]any{"field": "category"})
 		return
 	}
 	scope, ok := d.project(w, r, p, action)
@@ -405,7 +455,7 @@ func (d *dashboard) triageEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	ev, created, err := d.triage.Record(r.Context(), triage.Record{
 		ProjectID: string(scope.ProjectID), TestResultID: r.PathValue("resultId"), Type: triage.EventType(req.Type),
-		ActorType: triage.ActorUser, ActorID: p.UserID, Payload: req.Payload,
+		ActorType: triage.ActorUser, ActorID: p.UserID, Payload: req.Payload, Category: category,
 	})
 	if err != nil {
 		switch {

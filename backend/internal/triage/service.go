@@ -9,18 +9,27 @@ import (
 	"time"
 
 	"github.com/vinh/automation-testing-platform/backend/internal/platform/pg"
+	"github.com/vinh/automation-testing-platform/backend/internal/platform/queue"
 	"github.com/vinh/automation-testing-platform/backend/internal/results"
 )
 
 type service struct {
-	db      *pg.DB
-	results results.Service
-	now     func() time.Time
+	db       *pg.DB
+	results  results.Service
+	now      func() time.Time
+	evidence EvidenceReader
+	keys     CredentialSource
+	llm      InvestigatorLLM
+	q        *queue.Queue
 }
 
 // New returns the Service over migrations/0008_triage.sql.
-func New(db *pg.DB, res results.Service) Service {
-	return &service{db: db, results: res, now: time.Now}
+func New(db *pg.DB, res results.Service, opts ...Option) Service {
+	s := &service{db: db, results: res, now: time.Now, q: queue.New(db)}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -190,6 +199,8 @@ func (s *service) PurgeProject(ctx context.Context, projectID string) error {
 	}
 	return s.db.WithTx(ctx, func(ctx context.Context) error {
 		for _, q := range []string{
+			"DELETE FROM ai_investigation_steps WHERE investigation_id IN (SELECT id FROM ai_investigations WHERE project_id = $1)",
+			"DELETE FROM ai_investigations WHERE project_id = $1",
 			"DELETE FROM ai_hypotheses WHERE project_id = $1",
 			"DELETE FROM triage_events WHERE project_id = $1",
 		} {
@@ -209,6 +220,8 @@ func (s *service) PurgeResults(ctx context.Context, resultIDs []string) error {
 	}
 	return s.db.WithTx(ctx, func(ctx context.Context) error {
 		for _, q := range []string{
+			`DELETE FROM ai_investigation_steps WHERE investigation_id IN (SELECT id FROM ai_investigations WHERE test_result_id::text = ANY($1))`,
+			`DELETE FROM ai_investigations WHERE test_result_id::text = ANY($1)`,
 			`DELETE FROM ai_hypotheses WHERE test_result_id::text = ANY($1)`,
 			`DELETE FROM triage_events WHERE test_result_id::text = ANY($1)`,
 		} {
