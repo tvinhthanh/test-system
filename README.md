@@ -35,6 +35,29 @@ cd backend
 go run ./cmd/api                 # :8080, curl localhost:8080/healthz
 go test ./...                    # gồm test kiến trúc §6.9.3
 
+# Tài liệu đối ngoại — exit code là cổng, chạy trước khi gửi cho ai
+cd docs/external
+npm install && npm run build
+./verify.sh                      # checklist §4.7, hiện 11/11
+```
+
+## Chạy máy cá nhân làm server
+
+`server/atp.sh` gom mọi lệnh vận hành: dựng cả stack (Postgres TLS, api, worker, Caddy HTTPS, Prometheus, backup hằng ngày) trên một máy có Docker — Linux, macOS, hoặc Windows với Docker Desktop + Git Bash. Dashboard được build trong container Node 22, không đụng `node_modules` của máy.
+
+```bash
+./server/atp.sh init          # hỏi địa chỉ máy (IP LAN hoặc tên miền), bucket hay không; sinh secret vào backend/deploy/.env
+./server/atp.sh up            # build dashboard + image, chạy tất cả, đợi api khỏe
+./server/atp.sh seed          # tổ chức, project, tài khoản owner, CI token đầu tiên
+./server/atp.sh status        # service nào chạy, dashboard ở đâu
+./server/atp.sh firewall      # mở cổng HTTPS/HTTP trên firewall của máy (Windows/WSL, ufw, firewalld, iptables, nftables)
+./server/atp.sh ca            # xuất chứng chỉ gốc của Caddy cho máy khác trong LAN tin cậy
+./server/atp.sh backup        # dump ngay; backup-copy <thư mục> để chép ra ổ khác
+./server/atp.sh update        # git pull, backup, build lại, chạy lại
+./server/atp.sh help          # mọi lệnh: down, restart, logs, token, admin …, reset
+```
+
+Máy khác trong mạng mở `https://<IP>`: mở cổng bằng `./server/atp.sh firewall` (Windows từ Git Bash hoặc WSL — bấm đồng ý hộp UAC; ufw, firewalld, iptables, nftables trên Linux; router/cloud security group thì tự mở), cài chứng chỉ từ `ca`. Cổng 443/80 đã có server khác dùng thì `HTTPS_PORT=8443 HTTP_PORT=8080 ./server/atp.sh init` — địa chỉ thành `https://<IP>:8443`. Ngay trên máy chủ cũng mở bằng địa chỉ đó (Caddy chỉ có chứng chỉ cho `DOMAIN`, không cho `localhost`). `seed` chạy trong một transaction: lỗi thì không tạo gì, chạy lại được. Không có bucket thì artifact nằm trong bộ nhớ và mất khi api khởi động lại — đủ để dùng thử; có S3/R2/MinIO thì chọn ở `init`.
 # Prototype test identity — bằng chứng §9.6
 cd prototype/identity
 go test ./...
