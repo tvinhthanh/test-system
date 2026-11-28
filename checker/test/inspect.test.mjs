@@ -21,6 +21,9 @@ const pages = {
     html("Bad", `<h1>Bad</h1><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><input placeholder="no label"><div style="color:#bbb;background:#fff">faint</div><label>Password <input type="password"></label>`),
   ],
   "/slow": [good, html("Slow", `<h1>Slow</h1><img src="/slow.gif" alt="slow">`)],
+  // Nothing to paint until after the load event: the first paint comes late,
+  // as on a cold WebKit. No CSP: it would block the inline script.
+  "/late": [{}, html("Late", `<script>addEventListener("load", () => setTimeout(() => { document.querySelector("main").innerHTML = "<h1>Late</h1>"; }, 1500));</script>`)],
 };
 let site, base, browser, sink;
 const policy = { allow: ["127.0.0.1"] };
@@ -81,6 +84,15 @@ test("check_performance compares the page's timings with a budget", async () => 
   const slow = await on("/slow", [step({ do: "check_performance", value: "load=500" })]);
   assert.equal(slow.ok, false, JSON.stringify(slow.results));
   assert.match(slow.results[0].error, /over budget: Page load/);
+});
+
+// The bug a live run found: right after the checker restarted, WebKit had
+// not painted yet when the timings were read, so a page within its budget
+// was an error — "this browser reported none of the budgeted timings".
+test("check_performance waits for the first paint before reading the timings", async () => {
+  const late = await on("/late", [step({ do: "check_performance", value: "fcp=4000" })]);
+  assert.ok(late.ok, JSON.stringify(late.results));
+  assert.match(late.results[0].note, /First content [\d.]+ m?s ≤ 4\.0 s/);
 });
 
 test("check_security fails on a password over plain HTTP and lists the rest", async () => {

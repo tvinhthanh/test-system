@@ -101,6 +101,9 @@ export async function checkAccessibility(page, value) {
 
 // -------------------------------------------------------------- performance
 
+// How long a performance check waits for the page's first paint.
+const PAINT_WAIT = 5_000;
+
 // Runs in the page: the timings of the document as it was last loaded.
 async function pageTimings() {
   const observed = (type) =>
@@ -143,6 +146,12 @@ async function pageTimings() {
 export async function checkPerformance(page, value) {
   const budget = parseBudget(value);
   await page.waitForLoadState("load", { timeout: 10_000 }).catch(() => {});
+  // The paint timings exist only once the page has painted, which can come
+  // after the load event (a cold WebKit, content added by script): read
+  // too early, every paint metric looks "not reported by this browser".
+  await page
+    .waitForFunction(() => typeof PerformancePaintTiming === "undefined" || performance.getEntriesByName("first-contentful-paint").length > 0, null, { timeout: PAINT_WAIT })
+    .catch(() => {});
   const t = await page.evaluate(pageTimings);
   const parts = [];
   const over = [];

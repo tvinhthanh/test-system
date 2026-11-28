@@ -85,7 +85,10 @@ func (s *service) RequestInvestigation(ctx context.Context, in NewInvestigation)
 		if count >= investigationDailyLimit {
 			return ErrDailyLimit
 		}
-		existing, err := scanInvestigation(q.QueryRow(ctx, `SELECT `+investigationColumns+` FROM ai_investigations WHERE project_id=$1 AND dedupe_key=$2 AND requested_day=$3`, in.ProjectID, fingerprint, day))
+		// Deduped per result: another result of the same failure gets its own
+		// row (shown on its own page); the worker reuses the sibling's
+		// conclusion instead of investigating again (reuseSibling).
+		existing, err := scanInvestigation(q.QueryRow(ctx, `SELECT `+investigationColumns+` FROM ai_investigations WHERE project_id=$1 AND test_result_id=$2 AND dedupe_key=$3 AND requested_day=$4`, in.ProjectID, in.ResultID, fingerprint, day))
 		if err == nil {
 			out = existing
 			return nil
@@ -246,6 +249,9 @@ func (s *service) runInvestigation(ctx context.Context, job queue.Job) error {
 	if err := q.QueryRow(ctx, `SELECT org_id FROM ai_investigations WHERE id=$1`, in.ID).Scan(&orgID); err != nil {
 		return err
 	}
+	if reused, err := s.reuseSibling(ctx, in); err != nil || reused {
+		return err
+	}
 	var acct llm.Account
 	var source string
 	ok := false
@@ -328,6 +334,49 @@ func (s *service) runInvestigation(ctx context.Context, job queue.Job) error {
 		_, _ = q.Exec(ctx, `INSERT INTO ai_investigation_steps(investigation_id,sequence,kind,tool,observation) VALUES($1,$2,'tool',$3,$4) ON CONFLICT DO NOTHING`, in.ID, (turns-1)*2+2, a.Tool, obs)
 	}
 	return fail("The investigation reached its turn limit without a conclusion.")
+}
+
+// reuseSibling finishes an investigation with the conclusion another result
+// of the same failure (same dedupe key: test, status and error) already got
+// today: the result gets its own copy of the hypothesis and its own
+// HYPOTHESIS_PROPOSED event, so its page shows it and a person decides on
+// it there — at no AI cost. False when there is no finished sibling yet.
+func (s *service) reuseSibling(ctx context.Context, in Investigation) (bool, error) {
+	q := s.db.Q(ctx)
+	var category, action, model, promptVersion, provider, src, actorType string
+	var confidence float64
+	var evidence json.RawMessage
+	err := q.QueryRow(ctx, `SELECT h.category,h.confidence,h.evidence,coalesce(h.suggested_action,''),h.model,h.prompt_version,o.provider,o.key_source,
+			coalesce((SELECT e.actor_type FROM triage_events e WHERE e.hypothesis_id=h.id AND e.type='HYPOTHESIS_PROPOSED' LIMIT 1),'AI')
+		FROM ai_investigations me
+		JOIN ai_investigations o ON o.project_id=me.project_id AND o.dedupe_key=me.dedupe_key AND o.requested_day=me.requested_day
+			AND o.status='done' AND o.id<>me.id AND o.hypothesis_id IS NOT NULL
+		JOIN ai_hypotheses h ON h.id=o.hypothesis_id
+		WHERE me.id=$1
+		ORDER BY o.finished_at LIMIT 1`, in.ID).Scan(&category, &confidence, &evidence, &action, &model, &promptVersion, &provider, &src, &actorType)
+	if errors.Is(err, pg.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	tr, err := s.results.GetResult(ctx, in.ProjectID, results.TestResultID(in.ResultID))
+	if err != nil {
+		return false, err
+	}
+	var hypID string
+	if err := q.QueryRow(ctx, `INSERT INTO ai_hypotheses(project_id,test_result_id,category,confidence,evidence,suggested_action,model,prompt_version,investigation_id)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, in.ProjectID, in.ResultID, category, confidence, evidence, action, model, promptVersion, in.ID).Scan(&hypID); err != nil {
+		return false, err
+	}
+	payload, _ := json.Marshal(map[string]any{"category": category, "confidence": confidence, "reused": true})
+	if _, err := q.Exec(ctx, `INSERT INTO triage_events(project_id,test_result_id,run_id,type,actor_type,actor_id,hypothesis_id,payload,occurred_at)
+		VALUES($1,$2,$3,'HYPOTHESIS_PROPOSED',$4,$5,$6,$7,now())`, in.ProjectID, in.ResultID, string(tr.RunID), actorType, model, hypID, payload); err != nil {
+		return false, err
+	}
+	_, err = q.Exec(ctx, `UPDATE ai_investigations SET status='done',provider=$2,model=$3,key_source=$4,hypothesis_id=$5,started_at=coalesce(started_at,now()),finished_at=now() WHERE id=$1`,
+		in.ID, provider, model, src, hypID)
+	return err == nil, err
 }
 
 func cut(s string, n int) string {
